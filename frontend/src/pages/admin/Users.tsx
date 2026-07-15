@@ -15,6 +15,7 @@ const emptyForm: FormState = { email: '', name: '', password: '', is_admin: fals
 const inputClass =
   'rounded-input border-[1.5px] border-line bg-white px-4 py-2.5 text-[15px] font-semibold placeholder:font-medium placeholder:text-placeholder focus:border-primary focus:outline-none'
 const labelClass = 'text-[11.5px] font-bold tracking-wide text-muted uppercase'
+const chipClass = 'rounded-full px-2.5 py-0.5 text-[11px] font-bold'
 
 export default function Users() {
   const { user: me } = useAuth()
@@ -189,11 +190,12 @@ export default function Users() {
         <p className="font-medium text-muted">Loading…</p>
       ) : (
         <div className="overflow-x-auto rounded-2xl border border-line bg-white">
-          <table className="w-full min-w-[560px] text-left text-sm">
+          <table className="w-full min-w-[640px] text-left text-sm">
             <thead>
               <tr className="border-b border-line text-[11.5px] font-bold tracking-wide text-muted uppercase">
                 <th className="px-4 py-3">Name</th>
                 <th className="px-4 py-3">Email</th>
+                <th className="px-4 py-3">Role</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
@@ -209,19 +211,17 @@ export default function Users() {
                   </td>
                   <td className="px-4 py-3 font-medium text-muted">{u.email}</td>
                   <td className="px-4 py-3">
-                    {u.is_admin && (
-                      <span className="mr-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-bold text-primary-dark">
-                        Admin
-                      </span>
-                    )}
-                    {u.is_active ? (
-                      <span className="rounded-full bg-page px-2.5 py-0.5 text-[11px] font-bold text-primary-dark">
-                        Active
-                      </span>
+                    {u.is_admin ? (
+                      <span className={`${chipClass} bg-page text-primary-dark`}>Admin</span>
                     ) : (
-                      <span className="rounded-full bg-canvas px-2.5 py-0.5 text-[11px] font-bold text-muted">
-                        Inactive
-                      </span>
+                      <span className={`${chipClass} bg-page text-muted`}>Member</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    {u.is_active ? (
+                      <span className={`${chipClass} bg-page text-primary-dark`}>Active</span>
+                    ) : (
+                      <span className={`${chipClass} bg-danger/10 text-danger`}>Inactive</span>
                     )}
                   </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
