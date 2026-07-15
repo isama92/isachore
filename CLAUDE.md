@@ -47,6 +47,10 @@ pre-commit run --all-files                         # what the git hook runs
   `create-admin` CLI. Passwords hashed with Argon2 (pwdlib). Protect endpoints
   by reusing `CurrentUser` / `AdminUser` from `app/api/deps.py`; soft delete
   only (`is_active=false`), and users may never demote or deactivate themselves.
+- Impersonation: `POST /users/{id}/impersonate` swaps the session cookie to the
+  target user and parks the admin's own token in the `isachore_admin_token`
+  cookie; `POST /auth/stop-impersonating` restores it. `/auth/me` reports
+  `impersonating`; logout ends both sessions.
 - Frontend auth: `useAuth()` from `src/auth/useAuth.ts`; API calls through the
   `api` wrapper in `src/lib/api.ts` (throws `ApiError`). Protected routes wrap
   in `RequireAuth` / `RequireAdmin` (`src/components/`); authenticated pages

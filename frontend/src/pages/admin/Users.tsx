@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useNavigate } from 'react-router'
 import { useAuth } from '../../auth/useAuth'
 import { api, ApiError } from '../../lib/api'
 import type { User } from '../../lib/types'
@@ -18,7 +19,8 @@ const labelClass = 'text-[11.5px] font-bold tracking-wide text-muted uppercase'
 const chipClass = 'rounded-full px-2.5 py-0.5 text-[11px] font-bold'
 
 export default function Users() {
-  const { user: me } = useAuth()
+  const { user: me, refresh } = useAuth()
+  const navigate = useNavigate()
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -82,6 +84,17 @@ export default function Users() {
     }
   }
 
+  async function loginAs(u: User) {
+    setError(null)
+    try {
+      await api.post<User>(`/api/v1/users/${u.id}/impersonate`)
+      await refresh()
+      await navigate('/')
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not log in as this user')
+    }
+  }
+
   async function setActive(u: User, active: boolean) {
     if (
       !active &&
@@ -114,76 +127,83 @@ export default function Users() {
         </button>
       </div>
 
-      {error && <p className="mb-4 text-[13px] font-bold text-danger">{error}</p>}
+      {error && !showForm && <p className="mb-4 text-[13px] font-bold text-danger">{error}</p>}
 
       {showForm && (
-        <form
-          onSubmit={(e) => void onSubmit(e)}
-          className="mb-6 flex flex-col gap-4 rounded-2xl border border-line bg-white p-5"
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4"
+          onClick={() => setShowForm(false)}
         >
-          <h2 className="font-display text-lg font-bold tracking-tight">
-            {editing ? `Edit ${editing.name}` : 'New user'}
-          </h2>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="flex flex-col gap-1.5">
-              <span className={labelClass}>Name</span>
-              <input
-                required
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className={inputClass}
-              />
-            </label>
-            <label className="flex flex-col gap-1.5">
-              <span className={labelClass}>Email</span>
-              <input
-                type="email"
-                required
-                value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
-                className={inputClass}
-              />
-            </label>
-            <label className="flex flex-col gap-1.5">
-              <span className={labelClass}>Password</span>
-              <input
-                type="password"
-                required={!editing}
-                minLength={8}
-                placeholder={editing ? 'Leave empty to keep current' : 'At least 8 characters'}
-                value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
-                className={inputClass}
-              />
-            </label>
-            <label className="flex items-center gap-2.5 self-end pb-3">
-              <input
-                type="checkbox"
-                checked={form.is_admin}
-                disabled={editing?.id === me?.id}
-                onChange={(e) => setForm({ ...form, is_admin: e.target.checked })}
-                className="size-4 accent-(--color-primary)"
-              />
-              <span className="text-sm font-bold text-ink">Admin</span>
-            </label>
-          </div>
-          <div className="flex gap-3">
-            <button
-              type="submit"
-              disabled={saving}
-              className="rounded-button bg-primary px-5 py-2.5 text-sm font-extrabold text-white shadow-glow hover:bg-primary-dark disabled:opacity-60"
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowForm(false)}
-              className="rounded-button px-5 py-2.5 text-sm font-bold text-muted hover:text-ink"
-            >
-              Cancel
-            </button>
-          </div>
-        </form>
+          <form
+            onSubmit={(e) => void onSubmit(e)}
+            onClick={(e) => e.stopPropagation()}
+            className="flex w-full max-w-lg flex-col gap-4 rounded-2xl bg-white p-6 shadow-2xl"
+          >
+            <h2 className="font-display text-lg font-bold tracking-tight">
+              {editing ? `Edit ${editing.name}` : 'New user'}
+            </h2>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="flex flex-col gap-1.5">
+                <span className={labelClass}>Name</span>
+                <input
+                  required
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  className={inputClass}
+                />
+              </label>
+              <label className="flex flex-col gap-1.5">
+                <span className={labelClass}>Email</span>
+                <input
+                  type="email"
+                  required
+                  value={form.email}
+                  onChange={(e) => setForm({ ...form, email: e.target.value })}
+                  className={inputClass}
+                />
+              </label>
+              <label className="flex flex-col gap-1.5">
+                <span className={labelClass}>Password</span>
+                <input
+                  type="password"
+                  required={!editing}
+                  minLength={8}
+                  placeholder={editing ? 'Leave empty to keep current' : 'At least 8 characters'}
+                  value={form.password}
+                  onChange={(e) => setForm({ ...form, password: e.target.value })}
+                  className={inputClass}
+                />
+              </label>
+              <label className="flex items-center gap-2.5 self-end pb-3">
+                <input
+                  type="checkbox"
+                  checked={form.is_admin}
+                  disabled={editing?.id === me?.id}
+                  onChange={(e) => setForm({ ...form, is_admin: e.target.checked })}
+                  className="size-4 accent-(--color-primary)"
+                />
+                <span className="text-sm font-bold text-ink">Admin</span>
+              </label>
+            </div>
+            {error && <p className="text-[13px] font-bold text-danger">{error}</p>}
+            <div className="flex gap-3">
+              <button
+                type="submit"
+                disabled={saving}
+                className="rounded-button bg-primary px-5 py-2.5 text-sm font-extrabold text-white shadow-glow hover:bg-primary-dark disabled:opacity-60"
+              >
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowForm(false)}
+                className="rounded-button px-5 py-2.5 text-sm font-bold text-muted hover:text-ink"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
       )}
 
       {loading ? (
@@ -225,6 +245,14 @@ export default function Users() {
                     )}
                   </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
+                    {u.id !== me?.id && u.is_active && (
+                      <button
+                        onClick={() => void loginAs(u)}
+                        className="mr-3 font-bold text-muted hover:text-ink"
+                      >
+                        Login as
+                      </button>
+                    )}
                     <button
                       onClick={() => openEdit(u)}
                       className="font-bold text-primary hover:text-primary-dark"

@@ -29,11 +29,8 @@ def get_request_token(request: Request) -> str | None:
     return None
 
 
-async def get_current_user(request: Request, session: SessionDep) -> User:
-    token = get_request_token(request)
-    if not token:
-        raise _credentials_exc
-
+async def get_user_by_token(session: AsyncSession, token: str) -> User | None:
+    """Resolve a raw token to its active user, or None if invalid/expired/inactive."""
     result = await session.execute(
         select(AuthToken)
         .options(joinedload(AuthToken.user))
@@ -44,8 +41,16 @@ async def get_current_user(request: Request, session: SessionDep) -> User:
     )
     auth_token = result.scalar_one_or_none()
     if auth_token is None or not auth_token.user.is_active:
-        raise _credentials_exc
+        return None
     return auth_token.user
+
+
+async def get_current_user(request: Request, session: SessionDep) -> User:
+    token = get_request_token(request)
+    user = await get_user_by_token(session, token) if token else None
+    if user is None:
+        raise _credentials_exc
+    return user
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]

@@ -6,3 +6,5 @@ export type User = {
   is_active: boolean
   created_at: string
 }
+
+export type Me = User & { impersonating: boolean }
