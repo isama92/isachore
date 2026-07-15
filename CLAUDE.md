@@ -2,8 +2,17 @@
 
 Chore management app for households: chores shared between multiple people,
 overdue / due-today / due-soon views, JSON API for future mobile clients.
-Work happens in small steps — check the TODO list in README.md for what's
-next, and tick items off there when they're done.
+
+## Workflow
+
+- Work happens in small steps — the TODO list in README.md is the roadmap:
+  check it for what's next and tick items off when they're done.
+- When requirements are ambiguous or a decision shapes UX/architecture, ask
+  the user before building; don't assume.
+- Commit per completed step (descriptive message; the pre-commit hook must pass).
+- Keep the standard ports (5173/8000/5432 dev, 80 prod). If a port is taken,
+  another local project's stack probably holds it — never remap isachore's
+  ports and never touch the other stack; ask the user to free it.
 
 ## Stack
 
@@ -61,7 +70,22 @@ pre-commit run --all-files                         # what the git hook runs
   none should be added.
 - Import routing from `react-router` (v8) — never `react-router-dom`.
 - Pages in `frontend/src/pages/`, one component per route.
-- UI mockups: `../isachore-design/Choreo Screens.dc.html` (login = 1a).
+- UI mockups: `../isachore-design/Choreo Screens.dc.html` (login = variant 1a,
+  "add chore" = variant 2a; variants are anchor ids in that file).
+
+## Verification
+
+No test framework yet (pytest/vitest are on the TODO list). Verify by
+exercising the running dev stack:
+
+- API: curl against `http://localhost:8000/api/v1/...` with a cookie jar
+  (`-c/-b`); check negative cases (401/403/400/404/409), not just the happy path.
+- UI: headless browser via `puppeteer-core` (npm-install it in a scratch dir
+  outside the repo) driving the system Chrome at `/usr/bin/google-chrome` —
+  drive real flows against `http://localhost:5173` and screenshot results.
+- The local dev DB may already contain seed users created during earlier
+  sessions (e.g. `admin@example.com` / `admin12345` — dev-only, this machine
+  only). Create your own via the `create-admin` CLI if missing.
 
 ## Gotchas
 
@@ -75,3 +99,16 @@ pre-commit run --all-files                         # what the git hook runs
   No real secrets, credentials, or production hostnames anywhere in the repo.
 - Set `ENVIRONMENT=prod` in production `.env` — it turns on the Secure flag
   for auth cookies.
+- eslint-plugin-react-hooks v7 (`set-state-in-effect`): never call a
+  state-setting function synchronously in a `useEffect` body — do data loading
+  with promise chains where setState happens only inside `.then/.catch/.finally`
+  callbacks (see `AuthProvider.tsx` / `Users.tsx` for the pattern).
+- react-refresh `only-export-components` + `--max-warnings=0`: keep React
+  context, provider component, and hook in separate files (see `src/auth/`).
+- FastAPI 0.139 registers included routers lazily; to introspect routes use
+  `app.openapi()['paths']`, not `app.routes`.
+- Alembic files generated inside the container are root-owned on the host:
+  `docker compose exec backend chown -R $(id -u):$(id -g) alembic/versions`.
+- To smoke-test prod compose without touching the running dev stack, use a
+  separate project name: `docker compose -f compose.prod.yml -p isachore-prod
+  up --build -d` (and `down -v` afterwards).
