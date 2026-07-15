@@ -9,9 +9,16 @@ type FormState = {
   name: string
   password: string
   is_admin: boolean
+  is_active: boolean
 }
 
-const emptyForm: FormState = { email: '', name: '', password: '', is_admin: false }
+const emptyForm: FormState = {
+  email: '',
+  name: '',
+  password: '',
+  is_admin: false,
+  is_active: true,
+}
 
 const inputClass =
   'rounded-input border-[1.5px] border-line bg-white px-4 py-2.5 text-[15px] font-semibold placeholder:font-medium placeholder:text-placeholder focus:border-primary focus:outline-none'
@@ -54,7 +61,13 @@ export default function Users() {
 
   function openEdit(u: User) {
     setEditing(u)
-    setForm({ email: u.email, name: u.name, password: '', is_admin: u.is_admin })
+    setForm({
+      email: u.email,
+      name: u.name,
+      password: '',
+      is_admin: u.is_admin,
+      is_active: u.is_active,
+    })
     setShowForm(true)
     setError(null)
   }
@@ -69,6 +82,7 @@ export default function Users() {
           email: form.email,
           name: form.name,
           is_admin: form.is_admin,
+          is_active: form.is_active,
         }
         if (form.password) payload.password = form.password
         await api.patch<User>(`/api/v1/users/${editing.id}`, payload)
@@ -174,16 +188,30 @@ export default function Users() {
                   className={inputClass}
                 />
               </label>
-              <label className="flex items-center gap-2.5 self-end pb-3">
-                <input
-                  type="checkbox"
-                  checked={form.is_admin}
-                  disabled={editing?.id === me?.id}
-                  onChange={(e) => setForm({ ...form, is_admin: e.target.checked })}
-                  className="size-4 accent-(--color-primary)"
-                />
-                <span className="text-sm font-bold text-ink">Admin</span>
-              </label>
+              <div className="flex items-center gap-5 self-end pb-3">
+                <label className="flex items-center gap-2.5">
+                  <input
+                    type="checkbox"
+                    checked={form.is_admin}
+                    disabled={editing?.id === me?.id}
+                    onChange={(e) => setForm({ ...form, is_admin: e.target.checked })}
+                    className="size-4 accent-(--color-primary)"
+                  />
+                  <span className="text-sm font-bold text-ink">Admin</span>
+                </label>
+                {editing && (
+                  <label className="flex items-center gap-2.5">
+                    <input
+                      type="checkbox"
+                      checked={form.is_active}
+                      disabled={editing.id === me?.id}
+                      onChange={(e) => setForm({ ...form, is_active: e.target.checked })}
+                      className="size-4 accent-(--color-primary)"
+                    />
+                    <span className="text-sm font-bold text-ink">Active</span>
+                  </label>
+                )}
+              </div>
             </div>
             {error && <p className="text-[13px] font-bold text-danger">{error}</p>}
             <div className="flex gap-3">
