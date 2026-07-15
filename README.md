@@ -31,7 +31,7 @@ docker compose up --build
 Production build (serves everything on port 80 via nginx):
 
 ```bash
-docker compose -f docker-compose.prod.yml up --build
+docker compose -f compose.prod.yml up --build
 ```
 
 One-time setup for the lint git hook:
