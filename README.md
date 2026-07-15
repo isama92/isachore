@@ -54,7 +54,7 @@ hook, Docker dev/prod, hello world at `/`, login page UI at `/login`.
 
 - [x] User model + first Alembic migration (`users`, `auth_tokens`)
 - [x] Auth backend: cookie login/logout with DB-backed opaque tokens, `create-admin` CLI, login page wired
-- [x] Admin section: users CRUD at `/admin/users` (create, edit, deactivate/reactivate)
+- [x] Admin section: users CRUD at `/admin/users` (create, edit, deactivate/reactivate, login as)
 - [ ] Household / chore models + migrations
 - [ ] Chores table page — list all chores of the household
 - [ ] Chore creation page — add a chore (assignees, rotation, tags, period, start date)

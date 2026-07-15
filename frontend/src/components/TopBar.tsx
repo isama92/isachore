@@ -1,9 +1,18 @@
 import { Link } from 'react-router'
 import { useAuth } from '../auth/useAuth'
+import { api } from '../lib/api'
 
 export default function TopBar() {
-  const { user, logout } = useAuth()
+  const { user, impersonating, logout, refresh } = useAuth()
   if (!user) return null
+
+  async function returnToAdmin() {
+    try {
+      await api.post('/api/v1/auth/stop-impersonating')
+    } finally {
+      await refresh()
+    }
+  }
 
   return (
     <header className="border-b border-line bg-white">
@@ -15,6 +24,14 @@ export default function TopBar() {
           <span className="font-display text-lg font-extrabold tracking-tight">isachore</span>
         </Link>
         <nav className="flex items-center gap-4">
+          {impersonating && (
+            <button
+              onClick={() => void returnToAdmin()}
+              className="rounded-full bg-danger/10 px-3 py-1 text-[12px] font-bold text-danger hover:bg-danger/20"
+            >
+              Return to admin
+            </button>
+          )}
           {user.is_admin && (
             <Link
               to="/admin/users"

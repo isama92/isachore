@@ -14,6 +14,10 @@ class UserRead(BaseModel):
     created_at: datetime
 
 
+class MeRead(UserRead):
+    impersonating: bool = False
+
+
 class UserCreate(BaseModel):
     email: EmailStr
     name: str = Field(min_length=1, max_length=255)

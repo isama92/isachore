@@ -1,8 +1,17 @@
-from fastapi import APIRouter, HTTPException, status
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from sqlalchemy import delete, select
 
-from app.api.deps import AdminUser, SessionDep
-from app.core.security import hash_password
+from app.api.deps import AdminUser, SessionDep, get_request_token
+from app.core.security import (
+    ADMIN_COOKIE_NAME,
+    TOKEN_TTL,
+    generate_token,
+    hash_password,
+    hash_token,
+    set_auth_cookie,
+)
 from app.models import AuthToken, User
 from app.schemas import UserCreate, UserRead, UserUpdate
 
@@ -85,6 +94,38 @@ async def update_user(
 
     await session.commit()
     await session.refresh(user)
+    return user
+
+
+@router.post("/{user_id}/impersonate", response_model=UserRead)
+async def impersonate_user(
+    user_id: int, admin: AdminUser, session: SessionDep, request: Request, response: Response
+) -> User:
+    user = await _get_user_or_404(session, user_id)
+    if user.id == admin.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="You are already this user"
+        )
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot log in as an inactive user"
+        )
+
+    token = generate_token()
+    session.add(
+        AuthToken(
+            token_hash=hash_token(token),
+            user_id=user.id,
+            expires_at=datetime.now(UTC) + TOKEN_TTL,
+        )
+    )
+    await session.commit()
+
+    # Keep the outermost admin session for the return trip (don't overwrite it
+    # when an impersonated admin impersonates someone else)
+    if not request.cookies.get(ADMIN_COOKIE_NAME) and (current := get_request_token(request)):
+        set_auth_cookie(response, current, ADMIN_COOKIE_NAME)
+    set_auth_cookie(response, token)
     return user
 
 

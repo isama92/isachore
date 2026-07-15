@@ -2,10 +2,15 @@ import hashlib
 import secrets
 from datetime import timedelta
 
+from fastapi import Response
 from pwdlib import PasswordHash
+
+from app.core.config import settings
 
 TOKEN_TTL = timedelta(days=30)
 COOKIE_NAME = "isachore_token"
+# Holds the original admin session while impersonating another user
+ADMIN_COOKIE_NAME = "isachore_admin_token"
 
 _password_hash = PasswordHash.recommended()
 
@@ -28,3 +33,19 @@ def generate_token() -> str:
 
 def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+def set_auth_cookie(response: Response, token: str, name: str = COOKIE_NAME) -> None:
+    response.set_cookie(
+        name,
+        token,
+        max_age=int(TOKEN_TTL.total_seconds()),
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=settings.environment != "dev",
+    )
+
+
+def clear_auth_cookie(response: Response, name: str = COOKIE_NAME) -> None:
+    response.delete_cookie(name, path="/")
