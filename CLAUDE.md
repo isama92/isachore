@@ -12,13 +12,13 @@ next, and tick items off there when they're done.
 - **Frontend** (`frontend/`): React 19 + TypeScript, Vite, Tailwind CSS v4,
   react-router 8, npm.
 - **DB**: PostgreSQL 18. **Docker** for dev and prod (multi-stage Dockerfiles,
-  `docker-compose.yml` dev / `docker-compose.prod.yml` prod).
+  `compose.yml` dev / `compose.prod.yml` prod).
 
 ## Commands
 
 ```bash
 docker compose up --build                          # dev stack: db + backend (reload) + frontend (HMR)
-docker compose -f docker-compose.prod.yml up --build  # prod: nginx on :80 serving SPA + /api proxy
+docker compose -f compose.prod.yml up --build      # prod: nginx on :80 serving SPA + /api proxy
 
 docker compose exec backend alembic revision --autogenerate -m "..."
 docker compose exec backend alembic upgrade head   # run alembic INSIDE the container so host "db" resolves
