@@ -1,0 +1,31 @@
+@import 'tailwindcss';
+
+@theme {
+  /* Fonts (self-hosted via @fontsource-variable, imported in main.tsx) */
+  --font-sans: 'Manrope Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Bricolage Grotesque Variable', var(--font-sans);
+
+  /* Colors (design tokens from isachore-design) */
+  --color-primary: #0d9488;
+  --color-primary-dark: #0f766e;
+  --color-ink: #0f2e2a;
+  --color-muted: #5b7c77;
+  --color-page: #f0fdfa;
+  --color-canvas: #e7f4f0;
+  --color-line: #cde7e1;
+  --color-placeholder: #9fbdb6;
+
+  /* Effects */
+  --shadow-glow: 0 12px 26px -10px rgb(13 148 136 / 0.75);
+  --shadow-logo: 0 8px 18px -6px rgb(13 148 136 / 0.7);
+
+  /* Radii */
+  --radius-input: 13px;
+  --radius-button: 15px;
+}
+
+@layer base {
+  body {
+    @apply bg-page font-sans text-ink antialiased;
+  }
+}

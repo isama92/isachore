@@ -1,0 +1,22 @@
+# env
+.env
+.env.*
+!.env.example
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.ruff_cache/
+.pytest_cache/
+
+# node
+node_modules/
+dist/
+*.local
+npm-debug.log*
+
+# editors / os
+.idea/
+.vscode/
+.DS_Store
