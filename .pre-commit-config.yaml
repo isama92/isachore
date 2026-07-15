@@ -1,0 +1,42 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+        # tsconfig files are JSONC (comments + trailing commas)
+        exclude: ^frontend/tsconfig.*\.json$
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  # Keep rev in sync with the ruff version in backend/pyproject.toml dev deps
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.21
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+        files: ^backend/
+      - id: ruff-format
+        files: ^backend/
+
+  # ESLint/Prettier run from frontend/node_modules (local npm install).
+  # pre-commit passes repo-root-relative paths; strip the frontend/ prefix
+  # and cd so eslint.config.js and .prettierrc resolve normally.
+  - repo: local
+    hooks:
+      - id: eslint
+        name: eslint (frontend)
+        language: system
+        types_or: [ts, tsx, javascript, jsx]
+        files: ^frontend/
+        entry: bash -c 'cd frontend && ./node_modules/.bin/eslint --fix --max-warnings=0 "${@#frontend/}"' --
+      - id: prettier
+        name: prettier (frontend)
+        language: system
+        files: ^frontend/.*\.(ts|tsx|js|jsx|css|html|json|md)$
+        exclude: ^frontend/package-lock\.json$
+        entry: bash -c 'cd frontend && ./node_modules/.bin/prettier --write --ignore-unknown "${@#frontend/}"' --
