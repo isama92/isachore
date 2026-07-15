@@ -18,7 +18,13 @@ multiple people, with a JSON API so mobile clients can join later.
 ```bash
 cp .env.example .env
 docker compose up --build
+docker compose exec backend alembic upgrade head
+docker compose exec backend python -m app.cli create-admin --email you@example.com --name You
 ```
+
+There is no self-registration: the first admin is created with the command
+above (it prompts for a password), and every other user is created by an
+admin in the UI under **Admin → Users**.
 
 | Service       | URL                                     |
 | ------------- | --------------------------------------- |
@@ -46,13 +52,15 @@ pre-commit install
 The idea, step by step. Done so far: project scaffold, linters + pre-commit
 hook, Docker dev/prod, hello world at `/`, login page UI at `/login`.
 
-- [ ] Household / user / chore models + first Alembic migration
-- [ ] Auth backend (register, login, tokens for mobile clients) + wire up the login page
+- [x] User model + first Alembic migration (`users`, `auth_tokens`)
+- [x] Auth backend: cookie login/logout with DB-backed opaque tokens, `create-admin` CLI, login page wired
+- [x] Admin section: users CRUD at `/admin/users` (create, edit, deactivate/reactivate)
+- [ ] Household / chore models + migrations
 - [ ] Chores table page — list all chores of the household
 - [ ] Chore creation page — add a chore (assignees, rotation, tags, period, start date)
 - [ ] Due views: what is **overdue**, what has to be done **today**, what is due **in a few days**
 - [ ] Mark chore as done / completion history
-- [ ] API conventions for mobile clients (token auth, versioning, pagination)
+- [ ] API keys for mobile / 3rd-party clients (reuse `auth_tokens` via `Authorization: Bearer`)
 - [ ] Tests: pytest (backend) + vitest (frontend)
 - [ ] CI (lint + test on push)
 - [ ] Prod deploy hardening (TLS, real secrets management, DB backups)
