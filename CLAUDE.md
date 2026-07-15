@@ -22,6 +22,7 @@ docker compose -f compose.prod.yml up --build      # prod: nginx on :80 serving 
 
 docker compose exec backend alembic revision --autogenerate -m "..."
 docker compose exec backend alembic upgrade head   # run alembic INSIDE the container so host "db" resolves
+docker compose exec backend python -m app.cli create-admin --email you@example.com --name You
 
 cd backend && uv run ruff check . && uv run ruff format .
 cd frontend && npm run lint && npm run format && npm run build   # build also typechecks (tsc -b)
@@ -36,9 +37,20 @@ pre-commit run --all-files                         # what the git hook runs
 - Config via `app/core/config.py` (pydantic-settings, env vars from `.env`).
   In compose the DB host is `db`; the code default targets `localhost` for
   host-side tooling. `DATABASE_URL` must use the `postgresql+asyncpg://` scheme.
-- No DB models yet. When they arrive: inherit from `app.db.base.Base`
-  (has a naming convention for Alembic autogenerate), import them in
-  `alembic/env.py`'s metadata scope, migrations via autogenerate.
+- Models live in `app/models/` and inherit from `app.db.base.Base` (naming
+  convention for Alembic autogenerate). Re-export new models from
+  `app/models/__init__.py` — that import is what registers them on
+  `Base.metadata` for autogenerate. Pydantic schemas live in `app/schemas/`.
+- Auth: DB-backed opaque tokens (`auth_tokens` table, SHA-256 hashed), sent as
+  an httpOnly `isachore_token` cookie or `Authorization: Bearer`. NO
+  self-registration — admins create users; the first admin comes from the
+  `create-admin` CLI. Passwords hashed with Argon2 (pwdlib). Protect endpoints
+  by reusing `CurrentUser` / `AdminUser` from `app/api/deps.py`; soft delete
+  only (`is_active=false`), and users may never demote or deactivate themselves.
+- Frontend auth: `useAuth()` from `src/auth/useAuth.ts`; API calls through the
+  `api` wrapper in `src/lib/api.ts` (throws `ApiError`). Protected routes wrap
+  in `RequireAuth` / `RequireAdmin` (`src/components/`); authenticated pages
+  render under the `TopBar`.
 - Design tokens (colours, fonts, radii, shadows) live ONLY in
   `frontend/src/index.css` under `@theme` — never hardcode hex values in
   components. Tailwind v4 is CSS-first: there is NO tailwind.config.js and
@@ -57,3 +69,5 @@ pre-commit run --all-files                         # what the git hook runs
   sync with the ruff dev dependency in `backend/pyproject.toml`.
 - Never commit `.env`; dev-only placeholder credentials belong in `.env.example`.
   No real secrets, credentials, or production hostnames anywhere in the repo.
+- Set `ENVIRONMENT=prod` in production `.env` — it turns on the Secure flag
+  for auth cookies.

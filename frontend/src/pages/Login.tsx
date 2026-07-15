@@ -1,6 +1,35 @@
-import { Link } from 'react-router'
+import { useState, type FormEvent } from 'react'
+import { Navigate, useLocation } from 'react-router'
+import { useAuth } from '../auth/useAuth'
+import { ApiError } from '../lib/api'
 
 export default function Login() {
+  const { user, loading, login } = useAuth()
+  const location = useLocation()
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+
+  const state = location.state as { from?: string } | null
+  const from = state?.from ?? '/'
+
+  if (loading) return null
+  if (user) return <Navigate to={from} replace />
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault()
+    setSubmitting(true)
+    setError(null)
+    try {
+      await login(email, password)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Something went wrong, please try again')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   return (
     <main className="flex min-h-dvh items-center justify-center px-7 py-10">
       <div className="w-full max-w-sm">
@@ -18,7 +47,7 @@ export default function Login() {
           Sign in to see what your flat needs today.
         </p>
 
-        <form className="flex flex-col gap-4" onSubmit={(e) => e.preventDefault()}>
+        <form className="flex flex-col gap-4" onSubmit={(e) => void onSubmit(e)}>
           <label className="flex flex-col gap-1.5">
             <span className="text-[11.5px] font-bold tracking-wide text-muted uppercase">
               Email
@@ -28,6 +57,9 @@ export default function Login() {
               name="email"
               autoComplete="email"
               placeholder="you@example.com"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
               className="rounded-input border-[1.5px] border-line bg-white px-4 py-3 text-[15px] font-semibold placeholder:font-medium placeholder:text-placeholder focus:border-primary focus:outline-none"
             />
           </label>
@@ -41,29 +73,26 @@ export default function Login() {
               name="password"
               autoComplete="current-password"
               placeholder="••••••••••"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
               className="rounded-input border-[1.5px] border-line bg-white px-4 py-3 text-[15px] font-semibold placeholder:font-medium placeholder:text-placeholder focus:border-primary focus:outline-none"
             />
           </label>
 
-          <div className="text-right">
-            <a href="#" className="text-[13px] font-bold text-primary hover:text-primary-dark">
-              Forgot password?
-            </a>
-          </div>
+          {error && <p className="text-[13px] font-bold text-danger">{error}</p>}
 
           <button
             type="submit"
-            className="rounded-button bg-primary p-[15px] text-[15.5px] font-extrabold text-white shadow-glow transition hover:bg-primary-dark"
+            disabled={submitting}
+            className="rounded-button bg-primary p-[15px] text-[15.5px] font-extrabold text-white shadow-glow transition hover:bg-primary-dark disabled:opacity-60"
           >
-            Sign in
+            {submitting ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
 
         <p className="mt-6 text-center text-[13.5px] font-medium text-muted">
-          New here?{' '}
-          <Link to="/login" className="font-extrabold text-primary-dark">
-            Join your household
-          </Link>
+          New here? Ask your household admin for an account.
         </p>
       </div>
     </main>
