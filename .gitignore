@@ -23,3 +23,7 @@ npm-debug.log*
 .idea/
 .vscode/
 .DS_Store
+
+# uploaded files (avatars) — keep the dir, ignore its contents
+backend/storage/*
+!backend/storage/.gitkeep

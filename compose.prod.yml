@@ -40,6 +40,11 @@ services:
       # X-Real-IP / X-Forwarded-For, not the socket peer. Trust it here so the
       # per-IP login throttle keys on the real client (never nginx's own IP).
       TRUST_FORWARDED_FOR: "true"
+    volumes:
+      # Persist uploaded avatars across restarts/redeploys. The image creates
+      # /app/storage/avatars owned by the "app" user so the volume inherits
+      # writable ownership on first mount.
+      - avatars:/app/storage
     depends_on:
       db:
         condition: service_healthy
@@ -59,3 +64,4 @@ services:
 
 volumes:
   pgdata:
+  avatars:

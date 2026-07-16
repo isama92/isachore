@@ -19,6 +19,9 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(255))
     password_hash: Mapped[str] = mapped_column(String(255))
+    # Filename of the user's uploaded avatar under <storage_dir>/avatars (not a
+    # full path); None means "no picture, fall back to initials".
+    avatar_path: Mapped[str | None] = mapped_column(String(255), default=None)
     is_admin: Mapped[bool] = mapped_column(default=False)
     is_active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
