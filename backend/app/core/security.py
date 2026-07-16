@@ -43,7 +43,7 @@ def set_auth_cookie(response: Response, token: str, name: str = COOKIE_NAME) -> 
         path="/",
         httponly=True,
         samesite="lax",
-        secure=settings.environment != "dev",
+        secure=settings.cookies_secure,
     )
 
 

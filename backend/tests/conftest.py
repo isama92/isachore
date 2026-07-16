@@ -90,7 +90,14 @@ async def db_session(test_engine) -> AsyncIterator[AsyncSession]:
 
 
 @pytest_asyncio.fixture
-async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
+async def client(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[AsyncClient]:
+    # The test client talks HTTP (http://testserver) and httpx won't send Secure
+    # cookies over HTTP, so pin the non-secure path regardless of the ambient
+    # COOKIES_SECURE (default is now fail-closed True).
+    monkeypatch.setattr(settings, "cookies_secure", False)
+
     async def _override_get_session() -> AsyncIterator[AsyncSession]:
         yield db_session
 

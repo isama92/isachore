@@ -128,8 +128,11 @@ commit. Tests live in `backend/tests/` (pytest) and alongside the code as
   sync with the ruff dev dependency in `backend/pyproject.toml`.
 - Never commit `.env`; dev-only placeholder credentials belong in `.env.example`.
   No real secrets, credentials, or production hostnames anywhere in the repo.
-- Set `ENVIRONMENT=prod` in production `.env` — it turns on the Secure flag
-  for auth cookies.
+- Auth cookies get the `Secure` flag by default (fail-closed). Local dev is
+  served over plain HTTP, so set `COOKIES_SECURE=false` in the dev `.env` or
+  login cookies won't be sent. Leave it unset/true in production (which must
+  terminate TLS). `ENVIRONMENT` is now just an informational deployment marker
+  and no longer controls cookie security.
 - eslint-plugin-react-hooks v7 (`set-state-in-effect`): never call a
   state-setting function synchronously in a `useEffect` body — do data loading
   with promise chains where setState happens only inside `.then/.catch/.finally`
