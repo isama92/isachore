@@ -1,0 +1,251 @@
+from collections.abc import Awaitable, Callable
+
+from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models import AuditAction, AuditEvent, User
+
+Login = Callable[..., Awaitable[User]]
+AuthClient = Callable[[User], Awaitable[AsyncClient]]
+
+
+async def _events(session: AsyncSession, action: AuditAction) -> list[AuditEvent]:
+    result = await session.execute(
+        select(AuditEvent).where(AuditEvent.action == action).order_by(AuditEvent.id)
+    )
+    return list(result.scalars())
+
+
+async def test_login_success_is_audited(
+    client: AsyncClient, make_user: Login, db_session: AsyncSession
+) -> None:
+    user = await make_user(email="alice@example.com", password="password12345")
+    resp = await client.post(
+        "/api/v1/auth/login", json={"email": "alice@example.com", "password": "password12345"}
+    )
+    assert resp.status_code == 200
+
+    events = await _events(db_session, AuditAction.login_success)
+    assert len(events) == 1
+    assert events[0].actor_user_id == user.id
+    assert events[0].target_user_id is None
+    assert events[0].ip_address == "127.0.0.1"
+
+
+async def test_login_failure_is_audited_and_persists(
+    client: AsyncClient, make_user: Login, db_session: AsyncSession
+) -> None:
+    await make_user(email="alice@example.com", password="password12345")
+    resp = await client.post(
+        "/api/v1/auth/login", json={"email": "alice@example.com", "password": "wrong-password"}
+    )
+    assert resp.status_code == 401
+
+    # Persisted despite the 401; actor unknown, attempted email in detail.
+    events = await _events(db_session, AuditAction.login_failed)
+    assert len(events) == 1
+    assert events[0].actor_user_id is None
+    assert events[0].detail == "alice@example.com"
+
+
+async def test_login_failure_detail_is_lowercased(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    resp = await client.post(
+        "/api/v1/auth/login", json={"email": "NOBODY@example.com", "password": "x"}
+    )
+    assert resp.status_code == 401
+    events = await _events(db_session, AuditAction.login_failed)
+    assert len(events) == 1
+    assert events[0].detail == "nobody@example.com"
+
+
+async def test_logout_is_audited(
+    make_user: Login, auth_client: AuthClient, db_session: AsyncSession
+) -> None:
+    user = await make_user(email="alice@example.com")
+    client = await auth_client(user)
+
+    resp = await client.post("/api/v1/auth/logout")
+    assert resp.status_code == 204
+
+    events = await _events(db_session, AuditAction.logout)
+    assert len(events) == 1
+    assert events[0].actor_user_id == user.id
+
+
+async def test_impersonation_round_trip_is_audited(
+    make_user: Login, auth_client: AuthClient, db_session: AsyncSession
+) -> None:
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    target = await make_user(email="bob@example.com")
+    client = await auth_client(admin)
+
+    start = await client.post(f"/api/v1/users/{target.id}/impersonate")
+    assert start.status_code == 200
+    starts = await _events(db_session, AuditAction.impersonate_start)
+    assert len(starts) == 1
+    assert starts[0].actor_user_id == admin.id
+    assert starts[0].target_user_id == target.id
+    assert starts[0].impersonator_user_id is None
+
+    stop = await client.post("/api/v1/auth/stop-impersonating")
+    assert stop.status_code == 200
+    stops = await _events(db_session, AuditAction.impersonate_stop)
+    assert len(stops) == 1
+    assert stops[0].actor_user_id == admin.id
+    assert stops[0].target_user_id == target.id
+
+
+async def test_user_created_and_deactivated_are_audited(
+    make_user: Login, auth_client: AuthClient, db_session: AsyncSession
+) -> None:
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    client = await auth_client(admin)
+
+    created = await client.post(
+        "/api/v1/users",
+        json={
+            "email": "new@example.com",
+            "name": "New Person",
+            "password": "password12345",
+            "is_admin": False,
+        },
+    )
+    assert created.status_code == 201
+    new_id = created.json()["id"]
+
+    create_events = await _events(db_session, AuditAction.user_created)
+    assert len(create_events) == 1
+    assert create_events[0].actor_user_id == admin.id
+    assert create_events[0].target_user_id == new_id
+    assert create_events[0].impersonator_user_id is None
+
+    deleted = await client.delete(f"/api/v1/users/{new_id}")
+    assert deleted.status_code == 204
+
+    deactivate_events = await _events(db_session, AuditAction.user_deactivated)
+    assert len(deactivate_events) == 1
+    assert deactivate_events[0].actor_user_id == admin.id
+    assert deactivate_events[0].target_user_id == new_id
+
+
+async def test_update_while_impersonating_records_real_operator(
+    make_user: Login, auth_client: AuthClient, db_session: AsyncSession
+) -> None:
+    # Accountability: an action taken while impersonating must trace back to the
+    # real operator via impersonator_user_id (ties to the H1 fix).
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    other_admin = await make_user(email="eve@example.com", is_admin=True)
+    victim = await make_user(email="bob@example.com")
+    client = await auth_client(admin)
+
+    assert (await client.post(f"/api/v1/users/{other_admin.id}/impersonate")).status_code == 200
+    resp = await client.patch(f"/api/v1/users/{victim.id}", json={"name": "Bobby"})
+    assert resp.status_code == 200
+
+    events = await _events(db_session, AuditAction.user_updated)
+    assert len(events) == 1
+    assert events[0].actor_user_id == other_admin.id  # the impersonated session identity
+    assert events[0].impersonator_user_id == admin.id  # the real operator behind it
+    assert events[0].target_user_id == victim.id
+    assert events[0].detail == "name"
+
+
+async def test_failed_mutation_is_not_audited(
+    make_user: Login, auth_client: AuthClient, db_session: AsyncSession
+) -> None:
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    other = await make_user(email="taken@example.com")
+    client = await auth_client(admin)
+
+    # Self-demote is blocked (400) before any audit event is recorded.
+    resp = await client.patch(f"/api/v1/users/{admin.id}", json={"is_admin": False})
+    assert resp.status_code == 400
+    assert await _events(db_session, AuditAction.user_updated) == []
+
+    # 404 target: no user_updated row.
+    resp = await client.patch("/api/v1/users/999999", json={"name": "Ghost"})
+    assert resp.status_code == 404
+    assert await _events(db_session, AuditAction.user_updated) == []
+
+    # 409 duplicate email on create: no user_created row.
+    resp = await client.post(
+        "/api/v1/users",
+        json={
+            "email": other.email,
+            "name": "Dup",
+            "password": "password12345",
+            "is_admin": False,
+        },
+    )
+    assert resp.status_code == 409
+    assert await _events(db_session, AuditAction.user_created) == []
+
+
+async def test_password_update_is_audited_without_leaking_value(
+    make_user: Login, auth_client: AuthClient, db_session: AsyncSession
+) -> None:
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    target = await make_user(email="bob@example.com")
+    client = await auth_client(admin)
+
+    resp = await client.patch(
+        f"/api/v1/users/{target.id}", json={"password": "a-brand-new-password"}
+    )
+    assert resp.status_code == 200
+
+    events = await _events(db_session, AuditAction.user_updated)
+    assert len(events) == 1
+    assert events[0].detail == "password"
+    assert "a-brand-new-password" not in (events[0].detail or "")
+
+
+async def test_logout_while_impersonating_records_operator(
+    make_user: Login, auth_client: AuthClient, db_session: AsyncSession
+) -> None:
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    target = await make_user(email="bob@example.com")
+    client = await auth_client(admin)
+
+    assert (await client.post(f"/api/v1/users/{target.id}/impersonate")).status_code == 200
+    assert (await client.post("/api/v1/auth/logout")).status_code == 204
+
+    events = await _events(db_session, AuditAction.logout)
+    assert len(events) == 1
+    assert events[0].actor_user_id == target.id  # the impersonated session
+    assert events[0].impersonator_user_id == admin.id  # the real operator
+
+
+async def test_create_and_deactivate_while_impersonating_record_operator(
+    make_user: Login, auth_client: AuthClient, db_session: AsyncSession
+) -> None:
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    eve = await make_user(email="eve@example.com", is_admin=True)
+    client = await auth_client(admin)
+
+    assert (await client.post(f"/api/v1/users/{eve.id}/impersonate")).status_code == 200
+
+    created = await client.post(
+        "/api/v1/users",
+        json={
+            "email": "new@example.com",
+            "name": "New",
+            "password": "password12345",
+            "is_admin": False,
+        },
+    )
+    assert created.status_code == 201
+    new_id = created.json()["id"]
+    assert (await client.delete(f"/api/v1/users/{new_id}")).status_code == 204
+
+    create_events = await _events(db_session, AuditAction.user_created)
+    assert len(create_events) == 1
+    assert create_events[0].actor_user_id == eve.id
+    assert create_events[0].impersonator_user_id == admin.id
+
+    deactivate_events = await _events(db_session, AuditAction.user_deactivated)
+    assert len(deactivate_events) == 1
+    assert deactivate_events[0].actor_user_id == eve.id
+    assert deactivate_events[0].impersonator_user_id == admin.id

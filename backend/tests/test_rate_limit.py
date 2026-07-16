@@ -3,6 +3,7 @@ from collections.abc import Awaitable, Callable
 import pytest
 from httpx import AsyncClient
 from redis.asyncio import Redis
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from app.core.config import settings
 from app.models import User
@@ -204,6 +205,30 @@ async def test_locked_out_attempts_do_not_extend_the_lockout(
         assert (await _login(client, "alice@example.com", "wrong-password")).status_code == 429
     assert await fake_redis.get(key) == "3"
     assert await fake_redis.ttl(key) <= ttl_before
+
+
+async def test_login_fails_open_when_redis_unavailable(
+    client: AsyncClient, make_user: Login, fake_redis: Redis, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A Redis outage must degrade to no throttling, not a 500 on every login.
+    await make_user(email="alice@example.com", password="password12345")
+
+    async def boom_async(*args: object, **kwargs: object) -> object:
+        raise RedisConnectionError("redis down")
+
+    def boom_sync(*args: object, **kwargs: object) -> object:
+        raise RedisConnectionError("redis down")
+
+    monkeypatch.setattr(fake_redis, "get", boom_async)
+    monkeypatch.setattr(fake_redis, "delete", boom_async)
+    monkeypatch.setattr(fake_redis, "pipeline", boom_sync)
+
+    # A wrong password still returns 401 (not 500) despite the failed record.
+    bad = await _login(client, "alice@example.com", "wrong-password")
+    assert bad.status_code == 401
+    # And a correct login still succeeds despite the failed enforce/clear.
+    good = await _login(client, "alice@example.com", "password12345")
+    assert good.status_code == 200
 
 
 async def test_success_clears_email_counter_but_not_ip_counter(

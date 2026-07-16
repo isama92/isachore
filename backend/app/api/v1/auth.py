@@ -11,6 +11,7 @@ from app.api.deps import (
     get_request_token,
     get_user_by_token,
 )
+from app.core.audit import record_event
 from app.core.rate_limit import (
     clear_login_failures,
     client_ip,
@@ -27,7 +28,7 @@ from app.core.security import (
     set_auth_cookie,
     verify_password,
 )
-from app.models import AuthToken, User
+from app.models import AuditAction, AuthToken, User
 from app.schemas import LoginRequest, MeRead, UserRead
 
 router = APIRouter()
@@ -55,6 +56,10 @@ async def login(
     )
     if user is None or not password_ok or not user.is_active:
         await record_login_failure(redis, email=email, ip=ip)
+        # Persist the failed attempt (actor unknown; the attempted email goes in
+        # detail) even though the request itself fails with 401.
+        await record_event(session, action=AuditAction.login_failed, ip=ip, detail=email)
+        await session.commit()
         # One message for every failure mode so emails can't be enumerated
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
@@ -68,6 +73,7 @@ async def login(
             expires_at=datetime.now(UTC) + TOKEN_TTL,
         )
     )
+    await record_event(session, action=AuditAction.login_success, actor_id=user.id, ip=ip)
     await session.commit()
 
     await clear_login_failures(redis, email=email)
@@ -79,14 +85,25 @@ async def login(
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(request: Request, session: SessionDep, response: Response) -> None:
     # Ends both the current session and, when impersonating, the admin one
+    token = get_request_token(request)
+    actor = await get_user_by_token(session, token) if token else None
+    # If impersonating, the real operator ends the session; record them too.
+    impersonator = await get_impersonator(request, session)
     hashes = []
-    if token := get_request_token(request):
+    if token:
         hashes.append(hash_token(token))
     if admin_token := request.cookies.get(ADMIN_COOKIE_NAME):
         hashes.append(hash_token(admin_token))
     if hashes:
         await session.execute(delete(AuthToken).where(AuthToken.token_hash.in_(hashes)))
-        await session.commit()
+    await record_event(
+        session,
+        action=AuditAction.logout,
+        actor_id=actor.id if actor else None,
+        impersonator_id=impersonator.id if impersonator else None,
+        ip=client_ip(request),
+    )
+    await session.commit()
     clear_auth_cookie(response)
     clear_auth_cookie(response, ADMIN_COOKIE_NAME)
 
@@ -108,9 +125,17 @@ async def stop_impersonating(request: Request, session: SessionDep, response: Re
 
     # Drop the impersonated session and restore the admin one
     current = get_request_token(request)
+    target = await get_user_by_token(session, current) if current else None
     if current and current != admin_token:
         await session.execute(delete(AuthToken).where(AuthToken.token_hash == hash_token(current)))
-        await session.commit()
+    await record_event(
+        session,
+        action=AuditAction.impersonate_stop,
+        actor_id=admin.id,
+        target_id=target.id if target else None,
+        ip=client_ip(request),
+    )
+    await session.commit()
 
     set_auth_cookie(response, admin_token)
     clear_auth_cookie(response, ADMIN_COOKIE_NAME)

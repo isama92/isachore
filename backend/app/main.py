@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -5,6 +6,9 @@ from fastapi import FastAPI
 
 from app.api.v1.router import api_router
 from app.db.redis import redis_client
+
+# INFO so the app.audit trail (M3) is emitted alongside the DB records.
+logging.basicConfig(level=logging.INFO)
 
 
 @asynccontextmanager
