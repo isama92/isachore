@@ -17,6 +17,8 @@ from app.models import User
 
 
 async def create_admin(email: str, name: str, password: str) -> None:
+    # Normalise like the API schema does, since the CLI bypasses Pydantic (L3)
+    email = email.lower()
     async with async_session_factory() as session:
         existing = await session.execute(select(User.id).where(User.email == email))
         if existing.scalar_one_or_none() is not None:

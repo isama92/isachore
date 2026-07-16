@@ -1,6 +1,12 @@
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field
+
+# Emails are stored and compared lower-cased so a differently-cased address is
+# the same account (L3). The validator runs only on the non-None union member,
+# so an optional email left unset stays None.
+NormalisedEmail = Annotated[EmailStr, AfterValidator(lambda v: v.lower())]
 
 
 class UserRead(BaseModel):
@@ -19,14 +25,14 @@ class MeRead(UserRead):
 
 
 class UserCreate(BaseModel):
-    email: EmailStr
+    email: NormalisedEmail
     name: str = Field(min_length=1, max_length=255)
     password: str = Field(min_length=8)
     is_admin: bool = False
 
 
 class UserUpdate(BaseModel):
-    email: EmailStr | None = None
+    email: NormalisedEmail | None = None
     name: str | None = Field(default=None, min_length=1, max_length=255)
     password: str | None = Field(default=None, min_length=8)
     is_admin: bool | None = None
@@ -34,5 +40,5 @@ class UserUpdate(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: NormalisedEmail
     password: str

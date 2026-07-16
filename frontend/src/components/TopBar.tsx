@@ -9,6 +9,10 @@ export default function TopBar() {
   async function returnToAdmin() {
     try {
       await api.post('/api/v1/auth/stop-impersonating')
+    } catch {
+      // If the parked admin session has expired the server ends both sessions
+      // and returns 401; refresh() below then reflects the logged-out state and
+      // RequireAuth sends the operator to login.
     } finally {
       await refresh()
     }

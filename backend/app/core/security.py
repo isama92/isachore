@@ -48,4 +48,13 @@ def set_auth_cookie(response: Response, token: str, name: str = COOKIE_NAME) -> 
 
 
 def clear_auth_cookie(response: Response, name: str = COOKIE_NAME) -> None:
-    response.delete_cookie(name, path="/")
+    # Mirror the attributes used when setting the cookie: browsers are
+    # increasingly strict about matching path/SameSite/Secure on removal, and a
+    # mismatch can leave the cookie un-cleared (L4).
+    response.delete_cookie(
+        name,
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=settings.cookies_secure,
+    )

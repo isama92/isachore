@@ -164,6 +164,9 @@ async def impersonate_user(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot log in as an inactive user"
         )
 
+    current = get_request_token(request)
+    parked_admin = request.cookies.get(ADMIN_COOKIE_NAME)
+
     token = generate_token()
     session.add(
         AuthToken(
@@ -172,6 +175,11 @@ async def impersonate_user(
             expires_at=datetime.now(UTC) + TOKEN_TTL,
         )
     )
+    # Nested impersonation: the outermost admin stays parked in the admin cookie,
+    # so the current (intermediate) session is about to lose its only cookie
+    # reference. Revoke it rather than leave it valid for the full TTL (L2).
+    if parked_admin and current and current != parked_admin:
+        await session.execute(delete(AuthToken).where(AuthToken.token_hash == hash_token(current)))
     # impersonator is set only for a nested impersonation; it records the
     # outermost operator so the chain traces back to a real admin.
     await record_event(
@@ -186,7 +194,7 @@ async def impersonate_user(
 
     # Keep the outermost admin session for the return trip (don't overwrite it
     # when an impersonated admin impersonates someone else)
-    if not request.cookies.get(ADMIN_COOKIE_NAME) and (current := get_request_token(request)):
+    if not parked_admin and current:
         set_auth_cookie(response, current, ADMIN_COOKIE_NAME)
     set_auth_cookie(response, token)
     return user

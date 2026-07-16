@@ -103,6 +103,33 @@ async def test_create_user_duplicate_email(make_user: Login, auth_client: AuthCl
     assert resp.status_code == 409
 
 
+async def test_create_user_normalises_email_case(make_user: Login, auth_client: AuthClient) -> None:
+    # Email is stored lower-cased so casing can't create a duplicate account (L3)
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    client = await auth_client(admin)
+
+    resp = await client.post(
+        "/api/v1/users",
+        json={"email": "Mixed@Example.com", "name": "Mixed", "password": "password12345"},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["email"] == "mixed@example.com"
+
+
+async def test_create_user_duplicate_email_case_insensitive(
+    make_user: Login, auth_client: AuthClient
+) -> None:
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    await make_user(email="taken@example.com")
+    client = await auth_client(admin)
+
+    resp = await client.post(
+        "/api/v1/users",
+        json={"email": "Taken@Example.com", "name": "Dup", "password": "password12345"},
+    )
+    assert resp.status_code == 409
+
+
 async def test_create_user_invalid_payload(make_user: Login, auth_client: AuthClient) -> None:
     admin = await make_user(email="admin@example.com", is_admin=True)
     client = await auth_client(admin)
@@ -271,6 +298,38 @@ async def test_impersonate_as_member_forbidden(make_user: Login, auth_client: Au
     client = await auth_client(member)
     resp = await client.post(f"/api/v1/users/{target.id}/impersonate")
     assert resp.status_code == 403
+
+
+async def test_nested_impersonation_revokes_intermediate_token(
+    client: AsyncClient, make_user: Login, db_session: AsyncSession
+) -> None:
+    # A impersonates admin B, then (as B) impersonates member U. The outermost
+    # admin (A) stays parked in the admin cookie, so B's session token would be
+    # orphaned: it must be revoked, not left valid for the full TTL (L2).
+    await make_user(email="admin@example.com", password="password12345", is_admin=True)
+    bob = await make_user(email="bob@example.com", is_admin=True)
+    member = await make_user(email="member@example.com")
+
+    await client.post(
+        "/api/v1/auth/login",
+        json={"email": "admin@example.com", "password": "password12345"},
+    )
+    await client.post(f"/api/v1/users/{bob.id}/impersonate")
+    bob_token = client.cookies.get("isachore_token")
+    assert bob_token is not None
+
+    resp = await client.post(f"/api/v1/users/{member.id}/impersonate")
+    assert resp.status_code == 200
+
+    orphaned = await db_session.scalar(
+        select(AuthToken.id).where(AuthToken.token_hash == hash_token(bob_token))
+    )
+    assert orphaned is None
+
+    # The outermost admin session survives: the return trip lands back on A
+    stop = await client.post("/api/v1/auth/stop-impersonating")
+    assert stop.status_code == 200
+    assert stop.json()["email"] == "admin@example.com"
 
 
 # --- impersonation self-guard (H1) --------------------------------------

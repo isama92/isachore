@@ -2,7 +2,7 @@ import pytest
 from fastapi import Response
 
 from app.core.config import Settings, settings
-from app.core.security import set_auth_cookie
+from app.core.security import clear_auth_cookie, set_auth_cookie
 
 
 def _set_cookie_header(secure: bool, monkeypatch: pytest.MonkeyPatch) -> str:
@@ -36,3 +36,29 @@ def test_cookies_secure_defaults_to_true() -> None:
     # Fail-closed: a deploy that configures nothing gets Secure cookies. Assert
     # the declared default so ambient env (.env / COOKIES_SECURE) can't mask it.
     assert Settings.model_fields["cookies_secure"].default is True
+
+
+def _clear_cookie_header(secure: bool, monkeypatch: pytest.MonkeyPatch) -> str:
+    monkeypatch.setattr(settings, "cookies_secure", secure)
+    response = Response()
+    clear_auth_cookie(response)
+    return response.headers["set-cookie"]
+
+
+def test_clear_auth_cookie_mirrors_attributes_when_secure(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Removal must mirror the set attributes or some browsers won't clear it (L4)
+    header = _clear_cookie_header(True, monkeypatch).lower()
+    assert "; secure" in header
+    assert "httponly" in header
+    assert "samesite=lax" in header
+    assert "path=/" in header
+    # It's a deletion, so the cookie is expired immediately
+    assert "max-age=0" in header
+
+
+def test_clear_auth_cookie_omits_secure_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    header = _clear_cookie_header(False, monkeypatch).lower()
+    assert "; secure" not in header
+    assert "samesite=lax" in header
+    assert "path=/" in header
+    assert "max-age=0" in header

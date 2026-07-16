@@ -48,4 +48,24 @@ describe('TopBar', () => {
       expect.objectContaining({ method: 'POST' }),
     )
   })
+
+  it('still refreshes when the admin session has expired (401)', async () => {
+    // The server ends both sessions and returns 401; the button must not throw,
+    // and refresh() runs so RequireAuth can redirect to login (L5).
+    mockFetch([
+      {
+        path: '/api/v1/auth/stop-impersonating',
+        method: 'POST',
+        status: 401,
+        body: { detail: 'Your admin session has expired. Please log in again.' },
+      },
+    ])
+    const { value } = renderWithProviders(<TopBar />, {
+      authValue: { user: makeUser({ name: 'Bob Member' }), impersonating: true },
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Return to admin' }))
+
+    await waitFor(() => expect(value.refresh).toHaveBeenCalled())
+  })
 })

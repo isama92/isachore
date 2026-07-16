@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 from sqlalchemy import delete, select
 
 from app.api.deps import (
@@ -28,6 +29,7 @@ from app.core.security import (
     set_auth_cookie,
     verify_password,
 )
+from app.core.tokens import purge_expired_tokens
 from app.models import AuditAction, AuthToken, User
 from app.schemas import LoginRequest, MeRead, UserRead
 
@@ -43,8 +45,8 @@ async def login(
     response: Response,
 ) -> User:
     ip = client_ip(request)
-    # Throttle key is case-insensitive so a differently-cased email can't sidestep
-    # the lockout (user lookup itself stays case-sensitive; see L3).
+    # payload.email is already lower-cased by the schema (L3); keep the explicit
+    # .lower() so the throttle key stays case-insensitive regardless.
     email = payload.email.lower()
     await enforce_login_rate_limit(redis, email=email, ip=ip)
 
@@ -74,6 +76,8 @@ async def login(
         )
     )
     await record_event(session, action=AuditAction.login_success, actor_id=user.id, ip=ip)
+    # Opportunistically clean out expired tokens so the table stays bounded (L1)
+    await purge_expired_tokens(session)
     await session.commit()
 
     await clear_login_failures(redis, email=email)
@@ -115,16 +119,46 @@ async def me(request: Request, user: CurrentUser, session: SessionDep) -> MeRead
 
 
 @router.post("/stop-impersonating", response_model=UserRead)
-async def stop_impersonating(request: Request, session: SessionDep, response: Response) -> User:
+async def stop_impersonating(
+    request: Request, session: SessionDep, response: Response
+) -> User | Response:
     admin_token = request.cookies.get(ADMIN_COOKIE_NAME)
-    admin = await get_user_by_token(session, admin_token) if admin_token else None
-    if admin_token is None or admin is None or not admin.is_admin:
+    if admin_token is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="No impersonation in progress"
         )
 
-    # Drop the impersonated session and restore the admin one
+    admin = await get_user_by_token(session, admin_token)
     current = get_request_token(request)
+    if admin is None or not admin.is_admin:
+        # The parked admin token has expired or is no longer valid. Rather than
+        # strand the operator in the impersonated session (whose own cookie is
+        # still live) with a bare, misleading 401, end both sessions and send
+        # them back to login with a clear message (L5). A returned Response, not
+        # a raised HTTPException, carries the cookie-clearing headers.
+        target = await get_user_by_token(session, current) if current else None
+        hashes = [hash_token(t) for t in {admin_token, current} if t]
+        await session.execute(delete(AuthToken).where(AuthToken.token_hash.in_(hashes)))
+        # Keep the audit trail closed: the impersonate_start would otherwise have
+        # no matching stop. The operator's session expired, so the actor is
+        # unknown; the impersonated target is still resolvable from its cookie.
+        await record_event(
+            session,
+            action=AuditAction.impersonate_stop,
+            target_id=target.id if target else None,
+            ip=client_ip(request),
+            detail="admin session expired",
+        )
+        await session.commit()
+        expired = JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"detail": "Your admin session has expired. Please log in again."},
+        )
+        clear_auth_cookie(expired)
+        clear_auth_cookie(expired, ADMIN_COOKIE_NAME)
+        return expired
+
+    # Drop the impersonated session and restore the admin one
     target = await get_user_by_token(session, current) if current else None
     if current and current != admin_token:
         await session.execute(delete(AuthToken).where(AuthToken.token_hash == hash_token(current)))
