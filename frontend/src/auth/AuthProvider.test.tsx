@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import AuthProvider from './AuthProvider'
 import { useAuth } from './useAuth'
 import ThemeProvider from '../theme/ThemeProvider'
+import i18n from '../i18n/i18n'
 import { jsonResponse, mockFetch } from '../test/utils'
 import { makeMe, makeUser } from '../test/fixtures'
 
@@ -115,11 +116,16 @@ describe('AuthProvider', () => {
     await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('second@example.com'))
   })
 
-  it('adopts the server flavour + accent from /auth/me', async () => {
+  it('adopts the server flavour + accent + language from /auth/me', async () => {
     mockFetch([
       {
         path: '/api/v1/auth/me',
-        body: makeMe({ email: 'ada@example.com', theme: 'frappe', accent_color: 'mauve' }),
+        body: makeMe({
+          email: 'ada@example.com',
+          theme: 'frappe',
+          accent_color: 'mauve',
+          language: 'it',
+        }),
       },
     ])
     renderProvider()
@@ -129,9 +135,11 @@ describe('AuthProvider', () => {
     expect(document.documentElement.dataset.accent).toBe('mauve')
     expect(localStorage.getItem('isachore-theme')).toBe('frappe')
     expect(localStorage.getItem('isachore-accent')).toBe('mauve')
+    await waitFor(() => expect(i18n.language).toBe('it'))
+    expect(localStorage.getItem('isachore-language')).toBe('it')
   })
 
-  it('does not adopt or persist the theme while impersonating', async () => {
+  it('does not adopt or persist the theme or language while impersonating', async () => {
     mockFetch([
       {
         path: '/api/v1/auth/me',
@@ -139,6 +147,7 @@ describe('AuthProvider', () => {
           email: 'ada@example.com',
           theme: 'frappe',
           accent_color: 'mauve',
+          language: 'it',
           impersonating: true,
         }),
       },
@@ -146,9 +155,12 @@ describe('AuthProvider', () => {
     renderProvider()
 
     await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('ada@example.com'))
-    // Stays on the OS default (Latte); the admin's own choice is left untouched.
+    // Stays on the OS default (Latte) and English; the admin's own choices are
+    // left untouched.
     expect(document.documentElement.dataset.theme).toBe('latte')
     expect(localStorage.getItem('isachore-theme')).toBeNull()
     expect(localStorage.getItem('isachore-accent')).toBeNull()
+    expect(i18n.language).toBe('en')
+    expect(localStorage.getItem('isachore-language')).toBeNull()
   })
 })

@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router'
 import { format } from 'date-fns'
 import { CalendarIcon } from 'lucide-react'
@@ -45,6 +46,7 @@ const chipItemClass =
   'flex h-auto items-center gap-2 rounded-full border-[1.5px] border-line bg-card px-3 py-1.5 text-sm font-bold text-muted-foreground hover:border-primary hover:bg-card hover:text-muted-foreground data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-primary-foreground'
 
 export default function ChoreCreate() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [members, setMembers] = useState<HouseholdMember[]>([])
   const [tags, setTags] = useState<Tag[]>([])
@@ -72,7 +74,7 @@ export default function ChoreCreate() {
       })
       .catch((err: unknown) => {
         if (cancelled) return
-        setError(err instanceof ApiError ? err.message : 'Failed to load the form')
+        setError(err instanceof ApiError ? err.message : t('choreCreate.loadError'))
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -80,7 +82,7 @@ export default function ChoreCreate() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [t])
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -96,10 +98,10 @@ export default function ChoreCreate() {
         assignee_ids: form.assignee_ids,
         tag_ids: form.tag_ids,
       })
-      toast.success('Chore created')
+      toast.success(t('choreCreate.created'))
       await navigate('/chores')
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not create the chore')
+      setError(err instanceof ApiError ? err.message : t('choreCreate.createError'))
     } finally {
       setSaving(false)
     }
@@ -107,38 +109,42 @@ export default function ChoreCreate() {
 
   return (
     <main className="mx-auto max-w-lg px-5 py-8">
-      <h1 className="mb-6 font-display text-2xl font-bold tracking-tight">New chore</h1>
+      <h1 className="mb-6 font-display text-2xl font-bold tracking-tight">
+        {t('choreCreate.title')}
+      </h1>
 
       {loading ? (
-        <p className="font-medium text-muted-foreground">Loading…</p>
+        <p className="font-medium text-muted-foreground">{t('common.loading')}</p>
       ) : (
         <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-5">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="title">Title</Label>
+            <Label htmlFor="title">{t('choreCreate.titleLabel')}</Label>
             <Input
               id="title"
               required
               value={form.title}
               onChange={(e) => setForm({ ...form, title: e.target.value })}
-              placeholder="Clean the bathroom"
+              placeholder={t('choreCreate.titlePlaceholder')}
             />
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="notes">Notes</Label>
+            <Label htmlFor="notes">{t('choreCreate.notes')}</Label>
             <Textarea
               id="notes"
               value={form.description}
               onChange={(e) => setForm({ ...form, description: e.target.value })}
-              placeholder="Scrub the tub, replace the towels…"
+              placeholder={t('choreCreate.notesPlaceholder')}
               rows={3}
             />
           </div>
 
           <div className="flex flex-col gap-2">
-            <Label id="assignees-label">Assignees</Label>
+            <Label id="assignees-label">{t('choreCreate.assignees')}</Label>
             {members.length === 0 ? (
-              <p className="text-sm font-medium text-muted-foreground">No household members yet.</p>
+              <p className="text-sm font-medium text-muted-foreground">
+                {t('choreCreate.noMembers')}
+              </p>
             ) : (
               <ToggleGroup
                 type="multiple"
@@ -159,7 +165,7 @@ export default function ChoreCreate() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
               <Label id="assignment-label" htmlFor="assignment">
-                Assignment
+                {t('choreCreate.assignment')}
               </Label>
               <Select
                 value={form.assignment_type}
@@ -173,9 +179,9 @@ export default function ChoreCreate() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {assignmentOptions.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>
-                      {o.label}
+                  {assignmentOptions.map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {t(`options.assignment.${value}`)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -184,7 +190,7 @@ export default function ChoreCreate() {
 
             <div className="flex flex-col gap-1.5">
               <Label id="repeats-label" htmlFor="repeats">
-                Repeats
+                {t('choreCreate.repeats')}
               </Label>
               <Select
                 value={form.repeats}
@@ -194,9 +200,9 @@ export default function ChoreCreate() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {repeatOptions.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>
-                      {o.label}
+                  {repeatOptions.map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {t(`options.repeat.${value}`)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -206,7 +212,7 @@ export default function ChoreCreate() {
 
           <div className="flex flex-col gap-1.5">
             <Label id="start-date-label" htmlFor="start-date">
-              Start date
+              {t('choreCreate.startDate')}
             </Label>
             <Popover open={dateOpen} onOpenChange={setDateOpen}>
               <PopoverTrigger asChild>
@@ -236,9 +242,9 @@ export default function ChoreCreate() {
           </div>
 
           <div className="flex flex-col gap-2">
-            <Label id="tags-label">Tags</Label>
+            <Label id="tags-label">{t('choreCreate.tags')}</Label>
             {tags.length === 0 ? (
-              <p className="text-sm font-medium text-muted-foreground">No tags yet.</p>
+              <p className="text-sm font-medium text-muted-foreground">{t('choreCreate.noTags')}</p>
             ) : (
               <ToggleGroup
                 type="multiple"
@@ -264,10 +270,10 @@ export default function ChoreCreate() {
 
           <div className="flex gap-3">
             <Button type="submit" size="lg" disabled={saving}>
-              {saving ? 'Saving…' : 'Add chore'}
+              {saving ? t('common.saving') : t('choreCreate.submit')}
             </Button>
             <Button asChild variant="ghost" size="lg">
-              <Link to="/chores">Cancel</Link>
+              <Link to="/chores">{t('common.cancel')}</Link>
             </Button>
           </div>
         </form>

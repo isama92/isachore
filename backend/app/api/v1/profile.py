@@ -21,8 +21,8 @@ async def update_profile(
     session: SessionDep,
     request: Request,
 ) -> User:
-    """Update the current user's own name, appearance (theme/accent) and/or
-    password. Self-service edits reuse the user_updated audit action
+    """Update the current user's own name, appearance (theme/accent), language
+    and/or password. Self-service edits reuse the user_updated audit action
     (actor == target); if an admin is doing this while impersonating,
     impersonator_id keeps the trail back to them."""
     changed: list[str] = []
@@ -38,6 +38,9 @@ async def update_profile(
     if payload.accent_color is not None and payload.accent_color != user.accent_color:
         user.accent_color = payload.accent_color
         changed.append("accent_color")
+    if payload.language is not None and payload.language != user.language:
+        user.language = payload.language
+        changed.append("language")
 
     if payload.new_password is not None:
         if not verify_password(payload.current_password or "", user.password_hash):

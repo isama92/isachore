@@ -1,9 +1,13 @@
 import { useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useAuth } from '../auth/useAuth'
 import { useTheme } from '../theme/useTheme'
 import type { Accent, Flavour } from '../theme/context'
 import { ACCENTS, THEMES, supportsAccent } from '../theme/themes'
+import i18n from '../i18n/i18n'
+import { useLanguage } from '../i18n/useLanguage'
+import { LANGUAGES, type Language } from '../i18n/languages'
 import { api, ApiError } from '../lib/api'
 import { fullName, initials } from '../lib/user'
 import type { User } from '../lib/types'
@@ -25,10 +29,15 @@ import {
 
 export default function Profile() {
   const { user, refresh } = useAuth()
+  const { t } = useTranslation()
   const { theme, setTheme, accent, setAccent } = useTheme()
+  const { language, setLanguage } = useLanguage()
 
   const [savingAppearance, setSavingAppearance] = useState(false)
   const [appearanceError, setAppearanceError] = useState<string | null>(null)
+
+  const [savingLanguage, setSavingLanguage] = useState(false)
+  const [languageError, setLanguageError] = useState<string | null>(null)
 
   const [firstName, setFirstName] = useState(user?.first_name ?? '')
   const [lastName, setLastName] = useState(user?.last_name ?? '')
@@ -53,10 +62,10 @@ export default function Profile() {
     setSavingName(true)
     try {
       await api.patch<User>('/api/v1/profile', { first_name: firstName, last_name: lastName })
-      toast.success('Name updated')
+      toast.success(t('profile.nameUpdated'))
       await refresh()
     } catch (err) {
-      setNameError(err instanceof ApiError ? err.message : 'Could not update your name')
+      setNameError(err instanceof ApiError ? err.message : t('profile.nameError'))
     } finally {
       setSavingName(false)
     }
@@ -74,14 +83,36 @@ export default function Profile() {
     setAccent(nextAccent)
     try {
       await api.patch<User>('/api/v1/profile', { theme: nextTheme, accent_color: nextAccent })
-      toast.success('Appearance updated')
+      toast.success(t('profile.appearanceUpdated'))
       await refresh()
     } catch (err) {
       setTheme(prevTheme)
       setAccent(prevAccent)
-      setAppearanceError(err instanceof ApiError ? err.message : 'Could not update your appearance')
+      setAppearanceError(err instanceof ApiError ? err.message : t('profile.appearanceError'))
     } finally {
       setSavingAppearance(false)
+    }
+  }
+
+  // Language saves like appearance: apply optimistically for an instant switch,
+  // then roll back if the server rejects it. Its own {language} PATCH, separate
+  // from theme/accent.
+  async function saveLanguage(next: Language) {
+    const prev = language
+    setLanguageError(null)
+    setSavingLanguage(true)
+    setLanguage(next)
+    try {
+      await api.patch<User>('/api/v1/profile', { language: next })
+      // Read via the i18n singleton (not the closure's t, which is still the
+      // pre-switch language) so the toast confirms in the language just chosen.
+      toast.success(i18n.t('profile.languageUpdated'))
+      await refresh()
+    } catch (err) {
+      setLanguage(prev)
+      setLanguageError(err instanceof ApiError ? err.message : t('profile.languageError'))
+    } finally {
+      setSavingLanguage(false)
     }
   }
 
@@ -96,10 +127,10 @@ export default function Profile() {
       const data = new FormData()
       data.append('file', file)
       await api.upload<User>('/api/v1/profile/avatar', 'PUT', data)
-      toast.success('Photo updated')
+      toast.success(t('profile.photoUpdated'))
       await refresh()
     } catch (err) {
-      setAvatarError(err instanceof ApiError ? err.message : 'Could not upload the photo')
+      setAvatarError(err instanceof ApiError ? err.message : t('profile.photoUploadError'))
     } finally {
       setAvatarBusy(false)
     }
@@ -110,10 +141,10 @@ export default function Profile() {
     setAvatarBusy(true)
     try {
       await api.del<User>('/api/v1/profile/avatar')
-      toast.success('Photo removed')
+      toast.success(t('profile.photoRemoved'))
       await refresh()
     } catch (err) {
-      setAvatarError(err instanceof ApiError ? err.message : 'Could not remove the photo')
+      setAvatarError(err instanceof ApiError ? err.message : t('profile.photoRemoveError'))
     } finally {
       setAvatarBusy(false)
     }
@@ -123,11 +154,11 @@ export default function Profile() {
     e.preventDefault()
     setPasswordError(null)
     if (newPassword !== confirmPassword) {
-      setPasswordError('The new passwords do not match')
+      setPasswordError(t('profile.passwordMismatch'))
       return
     }
     if (newPassword.length < 8) {
-      setPasswordError('The new password must be at least 8 characters')
+      setPasswordError(t('profile.passwordTooShort'))
       return
     }
     setSavingPassword(true)
@@ -136,13 +167,13 @@ export default function Profile() {
         current_password: currentPassword,
         new_password: newPassword,
       })
-      toast.success('Password changed')
+      toast.success(t('profile.passwordChanged'))
       setCurrentPassword('')
       setNewPassword('')
       setConfirmPassword('')
       await refresh()
     } catch (err) {
-      setPasswordError(err instanceof ApiError ? err.message : 'Could not change your password')
+      setPasswordError(err instanceof ApiError ? err.message : t('profile.passwordError'))
     } finally {
       setSavingPassword(false)
     }
@@ -150,12 +181,16 @@ export default function Profile() {
 
   return (
     <main className="mx-auto max-w-2xl px-5 py-8">
-      <h1 className="mb-6 font-display text-2xl font-bold tracking-tight">Your profile</h1>
+      <h1 className="mb-6 font-display text-2xl font-bold tracking-tight">
+        {t('profile.heading')}
+      </h1>
 
       <div className="flex flex-col gap-6">
         {/* Picture */}
         <section className="rounded-2xl border border-line bg-card p-6">
-          <h2 className="mb-4 font-display text-lg font-bold tracking-tight">Photo</h2>
+          <h2 className="mb-4 font-display text-lg font-bold tracking-tight">
+            {t('profile.photo')}
+          </h2>
           <div className="flex items-center gap-5">
             <Avatar className="size-20">
               {user.avatar_url && <AvatarImage src={user.avatar_url} alt={fullName(user)} />}
@@ -179,7 +214,7 @@ export default function Profile() {
                   disabled={avatarBusy}
                   onClick={() => fileRef.current?.click()}
                 >
-                  {avatarBusy ? 'Working…' : 'Change photo'}
+                  {avatarBusy ? t('profile.working') : t('profile.changePhoto')}
                 </Button>
                 {user.avatar_url && (
                   <Button
@@ -190,13 +225,11 @@ export default function Profile() {
                     className="text-destructive hover:opacity-80"
                     onClick={() => void onRemoveAvatar()}
                   >
-                    Remove
+                    {t('profile.remove')}
                   </Button>
                 )}
               </div>
-              <p className="text-xs font-medium text-muted-foreground">
-                PNG, JPEG or WebP, up to 5 MB.
-              </p>
+              <p className="text-xs font-medium text-muted-foreground">{t('profile.photoHint')}</p>
             </div>
           </div>
           {avatarError && <p className="mt-4 text-[13px] font-bold text-danger">{avatarError}</p>}
@@ -204,11 +237,13 @@ export default function Profile() {
 
         {/* Name */}
         <section className="rounded-2xl border border-line bg-card p-6">
-          <h2 className="mb-4 font-display text-lg font-bold tracking-tight">Name</h2>
+          <h2 className="mb-4 font-display text-lg font-bold tracking-tight">
+            {t('profile.nameHeading')}
+          </h2>
           <form onSubmit={(e) => void onNameSubmit(e)} className="flex flex-col gap-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="profile-first-name">First name</Label>
+                <Label htmlFor="profile-first-name">{t('common.firstName')}</Label>
                 <Input
                   id="profile-first-name"
                   required
@@ -217,7 +252,7 @@ export default function Profile() {
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="profile-last-name">Last name</Label>
+                <Label htmlFor="profile-last-name">{t('common.lastName')}</Label>
                 <Input
                   id="profile-last-name"
                   required
@@ -229,7 +264,7 @@ export default function Profile() {
             {nameError && <p className="text-[13px] font-bold text-danger">{nameError}</p>}
             <div>
               <Button type="submit" size="lg" disabled={savingName}>
-                {savingName ? 'Saving…' : 'Save name'}
+                {savingName ? t('common.saving') : t('profile.saveName')}
               </Button>
             </div>
           </form>
@@ -237,10 +272,35 @@ export default function Profile() {
 
         {/* Appearance */}
         <section className="rounded-2xl border border-line bg-card p-6">
-          <h2 className="mb-4 font-display text-lg font-bold tracking-tight">Appearance</h2>
+          <h2 className="mb-4 font-display text-lg font-bold tracking-tight">
+            {t('profile.appearance')}
+          </h2>
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="theme-select">Theme</Label>
+              <Label htmlFor="language-select">{t('profile.language')}</Label>
+              <Select
+                value={language}
+                disabled={savingLanguage}
+                onValueChange={(v) => void saveLanguage(v as Language)}
+              >
+                <SelectTrigger id="language-select" className="w-full sm:w-72">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {LANGUAGES.map((l) => (
+                    <SelectItem key={l.id} value={l.id}>
+                      {l.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {languageError && (
+                <p className="text-[13px] font-bold text-danger">{languageError}</p>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="theme-select">{t('profile.theme')}</Label>
               <Select
                 value={theme}
                 disabled={savingAppearance}
@@ -251,19 +311,19 @@ export default function Profile() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    <SelectLabel>Light</SelectLabel>
-                    {THEMES.filter((t) => t.group === 'light').map((t) => (
-                      <SelectItem key={t.id} value={t.id}>
-                        {t.label}
+                    <SelectLabel>{t('profile.light')}</SelectLabel>
+                    {THEMES.filter((th) => th.group === 'light').map((th) => (
+                      <SelectItem key={th.id} value={th.id}>
+                        {th.label}
                       </SelectItem>
                     ))}
                   </SelectGroup>
                   <SelectSeparator />
                   <SelectGroup>
-                    <SelectLabel>Dark</SelectLabel>
-                    {THEMES.filter((t) => t.group === 'dark').map((t) => (
-                      <SelectItem key={t.id} value={t.id}>
-                        {t.label}
+                    <SelectLabel>{t('profile.dark')}</SelectLabel>
+                    {THEMES.filter((th) => th.group === 'dark').map((th) => (
+                      <SelectItem key={th.id} value={th.id}>
+                        {th.label}
                       </SelectItem>
                     ))}
                   </SelectGroup>
@@ -273,7 +333,7 @@ export default function Profile() {
 
             {supportsAccent(theme) && (
               <div className="flex flex-col gap-1.5">
-                <Label>Accent colour</Label>
+                <Label>{t('profile.accentColour')}</Label>
                 <div className="flex flex-wrap gap-2">
                   {ACCENTS.map((a) => (
                     <button
@@ -305,10 +365,12 @@ export default function Profile() {
 
         {/* Password */}
         <section className="rounded-2xl border border-line bg-card p-6">
-          <h2 className="mb-4 font-display text-lg font-bold tracking-tight">Password</h2>
+          <h2 className="mb-4 font-display text-lg font-bold tracking-tight">
+            {t('profile.passwordHeading')}
+          </h2>
           <form onSubmit={(e) => void onPasswordSubmit(e)} className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="current-password">Current password</Label>
+              <Label htmlFor="current-password">{t('profile.currentPassword')}</Label>
               <Input
                 id="current-password"
                 type="password"
@@ -319,20 +381,20 @@ export default function Profile() {
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="new-password">New password</Label>
+              <Label htmlFor="new-password">{t('profile.newPassword')}</Label>
               <Input
                 id="new-password"
                 type="password"
                 autoComplete="new-password"
                 required
                 minLength={8}
-                placeholder="At least 8 characters"
+                placeholder={t('common.passwordMin')}
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="confirm-password">Confirm new password</Label>
+              <Label htmlFor="confirm-password">{t('profile.confirmPassword')}</Label>
               <Input
                 id="confirm-password"
                 type="password"
@@ -345,7 +407,7 @@ export default function Profile() {
             {passwordError && <p className="text-[13px] font-bold text-danger">{passwordError}</p>}
             <div>
               <Button type="submit" size="lg" disabled={savingPassword}>
-                {savingPassword ? 'Saving…' : 'Change password'}
+                {savingPassword ? t('common.saving') : t('profile.changePassword')}
               </Button>
             </div>
           </form>

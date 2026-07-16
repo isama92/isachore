@@ -36,6 +36,8 @@ Accent = Literal[
     "blue",
     "lavender",
 ]
+# UI language, kept in sync with the frontend i18n module (frontend/src/i18n).
+Language = Literal["en", "it"]
 
 
 class UserRead(BaseModel):
@@ -52,6 +54,8 @@ class UserRead(BaseModel):
     # default (the SPA applies these on load).
     theme: Flavour | None = None
     accent_color: Accent | None = None
+    # UI language; None means the client uses its default (English).
+    language: Language | None = None
     # Raw stored filename, read from the ORM object but never serialised; the
     # client only ever sees the derived avatar_url below.
     avatar_path: str | None = Field(default=None, exclude=True)
@@ -103,6 +107,7 @@ class ProfileUpdate(BaseModel):
     new_password: str | None = Field(default=None, min_length=8)
     theme: Flavour | None = None
     accent_color: Accent | None = None
+    language: Language | None = None
 
     @model_validator(mode="after")
     def _password_pair(self) -> "ProfileUpdate":

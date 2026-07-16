@@ -1,28 +1,25 @@
+import i18n from '../i18n/i18n'
+import { localeFor } from '../i18n/languages'
 import type { AssignmentType, RepeatPeriod } from './types'
 
-export const repeatOptions: { value: RepeatPeriod; label: string }[] = [
-  { value: 'manual', label: 'Manual' },
-  { value: 'hourly', label: 'Hourly' },
-  { value: 'daily', label: 'Daily' },
-  { value: 'weekly', label: 'Weekly' },
-  { value: 'monthly', label: 'Monthly' },
-  { value: 'yearly', label: 'Yearly' },
+// Option values in display order. The human labels live in the translation
+// files under options.repeat.* / options.assignment.*, so callers render them
+// with t(`options.repeat.${value}`) rather than a static label here.
+export const repeatOptions: readonly RepeatPeriod[] = [
+  'manual',
+  'hourly',
+  'daily',
+  'weekly',
+  'monthly',
+  'yearly',
 ]
 
-export const assignmentOptions: { value: AssignmentType; label: string }[] = [
-  { value: 'manual', label: 'Manual' },
-  { value: 'alphabetical', label: 'Alphabetical' },
-  { value: 'random', label: 'Random' },
-  { value: 'least_done', label: 'Least done' },
+export const assignmentOptions: readonly AssignmentType[] = [
+  'manual',
+  'alphabetical',
+  'random',
+  'least_done',
 ]
-
-export function repeatLabel(value: RepeatPeriod): string {
-  return repeatOptions.find((o) => o.value === value)?.label ?? value
-}
-
-export function assignmentLabel(value: AssignmentType): string {
-  return assignmentOptions.find((o) => o.value === value)?.label ?? value
-}
 
 // Today's date as a local (timezone-safe) "YYYY-MM-DD" string.
 export function todayISO(): string {
@@ -32,11 +29,12 @@ export function todayISO(): string {
   return `${d.getFullYear()}-${month}-${day}`
 }
 
-// Local (timezone-safe) formatting of an ISO date-only string like "2026-07-16".
+// Local (timezone-safe) formatting of an ISO date-only string like "2026-07-16",
+// in the active language's locale (en -> en-GB, it -> it-IT).
 export function formatDate(iso: string): string {
   const [year, month, day] = iso.split('-').map(Number)
   if (!year || !month || !day) return iso
-  return new Date(year, month - 1, day).toLocaleDateString('en-GB', {
+  return new Date(year, month - 1, day).toLocaleDateString(localeFor(i18n.language), {
     day: 'numeric',
     month: 'short',
     year: 'numeric',

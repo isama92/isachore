@@ -107,6 +107,43 @@ pre-commit run --all-files                         # what the git hook runs
   teal brand; dark is derived. The toggle is in `TopBar`. Toasts:
   `toast.success(...)` from `sonner`; a single `<Toaster />` is mounted in
   `main.tsx`. Feedback pattern: success -> toast, errors -> inline text.
+- i18n / translations: `react-i18next` + `i18next`. The `frontend/src/i18n/`
+  module mirrors `theme/`: `languages.ts` (the closed `Language` set = `'en' |
+  'it'`, autonym `LANGUAGES` metadata, `DEFAULT_LANGUAGE` = `en`, `isLanguage`
+  guard, `localeFor` → BCP47 for dates), `i18n.ts` (singleton init, the typed-
+  keys `declare module 'i18next'` augmentation, the `changeLanguage` persist
+  wrapper, and the `languageChanged` → `<html lang>` listener), `useLanguage.ts`
+  (`{ language, setLanguage }` hook), and `locales/{en,it}.json`. The singleton
+  is initialised by `import './i18n/i18n'` in `main.tsx` — no React provider.
+  - Adding ANY user-facing string: add the key to BOTH `en.json` and `it.json`
+    (identical nested trees), then render it with `useTranslation()` /
+    `t('group.key')` — never hardcode. Keys are typed off `en.json`, so a typo
+    or a key missing from `en.json` fails `tsc -b`; keep `it.json` in lockstep
+    (there is no compiler check that `it.json` matches, so drift is silent).
+    Keys are grouped by feature (`common`/`login`/`chores`/`profile`/`users`/
+    `options`/…), dot-separated (Laravel-style). Interpolation is `{{var}}`;
+    a two-way conditional becomes two keys; dynamic keys use a literal-union
+    template (`t(`options.repeat.${value}`)` where `value` is a literal union).
+  - Persistence mirrors theme's "persist only on an explicit choice": the
+    `changeLanguage()` wrapper in `i18n.ts` writes `localStorage`
+    (`isachore-language`); the `languageChanged` listener only sets `<html
+    lang>` and must NOT persist. Use the wrapper (via `useLanguage.setLanguage`,
+    or directly in `AuthProvider`); call bare `i18n.changeLanguage` only for a
+    non-persisting reset (e.g. test teardown in `src/test/setup.ts`).
+  - Per-user field `users.language` (nullable; `Language = Literal["en","it"]`
+    in `schemas/user.py`, kept in sync with the frontend `Language` type) is in
+    `UserRead` + `ProfileUpdate` (self-service; NOT admin `UserUpdate`, same as
+    theme) and adopted by `AuthProvider.syncAppearance` (skipped while
+    impersonating). The selector is on the Profile page, saved optimistically
+    then PATCHed with rollback (like `saveAppearance`). Dates: `formatDate` in
+    `lib/chores.ts` uses `localeFor(i18n.language)`.
+  - Not translated (deliberate): the brand name `isachore`, the Catppuccin
+    flavour names, and the 14 accent colour names.
+  - Gotcha: a handler closure captures the render-time `t`, so a toast fired
+    right after switching language would show the OLD language. The Profile
+    language-save success toast reads via the `i18n` singleton (`i18n.t(...)`)
+    so it confirms in the just-selected language; rollback/error paths keep
+    using the closure `t` (already the correct, restored language).
 - Pages in `frontend/src/pages/`, one component per route.
 - UI mockups: `../isachore-design/Choreo Screens.dc.html` (login = variant 1a,
   "add chore" = variant 2a; variants are anchor ids in that file).

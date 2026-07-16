@@ -31,6 +31,10 @@ class User(Base):
     # String column (no DB enum) keeps future additions migration-free.
     theme: Mapped[str | None] = mapped_column(String(32), default=None)
     accent_color: Mapped[str | None] = mapped_column(String(32), default=None)
+    # UI language preference. NULL means "not chosen", so the client falls back
+    # to its default (English). Same closed-set-at-the-schema-layer approach as
+    # theme/accent above.
+    language: Mapped[str | None] = mapped_column(String(32), default=None)
     is_admin: Mapped[bool] = mapped_column(default=False)
     is_active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

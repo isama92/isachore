@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Navigate, useLocation } from 'react-router'
 import { useAuth } from '../auth/useAuth'
 import { ApiError } from '../lib/api'
@@ -8,6 +9,7 @@ import { Label } from '@/components/ui/label'
 
 export default function Login() {
   const { user, loading, login } = useAuth()
+  const { t } = useTranslation()
   const location = useLocation()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -27,7 +29,7 @@ export default function Login() {
     try {
       await login(email, password)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Something went wrong, please try again')
+      setError(err instanceof ApiError ? err.message : t('login.error'))
     } finally {
       setSubmitting(false)
     }
@@ -44,21 +46,21 @@ export default function Login() {
         </div>
 
         <h1 className="font-display text-3xl leading-tight font-bold tracking-tight">
-          Welcome back.
+          {t('login.welcome')}
         </h1>
         <p className="mt-1.5 mb-7 text-[14.5px] font-medium text-muted-foreground">
-          Sign in to see what your flat needs today.
+          {t('login.subtitle')}
         </p>
 
         <form className="flex flex-col gap-4" onSubmit={(e) => void onSubmit(e)}>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="email">Email</Label>
+            <Label htmlFor="email">{t('common.email')}</Label>
             <Input
               id="email"
               type="email"
               name="email"
               autoComplete="email"
-              placeholder="you@example.com"
+              placeholder={t('login.emailPlaceholder')}
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -66,7 +68,7 @@ export default function Login() {
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="password">Password</Label>
+            <Label htmlFor="password">{t('common.password')}</Label>
             <Input
               id="password"
               type="password"
@@ -87,12 +89,12 @@ export default function Login() {
             disabled={submitting}
             className="h-11 w-full text-[15.5px]"
           >
-            {submitting ? 'Signing in…' : 'Sign in'}
+            {submitting ? t('login.signingIn') : t('login.signIn')}
           </Button>
         </form>
 
         <p className="mt-6 text-center text-[13.5px] font-medium text-muted-foreground">
-          New here? Ask your household admin for an account.
+          {t('login.hint')}
         </p>
       </div>
     </main>

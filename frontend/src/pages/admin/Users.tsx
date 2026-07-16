@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { useAuth } from '../../auth/useAuth'
@@ -58,6 +59,7 @@ const emptyForm: FormState = {
 
 export default function Users() {
   const { user: me, refresh } = useAuth()
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
@@ -73,10 +75,10 @@ export default function Users() {
         .get<User[]>('/api/v1/users')
         .then((data) => setUsers(data))
         .catch((err: unknown) => {
-          setError(err instanceof ApiError ? err.message : 'Failed to load users')
+          setError(err instanceof ApiError ? err.message : t('users.loadError'))
         })
         .finally(() => setLoading(false)),
-    [],
+    [t],
   )
 
   useEffect(() => {
@@ -122,11 +124,11 @@ export default function Users() {
       } else {
         await api.post<User>('/api/v1/users', form)
       }
-      toast.success(editing ? 'User updated' : 'User created')
+      toast.success(editing ? t('users.toastUpdated') : t('users.toastCreated'))
       setShowForm(false)
       await load()
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Saving failed')
+      setError(err instanceof ApiError ? err.message : t('users.saveError'))
     } finally {
       setSaving(false)
     }
@@ -136,11 +138,11 @@ export default function Users() {
     setError(null)
     try {
       await api.post<User>(`/api/v1/users/${u.id}/impersonate`)
-      toast.success(`Viewing as ${fullName(u)}`)
+      toast.success(t('users.viewingAs', { name: fullName(u) }))
       await refresh()
       await navigate('/')
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not log in as this user')
+      setError(err instanceof ApiError ? err.message : t('users.loginAsError'))
     }
   }
 
@@ -152,19 +154,19 @@ export default function Users() {
       } else {
         await api.del(`/api/v1/users/${u.id}`)
       }
-      toast.success(active ? 'User reactivated' : 'User deactivated')
+      toast.success(active ? t('users.reactivated') : t('users.deactivated'))
       await load()
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Update failed')
+      setError(err instanceof ApiError ? err.message : t('users.updateError'))
     }
   }
 
   return (
     <main className="mx-auto max-w-5xl px-5 py-8">
       <div className="mb-6 flex items-center justify-between">
-        <h1 className="font-display text-2xl font-bold tracking-tight">Users</h1>
+        <h1 className="font-display text-2xl font-bold tracking-tight">{t('users.title')}</h1>
         <Button type="button" size="lg" onClick={openCreate}>
-          Add user
+          {t('users.addUser')}
         </Button>
       </div>
 
@@ -180,14 +182,16 @@ export default function Users() {
         <DialogContent className="sm:max-w-lg">
           <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
             <DialogHeader>
-              <DialogTitle>{editing ? `Edit ${fullName(editing)}` : 'New user'}</DialogTitle>
+              <DialogTitle>
+                {editing ? t('users.editTitle', { name: fullName(editing) }) : t('users.newUser')}
+              </DialogTitle>
               <DialogDescription className="sr-only">
-                {editing ? 'Update this account.' : 'Create a new household member.'}
+                {editing ? t('users.editDescription') : t('users.newDescription')}
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="user-first-name">First name</Label>
+                <Label htmlFor="user-first-name">{t('common.firstName')}</Label>
                 <Input
                   id="user-first-name"
                   required
@@ -196,7 +200,7 @@ export default function Users() {
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="user-last-name">Last name</Label>
+                <Label htmlFor="user-last-name">{t('common.lastName')}</Label>
                 <Input
                   id="user-last-name"
                   required
@@ -205,7 +209,7 @@ export default function Users() {
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="user-email">Email</Label>
+                <Label htmlFor="user-email">{t('common.email')}</Label>
                 <Input
                   id="user-email"
                   type="email"
@@ -215,13 +219,13 @@ export default function Users() {
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="user-password">Password</Label>
+                <Label htmlFor="user-password">{t('common.password')}</Label>
                 <Input
                   id="user-password"
                   type="password"
                   required={!editing}
                   minLength={8}
-                  placeholder={editing ? 'Leave empty to keep current' : 'At least 8 characters'}
+                  placeholder={editing ? t('users.passwordKeep') : t('common.passwordMin')}
                   value={form.password}
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
                 />
@@ -238,7 +242,7 @@ export default function Users() {
                     htmlFor="is-admin"
                     className="text-sm font-bold tracking-normal text-foreground normal-case"
                   >
-                    Admin
+                    {t('users.adminLabel')}
                   </Label>
                 </div>
                 {editing && (
@@ -253,7 +257,7 @@ export default function Users() {
                       htmlFor="is-active"
                       className="text-sm font-bold tracking-normal text-foreground normal-case"
                     >
-                      Active
+                      {t('users.activeLabel')}
                     </Label>
                   </div>
                 )}
@@ -262,10 +266,10 @@ export default function Users() {
             {error && <p className="text-[13px] font-bold text-danger">{error}</p>}
             <DialogFooter>
               <Button type="button" variant="ghost" size="lg" onClick={() => setShowForm(false)}>
-                Cancel
+                {t('common.cancel')}
               </Button>
               <Button type="submit" size="lg" disabled={saving}>
-                {saving ? 'Saving…' : 'Save'}
+                {saving ? t('common.saving') : t('common.save')}
               </Button>
             </DialogFooter>
           </form>
@@ -273,17 +277,17 @@ export default function Users() {
       </Dialog>
 
       {loading ? (
-        <p className="font-medium text-muted-foreground">Loading…</p>
+        <p className="font-medium text-muted-foreground">{t('common.loading')}</p>
       ) : (
         <div className="overflow-hidden rounded-2xl border border-line bg-card">
           <Table className="min-w-[640px]">
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead>Name</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead>{t('users.headers.name')}</TableHead>
+                <TableHead>{t('users.headers.email')}</TableHead>
+                <TableHead>{t('users.headers.role')}</TableHead>
+                <TableHead>{t('users.headers.status')}</TableHead>
+                <TableHead className="text-right">{t('users.headers.actions')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -292,28 +296,30 @@ export default function Users() {
                   <TableCell className="font-semibold">
                     {fullName(u)}
                     {u.id === me?.id && (
-                      <span className="ml-2 text-[11px] font-bold text-placeholder">you</span>
+                      <span className="ml-2 text-[11px] font-bold text-placeholder">
+                        {t('users.you')}
+                      </span>
                     )}
                   </TableCell>
                   <TableCell className="font-medium text-muted-foreground">{u.email}</TableCell>
                   <TableCell>
                     {u.is_admin ? (
                       <Badge variant="secondary" className="text-primary">
-                        Admin
+                        {t('users.roleAdmin')}
                       </Badge>
                     ) : (
                       <Badge variant="secondary" className="text-muted-foreground">
-                        Member
+                        {t('users.roleMember')}
                       </Badge>
                     )}
                   </TableCell>
                   <TableCell>
                     {u.is_active ? (
                       <Badge variant="secondary" className="text-primary">
-                        Active
+                        {t('users.statusActive')}
                       </Badge>
                     ) : (
-                      <Badge variant="destructive">Inactive</Badge>
+                      <Badge variant="destructive">{t('users.statusInactive')}</Badge>
                     )}
                   </TableCell>
                   <TableCell className="text-right">
@@ -325,7 +331,7 @@ export default function Users() {
                         className="mr-3 h-auto p-0 font-bold text-muted-foreground hover:text-foreground hover:no-underline"
                         onClick={() => void loginAs(u)}
                       >
-                        Login as
+                        {t('users.loginAs')}
                       </Button>
                     )}
                     <Button
@@ -335,7 +341,7 @@ export default function Users() {
                       className="h-auto p-0 font-bold hover:text-primary-dark hover:no-underline"
                       onClick={() => openEdit(u)}
                     >
-                      Edit
+                      {t('users.edit')}
                     </Button>
                     {u.id !== me?.id &&
                       (u.is_active ? (
@@ -347,23 +353,25 @@ export default function Users() {
                               size="sm"
                               className="ml-3 h-auto p-0 font-bold text-destructive hover:no-underline hover:opacity-80"
                             >
-                              Deactivate
+                              {t('users.deactivate')}
                             </Button>
                           </AlertDialogTrigger>
                           <AlertDialogContent>
                             <AlertDialogHeader>
-                              <AlertDialogTitle>Deactivate {fullName(u)}?</AlertDialogTitle>
+                              <AlertDialogTitle>
+                                {t('users.deactivateConfirm', { name: fullName(u) })}
+                              </AlertDialogTitle>
                               <AlertDialogDescription>
-                                They will be logged out and unable to sign in.
+                                {t('users.deactivateBody')}
                               </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
                               <AlertDialogAction
                                 variant="destructive"
                                 onClick={() => void setActive(u, false)}
                               >
-                                Deactivate user
+                                {t('users.deactivateAction')}
                               </AlertDialogAction>
                             </AlertDialogFooter>
                           </AlertDialogContent>
@@ -377,20 +385,22 @@ export default function Users() {
                               size="sm"
                               className="ml-3 h-auto p-0 font-bold hover:text-primary-dark hover:no-underline"
                             >
-                              Reactivate
+                              {t('users.reactivate')}
                             </Button>
                           </AlertDialogTrigger>
                           <AlertDialogContent>
                             <AlertDialogHeader>
-                              <AlertDialogTitle>Reactivate {fullName(u)}?</AlertDialogTitle>
+                              <AlertDialogTitle>
+                                {t('users.reactivateConfirm', { name: fullName(u) })}
+                              </AlertDialogTitle>
                               <AlertDialogDescription>
-                                They will be able to sign in again.
+                                {t('users.reactivateBody')}
                               </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
                               <AlertDialogAction onClick={() => void setActive(u, true)}>
-                                Reactivate user
+                                {t('users.reactivateAction')}
                               </AlertDialogAction>
                             </AlertDialogFooter>
                           </AlertDialogContent>

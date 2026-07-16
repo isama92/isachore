@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { api } from '../lib/api'
 import type { Me, User } from '../lib/types'
 import { useTheme } from '../theme/useTheme'
+import { changeLanguage } from '../i18n/i18n'
 import { AuthContext } from './context'
 
 export default function AuthProvider({ children }: { children: ReactNode }) {
@@ -10,15 +11,17 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
   const { setTheme, setAccent } = useTheme()
 
-  // Adopt the user's saved appearance (mirrored into localStorage by setTheme /
-  // setAccent). Skip while impersonating so the admin's own preference is never
-  // overwritten by the impersonated user's; a null field means "no choice", so
-  // the current OS-default stays.
+  // Adopt the user's saved appearance + language (mirrored into localStorage by
+  // setTheme / setAccent / the languageChanged listener). Skip while
+  // impersonating so the admin's own preferences are never overwritten by the
+  // impersonated user's; a null field means "no choice", so the current default
+  // stays.
   const syncAppearance = useCallback(
-    (u: Pick<Me, 'theme' | 'accent_color'> & { impersonating?: boolean }) => {
+    (u: Pick<Me, 'theme' | 'accent_color' | 'language'> & { impersonating?: boolean }) => {
       if (u.impersonating) return
       if (u.theme) setTheme(u.theme)
       if (u.accent_color) setAccent(u.accent_color)
+      if (u.language) void changeLanguage(u.language)
     },
     [setTheme, setAccent],
   )

@@ -1,4 +1,5 @@
 import type { Accent, Flavour } from '../theme/context'
+import type { Language } from '../i18n/languages'
 
 export type User = {
   id: number
@@ -13,6 +14,8 @@ export type User = {
   // default. The API field is `accent_color`; the theme context calls it `accent`.
   theme: Flavour | null
   accent_color: Accent | null
+  // UI language preference; null means the client uses its default (English).
+  language: Language | null
 }
 
 export type Me = User & { impersonating: boolean }

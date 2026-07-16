@@ -75,6 +75,15 @@ docker compose exec frontend npm install
   `localStorage` (with a pre-paint script in `index.html` to avoid a flash). It
   follows the OS preference until the user picks a flavour; the calendar starts
   weeks on Monday.
+- **Language**: the UI ships in English (the default) and Italian, chosen on the
+  profile page. Like the theme it is a per-user preference, saved server-side
+  (`users.language`) and mirrored to `localStorage` (`isachore-language`), so it
+  survives reloads and is re-applied on login on any device. Strings live in
+  `frontend/src/i18n/locales/{en,it}.json`, keyed Laravel-style (nested dot keys
+  such as `chores.title`); components read them with `useTranslation()` /
+  `t('chores.title')`. Dates follow the active locale (en → en-GB, it → it-IT).
+  Built on `react-i18next` + `i18next`. See the i18n conventions in `CLAUDE.md`
+  before adding new strings.
 - **Toasts**: `import { toast } from 'sonner'` and call `toast.success(...)`
   for success feedback; the single `<Toaster />` is mounted in `main.tsx`.
 
@@ -105,9 +114,10 @@ Every feature should ship with tests; both suites must pass before committing.
 
 The idea, step by step. Done so far: project scaffold, linters + pre-commit
 hook, Docker dev/prod, hello world at `/`, login page UI at `/login`, chores +
-users management UI, a shadcn/ui component kit with light/dark theming, and a
+users management UI, a shadcn/ui component kit with light/dark theming, a
 self-service profile page (name / password / avatar upload) reached from an
-avatar menu in the top bar.
+avatar menu in the top bar, and English/Italian UI translations (react-i18next)
+picked per user on the profile page.
 
 The app is organised into four areas (context for future work):
 

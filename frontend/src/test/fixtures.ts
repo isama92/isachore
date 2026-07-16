@@ -13,6 +13,7 @@ export function makeUser(overrides: Partial<User> = {}): User {
     avatar_url: null,
     theme: null,
     accent_color: null,
+    language: null,
     ...overrides,
   }
 }

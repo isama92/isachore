@@ -72,6 +72,43 @@ describe('Profile', () => {
     expect(document.documentElement.dataset.theme).toBe('mocha')
   })
 
+  it('saves a language choice via the language select and applies it', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    const fetchMock = mockFetch([{ path: '/api/v1/profile', method: 'PATCH', body: makeUser() }])
+    const { value } = renderWithProviders(<Profile />, { authValue: { user: makeUser() } })
+
+    await user.click(screen.getByRole('combobox', { name: 'Language' }))
+    const listbox = within(await screen.findByRole('listbox'))
+    await user.click(listbox.getByRole('option', { name: 'Italiano' }))
+
+    await waitFor(() => expect(value.refresh).toHaveBeenCalled())
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/profile',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ language: 'it' }),
+      }),
+    )
+    // The languageChanged listener mirrors the choice onto <html lang> and the
+    // page re-renders in Italian.
+    expect(document.documentElement.lang).toBe('it')
+    expect(screen.getByRole('heading', { name: 'Il tuo profilo' })).toBeInTheDocument()
+  })
+
+  it('rolls back and shows an inline error when the language save fails', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    mockFetch([{ path: '/api/v1/profile', method: 'PATCH', status: 400, body: { detail: 'Nope' } }])
+    renderWithProviders(<Profile />, { authValue: { user: makeUser() } })
+
+    await user.click(screen.getByRole('combobox', { name: 'Language' }))
+    const listbox = within(await screen.findByRole('listbox'))
+    await user.click(listbox.getByRole('option', { name: 'Italiano' }))
+
+    expect(await screen.findByText('Nope')).toBeInTheDocument()
+    // Optimistic switch rolled back to English.
+    await waitFor(() => expect(document.documentElement.lang).toBe('en'))
+  })
+
   it('rolls back and shows an inline error when the appearance save fails', async () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     mockFetch([{ path: '/api/v1/profile', method: 'PATCH', status: 400, body: { detail: 'Nope' } }])

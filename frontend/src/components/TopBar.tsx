@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { useAuth } from '../auth/useAuth'
@@ -16,13 +17,14 @@ import {
 
 export default function TopBar() {
   const { user, impersonating, logout, refresh } = useAuth()
+  const { t } = useTranslation()
   const navigate = useNavigate()
   if (!user) return null
 
   async function returnToAdmin() {
     try {
       await api.post('/api/v1/auth/stop-impersonating')
-      toast.success('Back to your account')
+      toast.success(t('topbar.backToAccount'))
     } catch {
       // If the parked admin session has expired the server ends both sessions
       // and returns 401; refresh() below then reflects the logged-out state and
@@ -50,17 +52,17 @@ export default function TopBar() {
               className="rounded-full font-bold"
               onClick={() => void returnToAdmin()}
             >
-              Return to admin
+              {t('topbar.returnToAdmin')}
             </Button>
           )}
           <Link to="/chores" className="text-sm font-bold text-primary hover:text-primary-dark">
-            Chores
+            {t('topbar.chores')}
           </Link>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                aria-label="Open user menu"
+                aria-label={t('topbar.openMenu')}
                 className="rounded-full outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50"
               >
                 <Avatar size="lg">
@@ -82,16 +84,16 @@ export default function TopBar() {
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={() => void navigate('/profile')}>
-                Profile
+                {t('topbar.profile')}
               </DropdownMenuItem>
               {user.is_admin && (
                 <DropdownMenuItem onSelect={() => void navigate('/admin/users')}>
-                  Admin
+                  {t('topbar.admin')}
                 </DropdownMenuItem>
               )}
               <DropdownMenuSeparator />
               <DropdownMenuItem variant="destructive" onSelect={() => void logout()}>
-                Log out
+                {t('topbar.logout')}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

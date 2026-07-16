@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
 import { api, ApiError } from '../lib/api'
-import { assignmentLabel, formatDate, repeatLabel } from '../lib/chores'
+import { formatDate } from '../lib/chores'
 import { fullName } from '../lib/user'
 import type { Chore } from '../lib/types'
 import { Button } from '@/components/ui/button'
@@ -28,6 +29,7 @@ import {
 } from '@/components/ui/table'
 
 export default function Chores() {
+  const { t } = useTranslation()
   const [chores, setChores] = useState<Chore[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -38,10 +40,10 @@ export default function Chores() {
         .get<Chore[]>('/api/v1/chores')
         .then((data) => setChores(data))
         .catch((err: unknown) => {
-          setError(err instanceof ApiError ? err.message : 'Failed to load chores')
+          setError(err instanceof ApiError ? err.message : t('chores.loadError'))
         })
         .finally(() => setLoading(false)),
-    [],
+    [t],
   )
 
   useEffect(() => {
@@ -52,45 +54,43 @@ export default function Chores() {
     setError(null)
     try {
       await api.del(`/api/v1/chores/${chore.id}`)
-      toast.success('Chore deleted')
+      toast.success(t('chores.deleted'))
       await load()
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Delete failed')
+      setError(err instanceof ApiError ? err.message : t('chores.deleteError'))
     }
   }
 
   return (
     <main className="mx-auto max-w-5xl px-5 py-8">
       <div className="mb-6 flex items-center justify-between">
-        <h1 className="font-display text-2xl font-bold tracking-tight">Chores</h1>
+        <h1 className="font-display text-2xl font-bold tracking-tight">{t('chores.title')}</h1>
         <Button asChild size="lg">
-          <Link to="/chores/new">New chore</Link>
+          <Link to="/chores/new">{t('chores.new')}</Link>
         </Button>
       </div>
 
       {error && <p className="mb-4 text-[13px] font-bold text-danger">{error}</p>}
 
       {loading ? (
-        <p className="font-medium text-muted-foreground">Loading…</p>
+        <p className="font-medium text-muted-foreground">{t('common.loading')}</p>
       ) : chores.length === 0 ? (
         <div className="rounded-2xl border border-line bg-card p-10 text-center">
-          <p className="font-semibold text-ink">No chores yet.</p>
-          <p className="mt-1 text-sm font-medium text-muted-foreground">
-            Add the first one with New chore above.
-          </p>
+          <p className="font-semibold text-ink">{t('chores.empty')}</p>
+          <p className="mt-1 text-sm font-medium text-muted-foreground">{t('chores.emptyHint')}</p>
         </div>
       ) : (
         <div className="overflow-hidden rounded-2xl border border-line bg-card">
           <Table className="min-w-[720px]">
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead>Title</TableHead>
-                <TableHead>Assignees</TableHead>
-                <TableHead>Repeats</TableHead>
-                <TableHead>Assignment</TableHead>
-                <TableHead>Tags</TableHead>
-                <TableHead>Start</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead>{t('chores.headers.title')}</TableHead>
+                <TableHead>{t('chores.headers.assignees')}</TableHead>
+                <TableHead>{t('chores.headers.repeats')}</TableHead>
+                <TableHead>{t('chores.headers.assignment')}</TableHead>
+                <TableHead>{t('chores.headers.tags')}</TableHead>
+                <TableHead>{t('chores.headers.start')}</TableHead>
+                <TableHead className="text-right">{t('chores.headers.actions')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -99,7 +99,7 @@ export default function Chores() {
                   <TableCell className="font-semibold">{c.title}</TableCell>
                   <TableCell>
                     {c.assignees.length === 0 ? (
-                      <span className="text-muted-foreground">Unassigned</span>
+                      <span className="text-muted-foreground">{t('chores.unassigned')}</span>
                     ) : (
                       <span className="flex flex-wrap gap-1.5">
                         {c.assignees.map((a) => (
@@ -112,27 +112,27 @@ export default function Chores() {
                   </TableCell>
                   <TableCell>
                     <Badge variant="secondary" className="text-primary">
-                      {repeatLabel(c.repeats)}
+                      {t(`options.repeat.${c.repeats}`)}
                     </Badge>
                   </TableCell>
                   <TableCell className="font-medium text-muted-foreground">
-                    {assignmentLabel(c.assignment_type)}
+                    {t(`options.assignment.${c.assignment_type}`)}
                   </TableCell>
                   <TableCell>
                     {c.tags.length === 0 ? (
-                      <span className="text-muted-foreground">None</span>
+                      <span className="text-muted-foreground">{t('chores.noTags')}</span>
                     ) : (
                       <span className="flex flex-wrap items-center gap-2">
-                        {c.tags.map((t) => (
+                        {c.tags.map((tag) => (
                           <span
-                            key={t.id}
+                            key={tag.id}
                             className="flex items-center gap-1.5 text-[13px] font-semibold"
                           >
                             <span
                               className="inline-block size-2.5 rounded-full"
-                              style={{ backgroundColor: t.color }}
+                              style={{ backgroundColor: tag.color }}
                             />
-                            {t.name}
+                            {tag.name}
                           </span>
                         ))}
                       </span>
@@ -150,20 +150,22 @@ export default function Chores() {
                           size="sm"
                           className="h-auto p-0 font-bold text-destructive hover:no-underline hover:opacity-80"
                         >
-                          Delete
+                          {t('chores.delete')}
                         </Button>
                       </AlertDialogTrigger>
                       <AlertDialogContent>
                         <AlertDialogHeader>
-                          <AlertDialogTitle>Delete “{c.title}”?</AlertDialogTitle>
+                          <AlertDialogTitle>
+                            {t('chores.deleteConfirm', { title: c.title })}
+                          </AlertDialogTitle>
                           <AlertDialogDescription>
-                            This chore will be permanently removed. This cannot be undone.
+                            {t('chores.deleteConfirmBody')}
                           </AlertDialogDescription>
                         </AlertDialogHeader>
                         <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
                           <AlertDialogAction variant="destructive" onClick={() => void remove(c)}>
-                            Delete chore
+                            {t('chores.deleteConfirmAction')}
                           </AlertDialogAction>
                         </AlertDialogFooter>
                       </AlertDialogContent>

@@ -1,6 +1,10 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
+// Initialise the i18next singleton so components calling useTranslation() render
+// (no provider wrapper needed). Default language is English, so string-asserting
+// tests keep matching en.json verbatim.
+import i18n from '../i18n/i18n'
 
 // jsdom lacks a handful of APIs that Radix UI primitives (dialog, select,
 // popover, ...) call. Define them as plain assignments, not vi.stubGlobal, so
@@ -41,4 +45,7 @@ afterEach(() => {
   document.documentElement.classList.remove('dark')
   document.documentElement.removeAttribute('data-theme')
   document.documentElement.removeAttribute('data-accent')
+  // The i18n instance is a module singleton that survives across tests; reset it
+  // to English so a test that switched to Italian cannot leak into the next.
+  void i18n.changeLanguage('en')
 })
