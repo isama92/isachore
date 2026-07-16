@@ -31,9 +31,12 @@ export type Chore = {
   tags: Tag[]
 }
 
+// The households endpoint only returns what the assignee picker needs.
+export type HouseholdMember = Pick<User, 'id' | 'name'>
+
 export type Household = {
   id: number
   name: string
   created_at: string
-  members: User[]
+  members: HouseholdMember[]
 }

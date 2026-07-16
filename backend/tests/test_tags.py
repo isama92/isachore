@@ -46,6 +46,15 @@ async def test_list_tags_scoped_to_household(
     assert [t["name"] for t in resp.json()] == ["mine-tag"]
 
 
+async def test_list_tags_without_household(make_user: MakeUser, auth_client: AuthClient) -> None:
+    user = await make_user()
+    client = await auth_client(user)
+
+    resp = await client.get("/api/v1/tags")
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "You are not a member of any household"
+
+
 async def test_list_tags_requires_auth(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/tags")
     assert resp.status_code == 401

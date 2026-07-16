@@ -88,6 +88,19 @@ async def test_create_chore_foreign_assignee_rejected(
     assert resp.json()["detail"] == "Assignees must be members of your household"
 
 
+async def test_create_chore_inactive_assignee_rejected(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    user = await make_user(email="me@example.com")
+    inactive = await make_user(email="ghost@example.com", is_active=False)
+    await make_household(name="Mine", members=[user, inactive])
+    client = await auth_client(user)
+
+    resp = await client.post("/api/v1/chores", json=_payload(assignee_ids=[inactive.id]))
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "Assignees must be members of your household"
+
+
 async def test_create_chore_foreign_tag_rejected(
     make_user: MakeUser,
     make_household: MakeHousehold,

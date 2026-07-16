@@ -29,7 +29,11 @@ async def _resolve_assignees(
     result = await session.execute(
         select(User)
         .join(household_members, household_members.c.user_id == User.id)
-        .where(household_members.c.household_id == household.id, User.id.in_(ids))
+        .where(
+            household_members.c.household_id == household.id,
+            User.id.in_(ids),
+            User.is_active.is_(True),
+        )
     )
     users = list(result.scalars())
     if len(users) != len(set(ids)):

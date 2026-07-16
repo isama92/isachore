@@ -2,7 +2,14 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { api, ApiError } from '../lib/api'
 import { assignmentOptions, repeatOptions, todayISO } from '../lib/chores'
-import type { AssignmentType, Chore, Household, RepeatPeriod, Tag, User } from '../lib/types'
+import type {
+  AssignmentType,
+  Chore,
+  Household,
+  HouseholdMember,
+  RepeatPeriod,
+  Tag,
+} from '../lib/types'
 
 type FormState = {
   title: string
@@ -28,7 +35,7 @@ function chipClass(selected: boolean): string {
 
 export default function ChoreCreate() {
   const navigate = useNavigate()
-  const [members, setMembers] = useState<User[]>([])
+  const [members, setMembers] = useState<HouseholdMember[]>([])
   const [tags, setTags] = useState<Tag[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
