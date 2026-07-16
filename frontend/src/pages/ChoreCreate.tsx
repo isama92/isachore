@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/select'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import type {
   AssignmentType,
   Chore,
@@ -37,13 +38,10 @@ type FormState = {
   tag_ids: number[]
 }
 
-function chipClass(selected: boolean): string {
-  return `flex items-center gap-2 rounded-full border-[1.5px] px-3 py-1.5 text-sm font-bold ${
-    selected
-      ? 'border-primary bg-primary text-white'
-      : 'border-line bg-card text-muted-foreground hover:border-primary'
-  }`
-}
+// Brand pill styling for the assignee/tag ToggleGroupItems; the on/off look is
+// driven by data-[state=on] instead of a selected flag.
+const chipItemClass =
+  'flex h-auto items-center gap-2 rounded-full border-[1.5px] border-line bg-card px-3 py-1.5 text-sm font-bold text-muted-foreground hover:border-primary hover:bg-card hover:text-muted-foreground data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-white'
 
 export default function ChoreCreate() {
   const navigate = useNavigate()
@@ -82,13 +80,6 @@ export default function ChoreCreate() {
       cancelled = true
     }
   }, [])
-
-  function toggle(key: 'assignee_ids' | 'tag_ids', id: number) {
-    setForm((f) => ({
-      ...f,
-      [key]: f[key].includes(id) ? f[key].filter((x) => x !== id) : [...f[key], id],
-    }))
-  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -143,24 +134,24 @@ export default function ChoreCreate() {
             />
           </div>
 
-          <div className="flex flex-col gap-2" role="group" aria-labelledby="assignees-label">
+          <div className="flex flex-col gap-2">
             <Label id="assignees-label">Assignees</Label>
             {members.length === 0 ? (
               <p className="text-sm font-medium text-muted-foreground">No household members yet.</p>
             ) : (
-              <div className="flex flex-wrap gap-2">
+              <ToggleGroup
+                type="multiple"
+                aria-labelledby="assignees-label"
+                value={form.assignee_ids.map(String)}
+                onValueChange={(ids) => setForm((f) => ({ ...f, assignee_ids: ids.map(Number) }))}
+                className="w-full flex-wrap"
+              >
                 {members.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => toggle('assignee_ids', m.id)}
-                    aria-pressed={form.assignee_ids.includes(m.id)}
-                    className={chipClass(form.assignee_ids.includes(m.id))}
-                  >
+                  <ToggleGroupItem key={m.id} value={String(m.id)} className={chipItemClass}>
                     {m.name}
-                  </button>
+                  </ToggleGroupItem>
                 ))}
-              </div>
+              </ToggleGroup>
             )}
           </div>
 
@@ -243,28 +234,28 @@ export default function ChoreCreate() {
             </Popover>
           </div>
 
-          <div className="flex flex-col gap-2" role="group" aria-labelledby="tags-label">
+          <div className="flex flex-col gap-2">
             <Label id="tags-label">Tags</Label>
             {tags.length === 0 ? (
               <p className="text-sm font-medium text-muted-foreground">No tags yet.</p>
             ) : (
-              <div className="flex flex-wrap gap-2">
+              <ToggleGroup
+                type="multiple"
+                aria-labelledby="tags-label"
+                value={form.tag_ids.map(String)}
+                onValueChange={(ids) => setForm((f) => ({ ...f, tag_ids: ids.map(Number) }))}
+                className="w-full flex-wrap"
+              >
                 {tags.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => toggle('tag_ids', t.id)}
-                    aria-pressed={form.tag_ids.includes(t.id)}
-                    className={chipClass(form.tag_ids.includes(t.id))}
-                  >
+                  <ToggleGroupItem key={t.id} value={String(t.id)} className={chipItemClass}>
                     <span
                       className="inline-block size-2.5 rounded-full"
                       style={{ backgroundColor: t.color }}
                     />
                     {t.name}
-                  </button>
+                  </ToggleGroupItem>
                 ))}
-              </div>
+              </ToggleGroup>
             )}
           </div>
 
