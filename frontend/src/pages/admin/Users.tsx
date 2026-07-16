@@ -22,7 +22,7 @@ const emptyForm: FormState = {
 }
 
 const inputClass =
-  'rounded-input border-[1.5px] border-line bg-white px-4 py-2.5 text-[15px] font-semibold placeholder:font-medium placeholder:text-placeholder focus:border-primary focus:outline-none'
+  'rounded-input border-[1.5px] border-line bg-card px-4 py-2.5 text-[15px] font-semibold placeholder:font-medium placeholder:text-placeholder focus:border-primary focus:outline-none'
 const labelClass = 'text-[11.5px] font-bold tracking-wide text-muted-foreground uppercase'
 const chipClass = 'rounded-full px-2.5 py-0.5 text-[11px] font-bold'
 
@@ -143,13 +143,13 @@ export default function Users() {
 
       {showForm && (
         <div
-          className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4"
+          className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"
           onClick={() => setShowForm(false)}
         >
           <form
             onSubmit={(e) => void onSubmit(e)}
             onClick={(e) => e.stopPropagation()}
-            className="flex w-full max-w-lg flex-col gap-4 rounded-2xl bg-white p-6 shadow-2xl"
+            className="flex w-full max-w-lg flex-col gap-4 rounded-2xl bg-card p-6 shadow-2xl"
           >
             <h2 className="font-display text-lg font-bold tracking-tight">
               {editing ? `Edit ${editing.name}` : 'New user'}
@@ -227,7 +227,7 @@ export default function Users() {
       {loading ? (
         <p className="font-medium text-muted-foreground">Loading…</p>
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-line bg-white">
+        <div className="overflow-x-auto rounded-2xl border border-line bg-card">
           <table className="w-full min-w-[640px] text-left text-sm">
             <thead>
               <tr className="border-b border-line text-[11.5px] font-bold tracking-wide text-muted-foreground uppercase">

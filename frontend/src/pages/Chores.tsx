@@ -53,14 +53,14 @@ export default function Chores() {
       {loading ? (
         <p className="font-medium text-muted-foreground">Loading…</p>
       ) : chores.length === 0 ? (
-        <div className="rounded-2xl border border-line bg-white p-10 text-center">
+        <div className="rounded-2xl border border-line bg-card p-10 text-center">
           <p className="font-semibold text-ink">No chores yet.</p>
           <p className="mt-1 text-sm font-medium text-muted-foreground">
             Add the first one with New chore above.
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-line bg-white">
+        <div className="overflow-x-auto rounded-2xl border border-line bg-card">
           <table className="w-full min-w-[720px] text-left text-sm">
             <thead>
               <tr className="border-b border-line text-[11.5px] font-bold tracking-wide text-muted-foreground uppercase">

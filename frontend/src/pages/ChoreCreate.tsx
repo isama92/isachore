@@ -23,14 +23,14 @@ type FormState = {
 }
 
 const inputClass =
-  'rounded-input border-[1.5px] border-line bg-white px-4 py-2.5 text-[15px] font-semibold placeholder:font-medium placeholder:text-placeholder focus:border-primary focus:outline-none'
+  'rounded-input border-[1.5px] border-line bg-card px-4 py-2.5 text-[15px] font-semibold placeholder:font-medium placeholder:text-placeholder focus:border-primary focus:outline-none'
 const labelClass = 'text-[11.5px] font-bold tracking-wide text-muted-foreground uppercase'
 
 function chipClass(selected: boolean): string {
   return `flex items-center gap-2 rounded-full border-[1.5px] px-3 py-1.5 text-sm font-bold ${
     selected
       ? 'border-primary bg-primary text-white'
-      : 'border-line bg-white text-muted-foreground hover:border-primary'
+      : 'border-line bg-card text-muted-foreground hover:border-primary'
   }`
 }
 

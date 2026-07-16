@@ -34,4 +34,8 @@ afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
+  // The theme provider writes localStorage and toggles the <html> class; reset
+  // both so a dark-mode test cannot leak into the next test's initial theme.
+  localStorage.clear()
+  document.documentElement.classList.remove('dark')
 })

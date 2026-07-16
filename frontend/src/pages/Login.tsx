@@ -61,7 +61,7 @@ export default function Login() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="rounded-input border-[1.5px] border-line bg-white px-4 py-3 text-[15px] font-semibold placeholder:font-medium placeholder:text-placeholder focus:border-primary focus:outline-none"
+              className="rounded-input border-[1.5px] border-line bg-card px-4 py-3 text-[15px] font-semibold placeholder:font-medium placeholder:text-placeholder focus:border-primary focus:outline-none"
             />
           </label>
 
@@ -77,7 +77,7 @@ export default function Login() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="rounded-input border-[1.5px] border-line bg-white px-4 py-3 text-[15px] font-semibold placeholder:font-medium placeholder:text-placeholder focus:border-primary focus:outline-none"
+              className="rounded-input border-[1.5px] border-line bg-card px-4 py-3 text-[15px] font-semibold placeholder:font-medium placeholder:text-placeholder focus:border-primary focus:outline-none"
             />
           </label>
 

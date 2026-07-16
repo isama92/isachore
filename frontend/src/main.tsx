@@ -6,13 +6,16 @@ import '@fontsource-variable/manrope/index.css'
 import './index.css'
 import App from './App'
 import AuthProvider from './auth/AuthProvider'
+import ThemeProvider from './theme/ThemeProvider'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter>
-      <AuthProvider>
-        <App />
-      </AuthProvider>
-    </BrowserRouter>
+    <ThemeProvider>
+      <BrowserRouter>
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+      </BrowserRouter>
+    </ThemeProvider>
   </StrictMode>,
 )

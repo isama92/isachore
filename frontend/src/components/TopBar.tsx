@@ -1,10 +1,13 @@
+import { Moon, Sun } from 'lucide-react'
 import { Link } from 'react-router'
 import { useAuth } from '../auth/useAuth'
+import { useTheme } from '../theme/useTheme'
 import { api } from '../lib/api'
 import { Button } from '@/components/ui/button'
 
 export default function TopBar() {
   const { user, impersonating, logout, refresh } = useAuth()
+  const { theme, toggleTheme } = useTheme()
   if (!user) return null
 
   async function returnToAdmin() {
@@ -20,7 +23,7 @@ export default function TopBar() {
   }
 
   return (
-    <header className="border-b border-line bg-white">
+    <header className="border-b border-line bg-card">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-3">
         <Link to="/" className="flex items-center gap-2">
           <span className="grid size-7 place-items-center rounded-lg bg-primary text-sm font-extrabold text-white shadow-logo">
@@ -54,6 +57,16 @@ export default function TopBar() {
           <span className="hidden text-sm font-medium text-muted-foreground sm:inline">
             {user.name}
           </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Toggle theme"
+            className="text-muted-foreground hover:text-foreground"
+            onClick={toggleTheme}
+          >
+            {theme === 'dark' ? <Sun /> : <Moon />}
+          </Button>
           <Button
             type="button"
             variant="ghost"
