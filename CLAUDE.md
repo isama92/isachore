@@ -31,7 +31,8 @@ overdue / due-today / due-soon views, JSON API for future mobile clients.
 - **Backend** (`backend/`): FastAPI, async SQLAlchemy 2 + asyncpg, Alembic,
   pydantic-settings. Python 3.13, managed with uv.
 - **Frontend** (`frontend/`): React 19 + TypeScript, Vite, Tailwind CSS v4,
-  react-router 8, npm.
+  react-router 8, npm. UI is built on shadcn/ui (radix-nova style, Radix UI);
+  the owned component code lives in `src/components/ui/`.
 - **DB**: PostgreSQL 18. **Redis** backs login rate limiting (reachable only as
   `redis:6379` on the compose network, not published to the host). **Docker** for
   dev and prod (multi-stage Dockerfiles, `compose.yml` dev / `compose.prod.yml` prod).
@@ -90,6 +91,22 @@ pre-commit run --all-files                         # what the git hook runs
   Tailwind v4 is CSS-first: there is NO tailwind.config.js and none should be
   added.
 - Import routing from `react-router` (v8) — never `react-router-dom`.
+- UI components: shadcn/ui (radix-nova style) live in
+  `frontend/src/components/ui/`, config in `components.json`. Import via the
+  `@/` alias (`@/components/ui/button`) and compose classes with `cn()`
+  (`@/lib/utils`). Add components with
+  `printf 'n\n' | npx shadcn@latest add <name>` from `frontend/` (see Gotchas
+  for the `n`). Several primitives are customised to the brand and you should
+  keep using them rather than raw HTML: Button (brand default variant +
+  `rounded-button`), Input/Textarea and the Select trigger (`rounded-input`,
+  `h-10`), Label + Table headers (uppercase micro-label), Calendar
+  (Monday-first). When a primitive needs brand radius/sizing, edit the
+  component itself — don't fight it with per-call classes (see Gotchas).
+- Theme/dark mode: `ThemeProvider` + `useTheme()` in `frontend/src/theme/`
+  (context/provider/hook split, same rule as `src/auth/`). Light mode is the
+  teal brand; dark is derived. The toggle is in `TopBar`. Toasts:
+  `toast.success(...)` from `sonner`; a single `<Toaster />` is mounted in
+  `main.tsx`. Feedback pattern: success -> toast, errors -> inline text.
 - Pages in `frontend/src/pages/`, one component per route.
 - UI mockups: `../isachore-design/Choreo Screens.dc.html` (login = variant 1a,
   "add chore" = variant 2a; variants are anchor ids in that file).
@@ -150,7 +167,33 @@ commit. Tests live in `backend/tests/` (pytest) and alongside the code as
   with promise chains where setState happens only inside `.then/.catch/.finally`
   callbacks (see `AuthProvider.tsx` / `Users.tsx` for the pattern).
 - react-refresh `only-export-components` + `--max-warnings=0`: keep React
-  context, provider component, and hook in separate files (see `src/auth/`).
+  context, provider component, and hook in separate files (see `src/auth/` and
+  `src/theme/`). shadcn `ui/**` files co-export a component plus its cva
+  variants; an eslint override for `src/components/ui/**` permits that, so leave
+  those files in their canonical shape.
+- Adding a shadcn component re-pulls its registry deps and offers to overwrite
+  the brand-customised `button.tsx` — always decline
+  (`printf 'n\n' | npx shadcn@latest add <name>`), then double-install if
+  `package.json` changed (host + `docker compose exec frontend npm install`).
+  The radix-nova style ships `@import 'shadcn/tailwind.css'` (the `shadcn`
+  runtime dep supplies the `data-open`/`data-checked`/... variants the
+  components rely on), plus the unified `radix-ui` package and `tw-animate-css`
+  — don't remove them.
+- The shadcn radius scale (`--radius-sm/md/lg/...`) is deliberately NOT
+  redefined in `index.css`; brand roundness comes from `rounded-input` (13px) /
+  `rounded-button` (15px). tailwind-merge does not dedupe those custom radius
+  tokens against a base `rounded-*`, so set radius (and height) in the
+  component's own class string, as Button/Input/Select already do — not via a
+  call-site `className`.
+- Testing Radix components in jsdom: build the user with
+  `userEvent.setup({ pointerEventsCheck: 0 })` (Radix sets `pointer-events:none`
+  on the body when a modal opens) and query portaled content with
+  `within(await screen.findByRole('dialog' | 'alertdialog'))` /
+  `findByRole('option')`. The required jsdom stubs (`hasPointerCapture`,
+  `scrollIntoView`, `ResizeObserver`, `matchMedia`) are in `src/test/setup.ts`
+  — don't remove them. `renderWithProviders` wraps `ThemeProvider`, and its
+  `afterEach` clears `localStorage` + the `.dark` class so theme state can't
+  leak between tests.
 - FastAPI 0.139 registers included routers lazily; to introspect routes use
   `app.openapi()['paths']`, not `app.routes`.
 - Alembic files generated inside the container are root-owned on the host:
