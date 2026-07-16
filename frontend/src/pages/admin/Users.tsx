@@ -17,6 +17,15 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Checkbox } from '@/components/ui/checkbox'
 
 type FormState = {
   email: string
@@ -145,19 +154,21 @@ export default function Users() {
 
       {error && !showForm && <p className="mb-4 text-[13px] font-bold text-danger">{error}</p>}
 
-      {showForm && (
-        <div
-          className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"
-          onClick={() => setShowForm(false)}
-        >
-          <form
-            onSubmit={(e) => void onSubmit(e)}
-            onClick={(e) => e.stopPropagation()}
-            className="flex w-full max-w-lg flex-col gap-4 rounded-2xl bg-card p-6 shadow-2xl"
-          >
-            <h2 className="font-display text-lg font-bold tracking-tight">
-              {editing ? `Edit ${editing.name}` : 'New user'}
-            </h2>
+      <Dialog
+        open={showForm}
+        onOpenChange={(open) => {
+          setShowForm(open)
+          if (!open) setError(null)
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
+            <DialogHeader>
+              <DialogTitle>{editing ? `Edit ${editing.name}` : 'New user'}</DialogTitle>
+              <DialogDescription className="sr-only">
+                {editing ? 'Update this account.' : 'Create a new household member.'}
+              </DialogDescription>
+            </DialogHeader>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="user-name">Name</Label>
@@ -191,42 +202,50 @@ export default function Users() {
                 />
               </div>
               <div className="flex items-center gap-5 self-end pb-3">
-                <label className="flex items-center gap-2.5">
-                  <input
-                    type="checkbox"
+                <div className="flex items-center gap-2.5">
+                  <Checkbox
+                    id="is-admin"
                     checked={form.is_admin}
                     disabled={editing?.id === me?.id}
-                    onChange={(e) => setForm({ ...form, is_admin: e.target.checked })}
-                    className="size-4 accent-(--color-primary)"
+                    onCheckedChange={(v) => setForm({ ...form, is_admin: v === true })}
                   />
-                  <span className="text-sm font-bold text-ink">Admin</span>
-                </label>
+                  <Label
+                    htmlFor="is-admin"
+                    className="text-sm font-bold tracking-normal text-foreground normal-case"
+                  >
+                    Admin
+                  </Label>
+                </div>
                 {editing && (
-                  <label className="flex items-center gap-2.5">
-                    <input
-                      type="checkbox"
+                  <div className="flex items-center gap-2.5">
+                    <Checkbox
+                      id="is-active"
                       checked={form.is_active}
                       disabled={editing.id === me?.id}
-                      onChange={(e) => setForm({ ...form, is_active: e.target.checked })}
-                      className="size-4 accent-(--color-primary)"
+                      onCheckedChange={(v) => setForm({ ...form, is_active: v === true })}
                     />
-                    <span className="text-sm font-bold text-ink">Active</span>
-                  </label>
+                    <Label
+                      htmlFor="is-active"
+                      className="text-sm font-bold tracking-normal text-foreground normal-case"
+                    >
+                      Active
+                    </Label>
+                  </div>
                 )}
               </div>
             </div>
             {error && <p className="text-[13px] font-bold text-danger">{error}</p>}
-            <div className="flex gap-3">
-              <Button type="submit" size="lg" disabled={saving}>
-                {saving ? 'Saving…' : 'Save'}
-              </Button>
+            <DialogFooter>
               <Button type="button" variant="ghost" size="lg" onClick={() => setShowForm(false)}>
                 Cancel
               </Button>
-            </div>
+              <Button type="submit" size="lg" disabled={saving}>
+                {saving ? 'Saving…' : 'Save'}
+              </Button>
+            </DialogFooter>
           </form>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
 
       {loading ? (
         <p className="font-medium text-muted-foreground">Loading…</p>

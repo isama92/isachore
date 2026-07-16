@@ -36,14 +36,16 @@ describe('Users', () => {
       return jsonBody([me])
     })
     vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderWithProviders(<Users />, { authValue: { user: me } })
     await screen.findByText('Admin User')
 
-    await userEvent.click(screen.getByRole('button', { name: 'Add user' }))
-    await userEvent.type(screen.getByLabelText('Name'), 'New Person')
-    await userEvent.type(screen.getByLabelText('Email'), 'new@example.com')
-    await userEvent.type(screen.getByLabelText('Password'), 'password12345')
-    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await user.click(screen.getByRole('button', { name: 'Add user' }))
+    await user.type(await screen.findByLabelText('Name'), 'New Person')
+    await user.type(screen.getByLabelText('Email'), 'new@example.com')
+    await user.type(screen.getByLabelText('Password'), 'password12345')
+    await user.click(screen.getByRole('checkbox', { name: 'Admin' }))
+    await user.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -55,6 +57,7 @@ describe('Users', () => {
       email: 'new@example.com',
       name: 'New Person',
       password: 'password12345',
+      is_admin: true,
     })
   })
 
@@ -64,11 +67,12 @@ describe('Users', () => {
       return jsonBody([me, member])
     })
     vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderWithProviders(<Users />, { authValue: { user: me } })
     await screen.findByText('Bob Member')
 
-    await userEvent.click(screen.getAllByRole('button', { name: 'Edit' })[1])
-    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await user.click(screen.getAllByRole('button', { name: 'Edit' })[1])
+    await user.click(await screen.findByRole('button', { name: 'Save' }))
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -87,12 +91,13 @@ describe('Users', () => {
       return jsonBody([me, member])
     })
     vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderWithProviders(<Users />, { authValue: { user: me } })
     await screen.findByText('Bob Member')
 
-    await userEvent.click(screen.getAllByRole('button', { name: 'Edit' })[1])
-    await userEvent.type(screen.getByLabelText('Password'), 'brandnew12345')
-    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await user.click(screen.getAllByRole('button', { name: 'Edit' })[1])
+    await user.type(await screen.findByLabelText('Password'), 'brandnew12345')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -167,6 +172,7 @@ describe('Users', () => {
 
   it('protects the current user from self login-as, deactivate, and role edits', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonBody([me, member])))
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderWithProviders(<Users />, { authValue: { user: me } })
     await screen.findByText('Admin User')
 
@@ -175,10 +181,10 @@ describe('Users', () => {
     expect(screen.getAllByRole('button', { name: 'Deactivate' })).toHaveLength(1)
 
     // Editing yourself disables the Admin and Active toggles
-    await userEvent.click(screen.getAllByRole('button', { name: 'Edit' })[0])
-    const modal = screen.getByRole('heading', { name: /Edit Admin User/ }).closest('form')!
-    expect(within(modal).getByRole('checkbox', { name: 'Admin' })).toBeDisabled()
-    expect(within(modal).getByRole('checkbox', { name: 'Active' })).toBeDisabled()
+    await user.click(screen.getAllByRole('button', { name: 'Edit' })[0])
+    const dialog = await screen.findByRole('dialog', { name: /Edit Admin User/ })
+    expect(within(dialog).getByRole('checkbox', { name: 'Admin' })).toBeDisabled()
+    expect(within(dialog).getByRole('checkbox', { name: 'Active' })).toBeDisabled()
   })
 })
 
