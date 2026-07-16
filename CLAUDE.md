@@ -13,6 +13,14 @@ overdue / due-today / due-soon views, JSON API for future mobile clients.
   `pytest` cases, frontend components/pages get `vitest` cases, covering the
   negative paths too (not just the happy one). Both suites must be green before
   you commit. See Verification for how to run them.
+- Once the suites are green and before you commit a completed step, run a
+  read-only review subagent over the uncommitted changes (`git status` /
+  `git diff` / `git diff --staged`). Brief it explicitly, because it starts with
+  none of this conversation's context: what the feature should do, its
+  acceptance criteria, and to follow this CLAUDE.md for conventions. It reports
+  findings only and must not edit files. Then triage the report yourself: fix the
+  real issues, skip the false positives, and note what you decided before moving
+  on. Re-run the suites if a fix touched code, then commit.
 - Commit per completed step (descriptive message; the pre-commit hook must pass).
 - Keep the standard ports (5173/8000/5432 dev, 80 prod). If a port is taken,
   another local project's stack probably holds it — never remap isachore's
