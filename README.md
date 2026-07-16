@@ -77,18 +77,13 @@ The app is organised into four areas (context for future work):
 - **Chores management**: manage the household's chores.
 - **Tags management**: create, edit and delete tags.
 
-- [x] User model + first Alembic migration (`users`, `auth_tokens`)
-- [x] Auth backend: cookie login/logout with DB-backed opaque tokens, `create-admin` CLI, login page wired
-- [x] Admin section: users CRUD at `/admin/users` (create, edit, deactivate/reactivate, login as)
-- [x] Household / chore / tag models + migration (n-m households, chores, tags; single seeded household)
-- [x] Chores table page — list all chores of the household (`/chores`)
-- [x] Chore creation page — add a chore (assignees, rotation, tags, period, start date) (`/chores/new`)
 - [ ] Tags management (create/edit/delete tags)
+- [ ] Household crud
 - [ ] Admin: server settings
 - [ ] Due views: what is **overdue**, what has to be done **today**, what is due **in a few days**
+- [ ] chores changes log (see who changed the chores)
 - [ ] Mark chore as done / completion history
 - [ ] API keys for mobile / 3rd-party clients (reuse `auth_tokens` via `Authorization: Bearer`)
-- [x] Tests: pytest (backend) + vitest (frontend)
 - [ ] CI (lint + test on push)
 - [ ] Prod deploy hardening (TLS, real secrets management, DB backups)
 
