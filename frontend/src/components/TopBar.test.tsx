@@ -27,6 +27,11 @@ describe('TopBar', () => {
     expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument()
   })
 
+  it('shows the chores link for any user', () => {
+    renderWithProviders(<TopBar />, { authValue: { user: makeUser({ is_admin: false }) } })
+    expect(screen.getByRole('link', { name: 'Chores' })).toHaveAttribute('href', '/chores')
+  })
+
   it('returns to the admin session when impersonating', async () => {
     const fetchMock = mockFetch([
       { path: '/api/v1/auth/stop-impersonating', method: 'POST', body: makeUser() },

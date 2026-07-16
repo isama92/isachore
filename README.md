@@ -81,7 +81,7 @@ The app is organised into four areas (context for future work):
 - [x] Auth backend: cookie login/logout with DB-backed opaque tokens, `create-admin` CLI, login page wired
 - [x] Admin section: users CRUD at `/admin/users` (create, edit, deactivate/reactivate, login as)
 - [x] Household / chore / tag models + migration (n-m households, chores, tags; single seeded household)
-- [ ] Chores table page — list all chores of the household
+- [x] Chores table page — list all chores of the household (`/chores`)
 - [ ] Chore creation page — add a chore (assignees, rotation, tags, period, start date)
 - [ ] Tags management (create/edit/delete tags)
 - [ ] Admin: server settings

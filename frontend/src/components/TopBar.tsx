@@ -32,6 +32,9 @@ export default function TopBar() {
               Return to admin
             </button>
           )}
+          <Link to="/chores" className="text-sm font-bold text-primary hover:text-primary-dark">
+            Chores
+          </Link>
           {user.is_admin && (
             <Link
               to="/admin/users"
