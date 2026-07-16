@@ -1,5 +1,6 @@
 import { Link } from 'react-router'
 import { useAuth } from '../auth/useAuth'
+import { Button } from '@/components/ui/button'
 
 export default function Home() {
   const { user } = useAuth()
@@ -12,12 +13,9 @@ export default function Home() {
         <p className="mt-2 font-medium text-muted-foreground">
           Your due view lands here soon. For now, manage the household chores.
         </p>
-        <Link
-          to="/chores"
-          className="mt-6 inline-block rounded-button bg-primary px-5 py-2.5 text-sm font-extrabold text-white shadow-glow hover:bg-primary-dark"
-        >
-          Manage chores
-        </Link>
+        <Button asChild size="lg" className="mt-6">
+          <Link to="/chores">Manage chores</Link>
+        </Button>
       </div>
     </main>
   )

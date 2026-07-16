@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import { api, ApiError } from '../lib/api'
 import { assignmentLabel, formatDate, repeatLabel } from '../lib/chores'
 import type { Chore } from '../lib/types'
+import { Button } from '@/components/ui/button'
 
 const chipClass = 'rounded-full px-2.5 py-0.5 text-[11px] font-bold'
 
@@ -42,12 +43,9 @@ export default function Chores() {
     <main className="mx-auto max-w-5xl px-5 py-8">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="font-display text-2xl font-bold tracking-tight">Chores</h1>
-        <Link
-          to="/chores/new"
-          className="rounded-button bg-primary px-4 py-2 text-sm font-extrabold text-white shadow-glow hover:bg-primary-dark"
-        >
-          New chore
-        </Link>
+        <Button asChild size="lg">
+          <Link to="/chores/new">New chore</Link>
+        </Button>
       </div>
 
       {error && <p className="mb-4 text-[13px] font-bold text-danger">{error}</p>}
@@ -124,12 +122,15 @@ export default function Chores() {
                     {formatDate(c.start_date)}
                   </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
-                    <button
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="sm"
+                      className="h-auto p-0 font-bold text-destructive hover:no-underline hover:opacity-80"
                       onClick={() => void remove(c)}
-                      className="font-bold text-danger hover:opacity-80"
                     >
                       Delete
-                    </button>
+                    </Button>
                   </td>
                 </tr>
               ))}

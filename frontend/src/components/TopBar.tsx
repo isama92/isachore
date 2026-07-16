@@ -1,6 +1,7 @@
 import { Link } from 'react-router'
 import { useAuth } from '../auth/useAuth'
 import { api } from '../lib/api'
+import { Button } from '@/components/ui/button'
 
 export default function TopBar() {
   const { user, impersonating, logout, refresh } = useAuth()
@@ -29,12 +30,15 @@ export default function TopBar() {
         </Link>
         <nav className="flex items-center gap-4">
           {impersonating && (
-            <button
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              className="rounded-full font-bold"
               onClick={() => void returnToAdmin()}
-              className="rounded-full bg-danger/10 px-3 py-1 text-[12px] font-bold text-danger hover:bg-danger/20"
             >
               Return to admin
-            </button>
+            </Button>
           )}
           <Link to="/chores" className="text-sm font-bold text-primary hover:text-primary-dark">
             Chores
@@ -50,12 +54,15 @@ export default function TopBar() {
           <span className="hidden text-sm font-medium text-muted-foreground sm:inline">
             {user.name}
           </span>
-          <button
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="font-bold text-muted-foreground hover:text-foreground"
             onClick={() => void logout()}
-            className="text-sm font-bold text-muted-foreground hover:text-ink"
           >
             Log out
-          </button>
+          </Button>
         </nav>
       </div>
     </header>

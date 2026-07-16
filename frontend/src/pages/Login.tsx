@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Navigate, useLocation } from 'react-router'
 import { useAuth } from '../auth/useAuth'
 import { ApiError } from '../lib/api'
+import { Button } from '@/components/ui/button'
 
 export default function Login() {
   const { user, loading, login } = useAuth()
@@ -82,13 +83,14 @@ export default function Login() {
 
           {error && <p className="text-[13px] font-bold text-danger">{error}</p>}
 
-          <button
+          <Button
             type="submit"
+            size="lg"
             disabled={submitting}
-            className="rounded-button bg-primary p-[15px] text-[15.5px] font-extrabold text-white shadow-glow transition hover:bg-primary-dark disabled:opacity-60"
+            className="h-11 w-full text-[15.5px]"
           >
             {submitting ? 'Signing in…' : 'Sign in'}
-          </button>
+          </Button>
         </form>
 
         <p className="mt-6 text-center text-[13.5px] font-medium text-muted-foreground">

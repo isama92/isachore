@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router'
 import { useAuth } from '../../auth/useAuth'
 import { api, ApiError } from '../../lib/api'
 import type { User } from '../../lib/types'
+import { Button } from '@/components/ui/button'
 
 type FormState = {
   email: string
@@ -133,12 +134,9 @@ export default function Users() {
     <main className="mx-auto max-w-5xl px-5 py-8">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="font-display text-2xl font-bold tracking-tight">Users</h1>
-        <button
-          onClick={openCreate}
-          className="rounded-button bg-primary px-4 py-2 text-sm font-extrabold text-white shadow-glow hover:bg-primary-dark"
-        >
+        <Button type="button" size="lg" onClick={openCreate}>
           Add user
-        </button>
+        </Button>
       </div>
 
       {error && !showForm && <p className="mb-4 text-[13px] font-bold text-danger">{error}</p>}
@@ -215,20 +213,12 @@ export default function Users() {
             </div>
             {error && <p className="text-[13px] font-bold text-danger">{error}</p>}
             <div className="flex gap-3">
-              <button
-                type="submit"
-                disabled={saving}
-                className="rounded-button bg-primary px-5 py-2.5 text-sm font-extrabold text-white shadow-glow hover:bg-primary-dark disabled:opacity-60"
-              >
+              <Button type="submit" size="lg" disabled={saving}>
                 {saving ? 'Saving…' : 'Save'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowForm(false)}
-                className="rounded-button px-5 py-2.5 text-sm font-bold text-muted-foreground hover:text-ink"
-              >
+              </Button>
+              <Button type="button" variant="ghost" size="lg" onClick={() => setShowForm(false)}>
                 Cancel
-              </button>
+              </Button>
             </div>
           </form>
         </div>
@@ -274,34 +264,46 @@ export default function Users() {
                   </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
                     {u.id !== me?.id && u.is_active && (
-                      <button
+                      <Button
+                        type="button"
+                        variant="link"
+                        size="sm"
+                        className="mr-3 h-auto p-0 font-bold text-muted-foreground hover:text-foreground hover:no-underline"
                         onClick={() => void loginAs(u)}
-                        className="mr-3 font-bold text-muted-foreground hover:text-ink"
                       >
                         Login as
-                      </button>
+                      </Button>
                     )}
-                    <button
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="sm"
+                      className="h-auto p-0 font-bold hover:text-primary-dark hover:no-underline"
                       onClick={() => openEdit(u)}
-                      className="font-bold text-primary hover:text-primary-dark"
                     >
                       Edit
-                    </button>
+                    </Button>
                     {u.id !== me?.id &&
                       (u.is_active ? (
-                        <button
+                        <Button
+                          type="button"
+                          variant="link"
+                          size="sm"
+                          className="ml-3 h-auto p-0 font-bold text-destructive hover:no-underline hover:opacity-80"
                           onClick={() => void setActive(u, false)}
-                          className="ml-3 font-bold text-danger hover:opacity-80"
                         >
                           Deactivate
-                        </button>
+                        </Button>
                       ) : (
-                        <button
+                        <Button
+                          type="button"
+                          variant="link"
+                          size="sm"
+                          className="ml-3 h-auto p-0 font-bold hover:text-primary-dark hover:no-underline"
                           onClick={() => void setActive(u, true)}
-                          className="ml-3 font-bold text-primary hover:text-primary-dark"
                         >
                           Reactivate
-                        </button>
+                        </Button>
                       ))}
                   </td>
                 </tr>

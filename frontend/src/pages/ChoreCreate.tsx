@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { api, ApiError } from '../lib/api'
 import { assignmentOptions, repeatOptions, todayISO } from '../lib/chores'
+import { Button } from '@/components/ui/button'
 import type {
   AssignmentType,
   Chore,
@@ -223,19 +224,12 @@ export default function ChoreCreate() {
           {error && <p className="text-[13px] font-bold text-danger">{error}</p>}
 
           <div className="flex gap-3">
-            <button
-              type="submit"
-              disabled={saving}
-              className="rounded-button bg-primary px-5 py-2.5 text-sm font-extrabold text-white shadow-glow hover:bg-primary-dark disabled:opacity-60"
-            >
+            <Button type="submit" size="lg" disabled={saving}>
               {saving ? 'Saving…' : 'Add chore'}
-            </button>
-            <Link
-              to="/chores"
-              className="rounded-button px-5 py-2.5 text-sm font-bold text-muted-foreground hover:text-ink"
-            >
-              Cancel
-            </Link>
+            </Button>
+            <Button asChild variant="ghost" size="lg">
+              <Link to="/chores">Cancel</Link>
+            </Button>
           </div>
         </form>
       )}
