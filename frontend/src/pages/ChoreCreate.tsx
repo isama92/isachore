@@ -1,7 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
+import { format } from 'date-fns'
+import { CalendarIcon } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
-import { assignmentOptions, repeatOptions, todayISO } from '../lib/chores'
+import { assignmentOptions, formatDate, repeatOptions, todayISO } from '../lib/chores'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -13,6 +15,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Calendar } from '@/components/ui/calendar'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import type {
   AssignmentType,
   Chore,
@@ -32,11 +36,6 @@ type FormState = {
   tag_ids: number[]
 }
 
-// Retained for the still-native date input, which becomes a date picker in a
-// later step.
-const inputClass =
-  'rounded-input border-[1.5px] border-line bg-card px-4 py-2.5 text-[15px] font-semibold placeholder:font-medium placeholder:text-placeholder focus:border-primary focus:outline-none'
-
 function chipClass(selected: boolean): string {
   return `flex items-center gap-2 rounded-full border-[1.5px] px-3 py-1.5 text-sm font-bold ${
     selected
@@ -52,6 +51,7 @@ export default function ChoreCreate() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [dateOpen, setDateOpen] = useState(false)
   const [form, setForm] = useState<FormState>(() => ({
     title: '',
     description: '',
@@ -211,15 +211,34 @@ export default function ChoreCreate() {
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="start_date">Start date</Label>
-            <input
-              type="date"
-              id="start_date"
-              required
-              value={form.start_date}
-              onChange={(e) => setForm({ ...form, start_date: e.target.value })}
-              className={inputClass}
-            />
+            <Label id="start-date-label" htmlFor="start-date">
+              Start date
+            </Label>
+            <Popover open={dateOpen} onOpenChange={setDateOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  id="start-date"
+                  type="button"
+                  aria-labelledby="start-date-label start-date-value"
+                  className="flex h-10 w-full items-center justify-between rounded-input border border-input bg-transparent px-3 text-base outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30"
+                >
+                  <span id="start-date-value">{formatDate(form.start_date)}</span>
+                  <CalendarIcon className="size-4 text-muted-foreground" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  required
+                  selected={new Date(`${form.start_date}T00:00:00`)}
+                  onSelect={(d) => {
+                    if (d) setForm({ ...form, start_date: format(d, 'yyyy-MM-dd') })
+                    setDateOpen(false)
+                  }}
+                  autoFocus
+                />
+              </PopoverContent>
+            </Popover>
           </div>
 
           <div className="flex flex-col gap-2" role="group" aria-labelledby="tags-label">
