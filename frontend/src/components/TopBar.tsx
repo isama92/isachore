@@ -1,5 +1,6 @@
 import { Moon, Sun } from 'lucide-react'
 import { Link } from 'react-router'
+import { toast } from 'sonner'
 import { useAuth } from '../auth/useAuth'
 import { useTheme } from '../theme/useTheme'
 import { api } from '../lib/api'
@@ -13,6 +14,7 @@ export default function TopBar() {
   async function returnToAdmin() {
     try {
       await api.post('/api/v1/auth/stop-impersonating')
+      toast.success('Back to your account')
     } catch {
       // If the parked admin session has expired the server ends both sessions
       // and returns 401; refresh() below then reflects the logged-out state and

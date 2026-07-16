@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { toast } from 'sonner'
 import Chores from './Chores'
 import { jsonResponse, mockFetch, renderWithProviders } from '../test/utils'
 import { makeChore, makeTag, makeUser } from '../test/fixtures'
@@ -45,6 +46,7 @@ describe('Chores', () => {
 
   it('deletes a chore after confirming in the dialog and reloads', async () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
+    const toastSpy = vi.spyOn(toast, 'success')
     let deleted = false
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input.toString()
@@ -70,6 +72,7 @@ describe('Chores', () => {
       ),
     )
     expect(await screen.findByText('No chores yet.')).toBeInTheDocument()
+    expect(toastSpy).toHaveBeenCalledWith('Chore deleted')
   })
 
   it('does not delete when the dialog is cancelled', async () => {

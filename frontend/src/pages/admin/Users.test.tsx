@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router'
+import { toast } from 'sonner'
 import Users from './Users'
 import { renderWithProviders } from '../../test/utils'
 import { makeUser } from '../../test/fixtures'
@@ -37,6 +38,7 @@ describe('Users', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup({ pointerEventsCheck: 0 })
+    const toastSpy = vi.spyOn(toast, 'success')
     renderWithProviders(<Users />, { authValue: { user: me } })
     await screen.findByText('Admin User')
 
@@ -59,6 +61,7 @@ describe('Users', () => {
       password: 'password12345',
       is_admin: true,
     })
+    expect(toastSpy).toHaveBeenCalledWith('User created')
   })
 
   it('omits the password on edit when left blank', async () => {
@@ -145,6 +148,7 @@ describe('Users', () => {
       return jsonBody([me, member])
     })
     vi.stubGlobal('fetch', fetchMock)
+    const toastSpy = vi.spyOn(toast, 'success')
     renderWithProviders(<Users />, { authValue: { user: me } })
     await screen.findByText('Bob Member')
 
@@ -168,6 +172,7 @@ describe('Users', () => {
         expect.objectContaining({ method: 'DELETE' }),
       ),
     )
+    expect(toastSpy).toHaveBeenCalledWith('User deactivated')
   })
 
   it('protects the current user from self login-as, deactivate, and role edits', async () => {

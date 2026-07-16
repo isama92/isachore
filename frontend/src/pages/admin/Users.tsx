@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router'
+import { toast } from 'sonner'
 import { useAuth } from '../../auth/useAuth'
 import { api, ApiError } from '../../lib/api'
 import type { User } from '../../lib/types'
@@ -116,6 +117,7 @@ export default function Users() {
       } else {
         await api.post<User>('/api/v1/users', form)
       }
+      toast.success(editing ? 'User updated' : 'User created')
       setShowForm(false)
       await load()
     } catch (err) {
@@ -129,6 +131,7 @@ export default function Users() {
     setError(null)
     try {
       await api.post<User>(`/api/v1/users/${u.id}/impersonate`)
+      toast.success(`Viewing as ${u.name}`)
       await refresh()
       await navigate('/')
     } catch (err) {
@@ -144,6 +147,7 @@ export default function Users() {
       } else {
         await api.del(`/api/v1/users/${u.id}`)
       }
+      toast.success(active ? 'User reactivated' : 'User deactivated')
       await load()
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Update failed')

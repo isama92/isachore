@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router'
+import { toast } from 'sonner'
 import { api, ApiError } from '../lib/api'
 import { assignmentLabel, formatDate, repeatLabel } from '../lib/chores'
 import type { Chore } from '../lib/types'
@@ -50,6 +51,7 @@ export default function Chores() {
     setError(null)
     try {
       await api.del(`/api/v1/chores/${chore.id}`)
+      toast.success('Chore deleted')
       await load()
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Delete failed')

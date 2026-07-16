@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { format } from 'date-fns'
 import { CalendarIcon } from 'lucide-react'
+import { toast } from 'sonner'
 import { api, ApiError } from '../lib/api'
 import { assignmentOptions, formatDate, repeatOptions, todayISO } from '../lib/chores'
 import { Button } from '@/components/ui/button'
@@ -103,6 +104,7 @@ export default function ChoreCreate() {
         assignee_ids: form.assignee_ids,
         tag_ids: form.tag_ids,
       })
+      toast.success('Chore created')
       await navigate('/chores')
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not create the chore')
