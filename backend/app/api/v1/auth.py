@@ -5,10 +5,17 @@ from sqlalchemy import delete, select
 
 from app.api.deps import (
     CurrentUser,
+    RedisDep,
     SessionDep,
     get_impersonator,
     get_request_token,
     get_user_by_token,
+)
+from app.core.rate_limit import (
+    clear_login_failures,
+    client_ip,
+    enforce_login_rate_limit,
+    record_login_failure,
 )
 from app.core.security import (
     ADMIN_COOKIE_NAME,
@@ -27,7 +34,19 @@ router = APIRouter()
 
 
 @router.post("/login", response_model=UserRead)
-async def login(payload: LoginRequest, session: SessionDep, response: Response) -> User:
+async def login(
+    payload: LoginRequest,
+    session: SessionDep,
+    redis: RedisDep,
+    request: Request,
+    response: Response,
+) -> User:
+    ip = client_ip(request)
+    # Throttle key is case-insensitive so a differently-cased email can't sidestep
+    # the lockout (user lookup itself stays case-sensitive; see L3).
+    email = payload.email.lower()
+    await enforce_login_rate_limit(redis, email=email, ip=ip)
+
     result = await session.execute(select(User).where(User.email == payload.email))
     user = result.scalar_one_or_none()
 
@@ -35,6 +54,7 @@ async def login(payload: LoginRequest, session: SessionDep, response: Response) 
         payload.password, user.password_hash if user else DUMMY_PASSWORD_HASH
     )
     if user is None or not password_ok or not user.is_active:
+        await record_login_failure(redis, email=email, ip=ip)
         # One message for every failure mode so emails can't be enumerated
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
@@ -50,6 +70,7 @@ async def login(payload: LoginRequest, session: SessionDep, response: Response) 
     )
     await session.commit()
 
+    await clear_login_failures(redis, email=email)
     set_auth_cookie(response, token)
     clear_auth_cookie(response, ADMIN_COOKIE_NAME)
     return user

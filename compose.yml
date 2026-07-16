@@ -18,17 +18,33 @@ services:
       retries: 10
       start_period: 10s
 
+  redis:
+    image: redis:8-alpine
+    # Backs login rate limiting. Not published to the host (reachable only as
+    # "redis:6379" on the compose network) so it can't collide with another stack.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
   backend:
     build:
       context: ./backend
       target: dev
     env_file: .env
+    environment:
+      # In-network Redis host; overrides any REDIS_URL from .env.
+      REDIS_URL: redis://redis:6379/0
     ports:
       - "8000:8000"
     volumes:
       - ./backend:/app
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   frontend:

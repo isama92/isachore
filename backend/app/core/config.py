@@ -19,5 +19,21 @@ class Settings(BaseSettings):
         "postgresql+asyncpg://isachore:isachore_dev_password@localhost:5432/isachore"
     )
 
+    # Redis backs login rate limiting (M2). Default targets localhost for
+    # host-side tooling; docker compose overrides the host to "redis".
+    redis_url: str = "redis://localhost:6379/0"
+
+    # Login throttling: after this many failed attempts within the window, /login
+    # returns 429 until the window elapses. Counted per attempted email and (more
+    # loosely) per client IP; the IP limit is higher to tolerate shared NATs.
+    login_max_attempts: int = 5
+    login_ip_max_attempts: int = 20
+    login_attempt_window: int = 900  # seconds (15 minutes)
+
+    # Trust the client IP from the X-Forwarded-For header. Off by default (safe
+    # for direct/dev access); turn on only behind a trusted reverse proxy such as
+    # the prod nginx, which sets the header.
+    trust_forwarded_for: bool = False
+
 
 settings = Settings()

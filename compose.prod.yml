@@ -16,13 +16,34 @@ services:
       start_period: 15s
     restart: unless-stopped
 
+  redis:
+    image: redis:8-alpine
+    # Backs login rate limiting. Reachable only as "redis:6379" on the compose
+    # network; not published to the host.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
       target: prod
     env_file: .env
+    environment:
+      # In-network Redis host; overrides any REDIS_URL from .env.
+      REDIS_URL: redis://redis:6379/0
+      # The nginx frontend proxies /api, so the real client IP arrives in
+      # X-Real-IP / X-Forwarded-For, not the socket peer. Trust it here so the
+      # per-IP login throttle keys on the real client (never nginx's own IP).
+      TRUST_FORWARDED_FOR: "true"
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
 

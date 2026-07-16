@@ -1,11 +1,13 @@
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, date, datetime, timedelta
 
+import fakeredis.aioredis
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from pwdlib import PasswordHash
 from pwdlib.hashers.argon2 import Argon2Hasher
+from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -15,6 +17,7 @@ from app.core import security
 from app.core.config import settings
 from app.core.security import generate_token, hash_token
 from app.db.base import Base
+from app.db.redis import get_redis
 from app.db.session import get_session
 from app.main import app
 from app.models import (
@@ -90,8 +93,20 @@ async def db_session(test_engine) -> AsyncIterator[AsyncSession]:
 
 
 @pytest_asyncio.fixture
+async def fake_redis() -> AsyncIterator[Redis]:
+    # In-process Redis so tests need no real server and stay isolated (a fresh
+    # instance per test, flushed on teardown).
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    try:
+        yield redis
+    finally:
+        await redis.flushall()
+        await redis.aclose()
+
+
+@pytest_asyncio.fixture
 async def client(
-    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    db_session: AsyncSession, fake_redis: Redis, monkeypatch: pytest.MonkeyPatch
 ) -> AsyncIterator[AsyncClient]:
     # The test client talks HTTP (http://testserver) and httpx won't send Secure
     # cookies over HTTP, so pin the non-secure path regardless of the ambient
@@ -101,7 +116,11 @@ async def client(
     async def _override_get_session() -> AsyncIterator[AsyncSession]:
         yield db_session
 
+    async def _override_get_redis() -> Redis:
+        return fake_redis
+
     app.dependency_overrides[get_session] = _override_get_session
+    app.dependency_overrides[get_redis] = _override_get_redis
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
         yield ac

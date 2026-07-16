@@ -32,8 +32,9 @@ overdue / due-today / due-soon views, JSON API for future mobile clients.
   pydantic-settings. Python 3.13, managed with uv.
 - **Frontend** (`frontend/`): React 19 + TypeScript, Vite, Tailwind CSS v4,
   react-router 8, npm.
-- **DB**: PostgreSQL 18. **Docker** for dev and prod (multi-stage Dockerfiles,
-  `compose.yml` dev / `compose.prod.yml` prod).
+- **DB**: PostgreSQL 18. **Redis** backs login rate limiting (reachable only as
+  `redis:6379` on the compose network, not published to the host). **Docker** for
+  dev and prod (multi-stage Dockerfiles, `compose.yml` dev / `compose.prod.yml` prod).
 
 ## Commands
 
@@ -100,8 +101,11 @@ commit. Tests live in `backend/tests/` (pytest) and alongside the code as
   test back via a SAVEPOINT, so tests are isolated and leave no residue; build
   cases with the `client` / `make_user` / `auth_client` fixtures from
   `tests/conftest.py`. Cover the negative paths (401/403/400/404/409), not just
-  the happy one. Coverage: add `--cov=app --cov-report=term-missing
-  --cov-report=html` (report at `backend/htmlcov/`).
+  the happy one. Redis is faked with `fakeredis` (the `fake_redis` fixture
+  overrides `get_redis`), so tests need no real Redis and stay isolated; tune the
+  login throttle per-test by monkeypatching `settings.login_*`. Coverage: add
+  `--cov=app --cov-report=term-missing --cov-report=html` (report at
+  `backend/htmlcov/`).
 - Frontend: `cd frontend && npm run test` (coverage: `npm run test:coverage` ->
   `frontend/coverage/`). Use `renderWithProviders` + the `fetch` mock from
   `src/test/utils.tsx` and the synthetic fixtures in `src/test/fixtures.ts` —
@@ -123,6 +127,10 @@ commit. Tests live in `backend/tests/` (pytest) and alongside the code as
 - After changing `frontend/package.json`: run `npm install` locally (pre-commit
   hooks use local node_modules) AND `docker compose exec frontend npm install`
   (a named volume shadows the container's node_modules).
+- After changing `backend/pyproject.toml` deps: the venv is baked into the image
+  at `/opt/venv`, so update the lock and reinstall with
+  `docker compose exec backend uv sync --no-install-project`, and rebuild the
+  image (`docker compose up -d --build backend`) so the change persists.
 - Changing `POSTGRES_*` in `.env` after first boot needs `docker compose down -v`.
 - Keep the ruff version in `.pre-commit-config.yaml` (`ruff-pre-commit` rev) in
   sync with the ruff dev dependency in `backend/pyproject.toml`.

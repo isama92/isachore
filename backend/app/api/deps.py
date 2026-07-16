@@ -2,15 +2,18 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
+from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.core.security import ADMIN_COOKIE_NAME, COOKIE_NAME, hash_token
+from app.db.redis import get_redis
 from app.db.session import get_session
 from app.models import AuthToken, Household, User, household_members
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+RedisDep = Annotated[Redis, Depends(get_redis)]
 
 _credentials_exc = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated"
