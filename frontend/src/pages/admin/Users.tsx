@@ -22,7 +22,7 @@ const emptyForm: FormState = {
 
 const inputClass =
   'rounded-input border-[1.5px] border-line bg-white px-4 py-2.5 text-[15px] font-semibold placeholder:font-medium placeholder:text-placeholder focus:border-primary focus:outline-none'
-const labelClass = 'text-[11.5px] font-bold tracking-wide text-muted uppercase'
+const labelClass = 'text-[11.5px] font-bold tracking-wide text-muted-foreground uppercase'
 const chipClass = 'rounded-full px-2.5 py-0.5 text-[11px] font-bold'
 
 export default function Users() {
@@ -225,7 +225,7 @@ export default function Users() {
               <button
                 type="button"
                 onClick={() => setShowForm(false)}
-                className="rounded-button px-5 py-2.5 text-sm font-bold text-muted hover:text-ink"
+                className="rounded-button px-5 py-2.5 text-sm font-bold text-muted-foreground hover:text-ink"
               >
                 Cancel
               </button>
@@ -235,12 +235,12 @@ export default function Users() {
       )}
 
       {loading ? (
-        <p className="font-medium text-muted">Loading…</p>
+        <p className="font-medium text-muted-foreground">Loading…</p>
       ) : (
         <div className="overflow-x-auto rounded-2xl border border-line bg-white">
           <table className="w-full min-w-[640px] text-left text-sm">
             <thead>
-              <tr className="border-b border-line text-[11.5px] font-bold tracking-wide text-muted uppercase">
+              <tr className="border-b border-line text-[11.5px] font-bold tracking-wide text-muted-foreground uppercase">
                 <th className="px-4 py-3">Name</th>
                 <th className="px-4 py-3">Email</th>
                 <th className="px-4 py-3">Role</th>
@@ -257,12 +257,12 @@ export default function Users() {
                       <span className="ml-2 text-[11px] font-bold text-placeholder">you</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 font-medium text-muted">{u.email}</td>
+                  <td className="px-4 py-3 font-medium text-muted-foreground">{u.email}</td>
                   <td className="px-4 py-3">
                     {u.is_admin ? (
                       <span className={`${chipClass} bg-page text-primary-dark`}>Admin</span>
                     ) : (
-                      <span className={`${chipClass} bg-page text-muted`}>Member</span>
+                      <span className={`${chipClass} bg-page text-muted-foreground`}>Member</span>
                     )}
                   </td>
                   <td className="px-4 py-3">
@@ -276,7 +276,7 @@ export default function Users() {
                     {u.id !== me?.id && u.is_active && (
                       <button
                         onClick={() => void loginAs(u)}
-                        className="mr-3 font-bold text-muted hover:text-ink"
+                        className="mr-3 font-bold text-muted-foreground hover:text-ink"
                       >
                         Login as
                       </button>

@@ -23,13 +23,13 @@ type FormState = {
 
 const inputClass =
   'rounded-input border-[1.5px] border-line bg-white px-4 py-2.5 text-[15px] font-semibold placeholder:font-medium placeholder:text-placeholder focus:border-primary focus:outline-none'
-const labelClass = 'text-[11.5px] font-bold tracking-wide text-muted uppercase'
+const labelClass = 'text-[11.5px] font-bold tracking-wide text-muted-foreground uppercase'
 
 function chipClass(selected: boolean): string {
   return `flex items-center gap-2 rounded-full border-[1.5px] px-3 py-1.5 text-sm font-bold ${
     selected
       ? 'border-primary bg-primary text-white'
-      : 'border-line bg-white text-muted hover:border-primary'
+      : 'border-line bg-white text-muted-foreground hover:border-primary'
   }`
 }
 
@@ -104,7 +104,7 @@ export default function ChoreCreate() {
       <h1 className="mb-6 font-display text-2xl font-bold tracking-tight">New chore</h1>
 
       {loading ? (
-        <p className="font-medium text-muted">Loading…</p>
+        <p className="font-medium text-muted-foreground">Loading…</p>
       ) : (
         <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-5">
           <label className="flex flex-col gap-1.5">
@@ -132,7 +132,7 @@ export default function ChoreCreate() {
           <div className="flex flex-col gap-2">
             <span className={labelClass}>Assignees</span>
             {members.length === 0 ? (
-              <p className="text-sm font-medium text-muted">No household members yet.</p>
+              <p className="text-sm font-medium text-muted-foreground">No household members yet.</p>
             ) : (
               <div className="flex flex-wrap gap-2">
                 {members.map((m) => (
@@ -198,7 +198,7 @@ export default function ChoreCreate() {
           <div className="flex flex-col gap-2">
             <span className={labelClass}>Tags</span>
             {tags.length === 0 ? (
-              <p className="text-sm font-medium text-muted">No tags yet.</p>
+              <p className="text-sm font-medium text-muted-foreground">No tags yet.</p>
             ) : (
               <div className="flex flex-wrap gap-2">
                 {tags.map((t) => (
@@ -232,7 +232,7 @@ export default function ChoreCreate() {
             </button>
             <Link
               to="/chores"
-              className="rounded-button px-5 py-2.5 text-sm font-bold text-muted hover:text-ink"
+              className="rounded-button px-5 py-2.5 text-sm font-bold text-muted-foreground hover:text-ink"
             >
               Cancel
             </Link>

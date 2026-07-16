@@ -82,9 +82,13 @@ pre-commit run --all-files                         # what the git hook runs
   in `RequireAuth` / `RequireAdmin` (`src/components/`); authenticated pages
   render under the `TopBar`.
 - Design tokens (colours, fonts, radii, shadows) live ONLY in
-  `frontend/src/index.css` under `@theme` — never hardcode hex values in
-  components. Tailwind v4 is CSS-first: there is NO tailwind.config.js and
-  none should be added.
+  `frontend/src/index.css` — never hardcode hex values in components. Since the
+  shadcn adoption they are split by role: theme-invariant tokens (fonts,
+  shadows, brand radii) under `@theme`; the runtime colour vars under
+  `:root`/`.dark` (light/dark values); and the utility mappings (both shadcn's
+  `--color-*` names and the legacy isachore aliases) under `@theme inline`.
+  Tailwind v4 is CSS-first: there is NO tailwind.config.js and none should be
+  added.
 - Import routing from `react-router` (v8) — never `react-router-dom`.
 - Pages in `frontend/src/pages/`, one component per route.
 - UI mockups: `../isachore-design/Choreo Screens.dc.html` (login = variant 1a,

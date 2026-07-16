@@ -28,6 +28,11 @@ export default defineConfig([
     // Test helpers export a custom render + fixtures, not a Fast Refresh boundary
     rules: { 'react-refresh/only-export-components': 'off' },
   },
+  {
+    files: ['src/components/ui/**/*.{ts,tsx}'],
+    // shadcn primitives co-export a component and its cva variants
+    rules: { 'react-refresh/only-export-components': 'off' },
+  },
   // must stay last so it disables rules that conflict with Prettier
   prettier,
 ])

@@ -9,7 +9,7 @@ export default function Home() {
         <h1 className="font-display text-3xl font-bold tracking-tight">
           {user ? `Hi ${user.name}` : 'isachore'}
         </h1>
-        <p className="mt-2 font-medium text-muted">
+        <p className="mt-2 font-medium text-muted-foreground">
           Your due view lands here soon. For now, manage the household chores.
         </p>
         <Link

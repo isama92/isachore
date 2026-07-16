@@ -53,11 +53,11 @@ export default function Chores() {
       {error && <p className="mb-4 text-[13px] font-bold text-danger">{error}</p>}
 
       {loading ? (
-        <p className="font-medium text-muted">Loading…</p>
+        <p className="font-medium text-muted-foreground">Loading…</p>
       ) : chores.length === 0 ? (
         <div className="rounded-2xl border border-line bg-white p-10 text-center">
           <p className="font-semibold text-ink">No chores yet.</p>
-          <p className="mt-1 text-sm font-medium text-muted">
+          <p className="mt-1 text-sm font-medium text-muted-foreground">
             Add the first one with New chore above.
           </p>
         </div>
@@ -65,7 +65,7 @@ export default function Chores() {
         <div className="overflow-x-auto rounded-2xl border border-line bg-white">
           <table className="w-full min-w-[720px] text-left text-sm">
             <thead>
-              <tr className="border-b border-line text-[11.5px] font-bold tracking-wide text-muted uppercase">
+              <tr className="border-b border-line text-[11.5px] font-bold tracking-wide text-muted-foreground uppercase">
                 <th className="px-4 py-3">Title</th>
                 <th className="px-4 py-3">Assignees</th>
                 <th className="px-4 py-3">Repeats</th>
@@ -81,7 +81,7 @@ export default function Chores() {
                   <td className="px-4 py-3 font-semibold">{c.title}</td>
                   <td className="px-4 py-3">
                     {c.assignees.length === 0 ? (
-                      <span className="text-muted">Unassigned</span>
+                      <span className="text-muted-foreground">Unassigned</span>
                     ) : (
                       <span className="flex flex-wrap gap-1.5">
                         {c.assignees.map((a) => (
@@ -97,12 +97,12 @@ export default function Chores() {
                       {repeatLabel(c.repeats)}
                     </span>
                   </td>
-                  <td className="px-4 py-3 font-medium text-muted">
+                  <td className="px-4 py-3 font-medium text-muted-foreground">
                     {assignmentLabel(c.assignment_type)}
                   </td>
                   <td className="px-4 py-3">
                     {c.tags.length === 0 ? (
-                      <span className="text-muted">None</span>
+                      <span className="text-muted-foreground">None</span>
                     ) : (
                       <span className="flex flex-wrap items-center gap-2">
                         {c.tags.map((t) => (
@@ -120,7 +120,7 @@ export default function Chores() {
                       </span>
                     )}
                   </td>
-                  <td className="px-4 py-3 font-medium text-muted whitespace-nowrap">
+                  <td className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">
                     {formatDate(c.start_date)}
                   </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">

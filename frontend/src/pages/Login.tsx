@@ -43,13 +43,13 @@ export default function Login() {
         <h1 className="font-display text-3xl leading-tight font-bold tracking-tight">
           Welcome back.
         </h1>
-        <p className="mt-1.5 mb-7 text-[14.5px] font-medium text-muted">
+        <p className="mt-1.5 mb-7 text-[14.5px] font-medium text-muted-foreground">
           Sign in to see what your flat needs today.
         </p>
 
         <form className="flex flex-col gap-4" onSubmit={(e) => void onSubmit(e)}>
           <label className="flex flex-col gap-1.5">
-            <span className="text-[11.5px] font-bold tracking-wide text-muted uppercase">
+            <span className="text-[11.5px] font-bold tracking-wide text-muted-foreground uppercase">
               Email
             </span>
             <input
@@ -65,7 +65,7 @@ export default function Login() {
           </label>
 
           <label className="flex flex-col gap-1.5">
-            <span className="text-[11.5px] font-bold tracking-wide text-muted uppercase">
+            <span className="text-[11.5px] font-bold tracking-wide text-muted-foreground uppercase">
               Password
             </span>
             <input
@@ -91,7 +91,7 @@ export default function Login() {
           </button>
         </form>
 
-        <p className="mt-6 text-center text-[13.5px] font-medium text-muted">
+        <p className="mt-6 text-center text-[13.5px] font-medium text-muted-foreground">
           New here? Ask your household admin for an account.
         </p>
       </div>

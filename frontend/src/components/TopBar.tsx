@@ -47,10 +47,12 @@ export default function TopBar() {
               Admin
             </Link>
           )}
-          <span className="hidden text-sm font-medium text-muted sm:inline">{user.name}</span>
+          <span className="hidden text-sm font-medium text-muted-foreground sm:inline">
+            {user.name}
+          </span>
           <button
             onClick={() => void logout()}
-            className="text-sm font-bold text-muted hover:text-ink"
+            className="text-sm font-bold text-muted-foreground hover:text-ink"
           >
             Log out
           </button>

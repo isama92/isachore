@@ -1,32 +1,127 @@
 @import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+
+@custom-variant dark (&:is(.dark *));
 
 @theme {
   /* Fonts (self-hosted via @fontsource-variable, imported in main.tsx) */
   --font-sans: 'Manrope Variable', ui-sans-serif, system-ui, sans-serif;
   --font-display: 'Bricolage Grotesque Variable', var(--font-sans);
 
-  /* Colors (design tokens from isachore-design) */
-  --color-primary: #0d9488;
-  --color-primary-dark: #0f766e;
-  --color-ink: #0f2e2a;
-  --color-muted: #5b7c77;
-  --color-page: #f0fdfa;
-  --color-canvas: #e7f4f0;
-  --color-line: #cde7e1;
-  --color-placeholder: #9fbdb6;
-  --color-danger: #f97362;
-
   /* Effects */
   --shadow-glow: 0 12px 26px -10px rgb(13 148 136 / 0.75);
   --shadow-logo: 0 8px 18px -6px rgb(13 148 136 / 0.7);
 
-  /* Radii */
+  /* Radii (isachore brand) */
   --radius-input: 13px;
   --radius-button: 15px;
 }
 
 @layer base {
   body {
-    @apply bg-page font-sans text-ink antialiased;
+    @apply bg-background font-sans text-foreground antialiased;
   }
+  * {
+    @apply border-border outline-ring/50;
+  }
+}
+
+@theme inline {
+  /* shadcn heading utility -> isachore display font */
+  --font-heading: var(--font-display);
+
+  /* NB: the shadcn radius scale (--radius-sm/md/lg/xl/...) is deliberately NOT
+     redefined here. Overriding it would change existing rounded-lg/xl/2xl brand
+     elements. It will be reintroduced (and the few existing usages migrated to
+     explicit radii) in the step that adds shadcn components. --radius stays
+     defined below for that. */
+
+  /* shadcn semantic colours -> runtime vars (theme-aware) */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* isachore legacy utilities kept working AND made theme-aware.
+     NOTE: text-muted was renamed to text-muted-foreground so that --muted can
+     serve shadcn's background semantic without breaking the brand text grey. */
+  --color-ink: var(--foreground);
+  --color-page: var(--background);
+  --color-canvas: var(--canvas);
+  --color-line: var(--border);
+  --color-danger: var(--destructive);
+  --color-placeholder: var(--placeholder);
+  --color-primary-dark: var(--primary-dark);
+}
+
+:root {
+  --radius: 0.9375rem;
+
+  /* Light mode = the existing isachore teal brand (unchanged appearance) */
+  --background: #f0fdfa;
+  --foreground: #0f2e2a;
+  --card: #ffffff;
+  --card-foreground: #0f2e2a;
+  --popover: #ffffff;
+  --popover-foreground: #0f2e2a;
+  --primary: #0d9488;
+  --primary-foreground: #ffffff;
+  --secondary: #e7f4f0;
+  --secondary-foreground: #0f2e2a;
+  --muted: #e7f4f0;
+  --muted-foreground: #5b7c77;
+  --accent: #e7f4f0;
+  --accent-foreground: #0f2e2a;
+  --destructive: #f97362;
+  --border: #cde7e1;
+  --input: #cde7e1;
+  --ring: #0d9488;
+
+  /* isachore brand-only raws */
+  --canvas: #e7f4f0;
+  --placeholder: #9fbdb6;
+  --primary-dark: #0f766e;
+}
+
+.dark {
+  /* Dark mode derived from the brand (deep teal-ink). Dormant until the theme
+     toggle lands; values are a starting point for the user to review live. */
+  --background: #0b1f1c;
+  --foreground: #e6f3ef;
+  --card: #10302b;
+  --card-foreground: #e6f3ef;
+  --popover: #10302b;
+  --popover-foreground: #e6f3ef;
+  --primary: #14b8a6;
+  --primary-foreground: #04231f;
+  --secondary: #16413a;
+  --secondary-foreground: #e6f3ef;
+  --muted: #16413a;
+  --muted-foreground: #9fc3ba;
+  --accent: #1c4f47;
+  --accent-foreground: #e6f3ef;
+  --destructive: #f97362;
+  --border: #1f4d45;
+  --input: #1f4d45;
+  --ring: #14b8a6;
+
+  /* isachore brand-only raws */
+  --canvas: #16413a;
+  --placeholder: #6f938b;
+  --primary-dark: #0d9488;
 }
