@@ -49,12 +49,15 @@ describe('ChoreCreate', () => {
       { authValue: { user: me }, route: '/chores/new' },
     )
 
-    await userEvent.type(await screen.findByLabelText('Title'), 'Scrub the tub')
-    await userEvent.click(screen.getByRole('button', { name: 'Jo' }))
-    await userEvent.click(screen.getByRole('button', { name: 'deep-clean' }))
-    await userEvent.selectOptions(screen.getByLabelText('Repeats'), 'daily')
-    await userEvent.selectOptions(screen.getByLabelText('Assignment'), 'least_done')
-    await userEvent.click(screen.getByRole('button', { name: 'Add chore' }))
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    await user.type(await screen.findByLabelText('Title'), 'Scrub the tub')
+    await user.click(screen.getByRole('button', { name: 'Jo' }))
+    await user.click(screen.getByRole('button', { name: 'deep-clean' }))
+    await user.click(screen.getByRole('combobox', { name: 'Repeats' }))
+    await user.click(await screen.findByRole('option', { name: 'Daily' }))
+    await user.click(screen.getByRole('combobox', { name: 'Assignment' }))
+    await user.click(await screen.findByRole('option', { name: 'Least done' }))
+    await user.click(screen.getByRole('button', { name: 'Add chore' }))
 
     expect(await screen.findByText('chores-list')).toBeInTheDocument()
     expect(postBody(fetchMock)).toMatchObject({

@@ -6,6 +6,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import type {
   AssignmentType,
   Chore,
@@ -25,8 +32,8 @@ type FormState = {
   tag_ids: number[]
 }
 
-// Retained for the still-native controls (the two selects and the date input),
-// which become shadcn Select / date picker in later steps.
+// Retained for the still-native date input, which becomes a date picker in a
+// later step.
 const inputClass =
   'rounded-input border-[1.5px] border-line bg-card px-4 py-2.5 text-[15px] font-semibold placeholder:font-medium placeholder:text-placeholder focus:border-primary focus:outline-none'
 
@@ -157,37 +164,49 @@ export default function ChoreCreate() {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="assignment">Assignment</Label>
-              <select
-                id="assignment"
+              <Label id="assignment-label" htmlFor="assignment">
+                Assignment
+              </Label>
+              <Select
                 value={form.assignment_type}
-                onChange={(e) =>
-                  setForm({ ...form, assignment_type: e.target.value as AssignmentType })
-                }
-                className={inputClass}
+                onValueChange={(v) => setForm({ ...form, assignment_type: v as AssignmentType })}
               >
-                {assignmentOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger
+                  id="assignment"
+                  aria-labelledby="assignment-label"
+                  className="w-full"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {assignmentOptions.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="repeats">Repeats</Label>
-              <select
-                id="repeats"
+              <Label id="repeats-label" htmlFor="repeats">
+                Repeats
+              </Label>
+              <Select
                 value={form.repeats}
-                onChange={(e) => setForm({ ...form, repeats: e.target.value as RepeatPeriod })}
-                className={inputClass}
+                onValueChange={(v) => setForm({ ...form, repeats: v as RepeatPeriod })}
               >
-                {repeatOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id="repeats" aria-labelledby="repeats-label" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {repeatOptions.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
