@@ -3,7 +3,13 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from sqlalchemy import delete, select
 
-from app.api.deps import CurrentUser, SessionDep, get_request_token, get_user_by_token
+from app.api.deps import (
+    CurrentUser,
+    SessionDep,
+    get_impersonator,
+    get_request_token,
+    get_user_by_token,
+)
 from app.core.security import (
     ADMIN_COOKIE_NAME,
     DUMMY_PASSWORD_HASH,
@@ -66,10 +72,7 @@ async def logout(request: Request, session: SessionDep, response: Response) -> N
 
 @router.get("/me", response_model=MeRead)
 async def me(request: Request, user: CurrentUser, session: SessionDep) -> MeRead:
-    impersonating = False
-    if admin_token := request.cookies.get(ADMIN_COOKIE_NAME):
-        admin = await get_user_by_token(session, admin_token)
-        impersonating = admin is not None and admin.is_admin
+    impersonating = await get_impersonator(request, session) is not None
     return MeRead.model_validate(user).model_copy(update={"impersonating": impersonating})
 
 

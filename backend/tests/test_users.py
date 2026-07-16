@@ -273,6 +273,99 @@ async def test_impersonate_as_member_forbidden(make_user: Login, auth_client: Au
     assert resp.status_code == 403
 
 
+# --- impersonation self-guard (H1) --------------------------------------
+# The "cannot demote/deactivate yourself" guard must protect the real operator
+# behind the parked admin cookie, not just the impersonated session identity.
+# Otherwise an admin who impersonates a second admin could strip or deactivate
+# their own real account by proxy.
+
+
+async def test_impersonating_admin_cannot_demote_real_operator(
+    client: AsyncClient, make_user: Login, db_session: AsyncSession
+) -> None:
+    admin = await make_user(email="admin@example.com", password="password12345", is_admin=True)
+    eve = await make_user(email="eve@example.com", is_admin=True)
+
+    await client.post(
+        "/api/v1/auth/login",
+        json={"email": "admin@example.com", "password": "password12345"},
+    )
+    await client.post(f"/api/v1/users/{eve.id}/impersonate")
+
+    # Acting as Eve, demoting the operator's own real account must be refused
+    resp = await client.patch(f"/api/v1/users/{admin.id}", json={"is_admin": False})
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "You cannot demote or deactivate yourself"
+    await db_session.refresh(admin)
+    assert admin.is_admin is True
+
+
+async def test_impersonating_admin_cannot_deactivate_real_operator(
+    client: AsyncClient, make_user: Login, db_session: AsyncSession
+) -> None:
+    admin = await make_user(email="admin@example.com", password="password12345", is_admin=True)
+    eve = await make_user(email="eve@example.com", is_admin=True)
+
+    await client.post(
+        "/api/v1/auth/login",
+        json={"email": "admin@example.com", "password": "password12345"},
+    )
+    await client.post(f"/api/v1/users/{eve.id}/impersonate")
+
+    resp = await client.delete(f"/api/v1/users/{admin.id}")
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "You cannot deactivate yourself"
+    await db_session.refresh(admin)
+    assert admin.is_active is True
+
+
+async def test_impersonating_admin_cannot_demote_current_session(
+    client: AsyncClient, make_user: Login, db_session: AsyncSession
+) -> None:
+    await make_user(email="admin@example.com", password="password12345", is_admin=True)
+    eve = await make_user(email="eve@example.com", is_admin=True)
+
+    await client.post(
+        "/api/v1/auth/login",
+        json={"email": "admin@example.com", "password": "password12345"},
+    )
+    await client.post(f"/api/v1/users/{eve.id}/impersonate")
+
+    # The impersonated session identity is still guarded (the "as well as the
+    # current one" half of the fix)
+    resp = await client.patch(f"/api/v1/users/{eve.id}", json={"is_admin": False})
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "You cannot demote or deactivate yourself"
+    await db_session.refresh(eve)
+    assert eve.is_admin is True
+
+
+async def test_impersonating_admin_can_demote_other_admin(
+    client: AsyncClient, make_user: Login, db_session: AsyncSession
+) -> None:
+    await make_user(email="admin@example.com", password="password12345", is_admin=True)
+    eve = await make_user(email="eve@example.com", is_admin=True)
+    carol = await make_user(email="carol@example.com", is_admin=True)
+
+    await client.post(
+        "/api/v1/auth/login",
+        json={"email": "admin@example.com", "password": "password12345"},
+    )
+    await client.post(f"/api/v1/users/{eve.id}/impersonate")
+
+    # A third admin who is neither the operator nor the impersonated session can
+    # still be managed: the guard is scoped to the self-ids, not all admins
+    resp = await client.patch(f"/api/v1/users/{carol.id}", json={"is_admin": False})
+
+    assert resp.status_code == 200
+    assert resp.json()["is_admin"] is False
+    await db_session.refresh(carol)
+    assert carol.is_admin is False
+
+
 # --- delete (soft) ------------------------------------------------------
 
 

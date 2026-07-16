@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from sqlalchemy import delete, select
 
-from app.api.deps import AdminUser, SessionDep, get_request_token
+from app.api.deps import AdminUser, Impersonator, SessionDep, get_request_token
 from app.core.households import add_to_default_household
 from app.core.security import (
     ADMIN_COOKIE_NAME,
@@ -42,6 +42,13 @@ async def _revoke_tokens(session: SessionDep, user_id: int) -> None:
     await session.execute(delete(AuthToken).where(AuthToken.user_id == user_id))
 
 
+def _protected_self_ids(admin: User, impersonator: User | None) -> set[int]:
+    """Ids that may never demote/deactivate themselves. During impersonation
+    that means the impersonated session AND the real operator behind the parked
+    admin cookie, so the self-guard can't be bypassed by proxy."""
+    return {admin.id} if impersonator is None else {admin.id, impersonator.id}
+
+
 @router.get("", response_model=list[UserRead])
 async def list_users(_: AdminUser, session: SessionDep) -> list[User]:
     result = await session.execute(select(User).order_by(User.id))
@@ -67,13 +74,17 @@ async def create_user(payload: UserCreate, _: AdminUser, session: SessionDep) ->
 
 @router.patch("/{user_id}", response_model=UserRead)
 async def update_user(
-    user_id: int, payload: UserUpdate, admin: AdminUser, session: SessionDep
+    user_id: int,
+    payload: UserUpdate,
+    admin: AdminUser,
+    impersonator: Impersonator,
+    session: SessionDep,
 ) -> User:
     user = await _get_user_or_404(session, user_id)
 
     demoting = payload.is_admin is False
     deactivating = payload.is_active is False
-    if user.id == admin.id and (demoting or deactivating):
+    if user.id in _protected_self_ids(admin, impersonator) and (demoting or deactivating):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="You cannot demote or deactivate yourself",
@@ -133,9 +144,11 @@ async def impersonate_user(
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def deactivate_user(user_id: int, admin: AdminUser, session: SessionDep) -> None:
+async def deactivate_user(
+    user_id: int, admin: AdminUser, impersonator: Impersonator, session: SessionDep
+) -> None:
     user = await _get_user_or_404(session, user_id)
-    if user.id == admin.id:
+    if user.id in _protected_self_ids(admin, impersonator):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot deactivate yourself"
         )

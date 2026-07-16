@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from app.core.security import COOKIE_NAME, hash_token
+from app.core.security import ADMIN_COOKIE_NAME, COOKIE_NAME, hash_token
 from app.db.session import get_session
 from app.models import AuthToken, Household, User, household_members
 
@@ -63,6 +63,19 @@ async def require_admin(user: CurrentUser) -> User:
 
 
 AdminUser = Annotated[User, Depends(require_admin)]
+
+
+async def get_impersonator(request: Request, session: SessionDep) -> User | None:
+    """The real admin behind an impersonation session (from the parked admin
+    cookie), or None when not impersonating."""
+    admin_token = request.cookies.get(ADMIN_COOKIE_NAME)
+    if not admin_token:
+        return None
+    admin = await get_user_by_token(session, admin_token)
+    return admin if admin is not None and admin.is_admin else None
+
+
+Impersonator = Annotated[User | None, Depends(get_impersonator)]
 
 
 async def get_current_household(user: CurrentUser, session: SessionDep) -> Household:
