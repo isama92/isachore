@@ -15,8 +15,15 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
-
-const chipClass = 'rounded-full px-2.5 py-0.5 text-[11px] font-bold'
+import { Badge } from '@/components/ui/badge'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 
 export default function Chores() {
   const [chores, setChores] = useState<Chore[]>([])
@@ -70,45 +77,45 @@ export default function Chores() {
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-line bg-card">
-          <table className="w-full min-w-[720px] text-left text-sm">
-            <thead>
-              <tr className="border-b border-line text-[11.5px] font-bold tracking-wide text-muted-foreground uppercase">
-                <th className="px-4 py-3">Title</th>
-                <th className="px-4 py-3">Assignees</th>
-                <th className="px-4 py-3">Repeats</th>
-                <th className="px-4 py-3">Assignment</th>
-                <th className="px-4 py-3">Tags</th>
-                <th className="px-4 py-3">Start</th>
-                <th className="px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
+        <div className="overflow-hidden rounded-2xl border border-line bg-card">
+          <Table className="min-w-[720px]">
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>Title</TableHead>
+                <TableHead>Assignees</TableHead>
+                <TableHead>Repeats</TableHead>
+                <TableHead>Assignment</TableHead>
+                <TableHead>Tags</TableHead>
+                <TableHead>Start</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {chores.map((c) => (
-                <tr key={c.id} className="border-b border-line/60 last:border-0">
-                  <td className="px-4 py-3 font-semibold">{c.title}</td>
-                  <td className="px-4 py-3">
+                <TableRow key={c.id}>
+                  <TableCell className="font-semibold">{c.title}</TableCell>
+                  <TableCell>
                     {c.assignees.length === 0 ? (
                       <span className="text-muted-foreground">Unassigned</span>
                     ) : (
                       <span className="flex flex-wrap gap-1.5">
                         {c.assignees.map((a) => (
-                          <span key={a.id} className={`${chipClass} bg-page text-ink`}>
+                          <Badge key={a.id} variant="secondary">
                             {a.name}
-                          </span>
+                          </Badge>
                         ))}
                       </span>
                     )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`${chipClass} bg-page text-primary-dark`}>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary" className="text-primary">
                       {repeatLabel(c.repeats)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 font-medium text-muted-foreground">
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="font-medium text-muted-foreground">
                     {assignmentLabel(c.assignment_type)}
-                  </td>
-                  <td className="px-4 py-3">
+                  </TableCell>
+                  <TableCell>
                     {c.tags.length === 0 ? (
                       <span className="text-muted-foreground">None</span>
                     ) : (
@@ -127,11 +134,11 @@ export default function Chores() {
                         ))}
                       </span>
                     )}
-                  </td>
-                  <td className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">
+                  </TableCell>
+                  <TableCell className="font-medium text-muted-foreground">
                     {formatDate(c.start_date)}
-                  </td>
-                  <td className="px-4 py-3 text-right whitespace-nowrap">
+                  </TableCell>
+                  <TableCell className="text-right">
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button
@@ -158,11 +165,11 @@ export default function Chores() {
                         </AlertDialogFooter>
                       </AlertDialogContent>
                     </AlertDialog>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
     </main>

@@ -26,6 +26,15 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Badge } from '@/components/ui/badge'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 
 type FormState = {
   email: string
@@ -42,8 +51,6 @@ const emptyForm: FormState = {
   is_admin: false,
   is_active: true,
 }
-
-const chipClass = 'rounded-full px-2.5 py-0.5 text-[11px] font-bold'
 
 export default function Users() {
   const { user: me, refresh } = useAuth()
@@ -250,42 +257,48 @@ export default function Users() {
       {loading ? (
         <p className="font-medium text-muted-foreground">Loading…</p>
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-line bg-card">
-          <table className="w-full min-w-[640px] text-left text-sm">
-            <thead>
-              <tr className="border-b border-line text-[11.5px] font-bold tracking-wide text-muted-foreground uppercase">
-                <th className="px-4 py-3">Name</th>
-                <th className="px-4 py-3">Email</th>
-                <th className="px-4 py-3">Role</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
+        <div className="overflow-hidden rounded-2xl border border-line bg-card">
+          <Table className="min-w-[640px]">
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>Name</TableHead>
+                <TableHead>Email</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {users.map((u) => (
-                <tr key={u.id} className="border-b border-line/60 last:border-0">
-                  <td className="px-4 py-3 font-semibold">
+                <TableRow key={u.id}>
+                  <TableCell className="font-semibold">
                     {u.name}
                     {u.id === me?.id && (
                       <span className="ml-2 text-[11px] font-bold text-placeholder">you</span>
                     )}
-                  </td>
-                  <td className="px-4 py-3 font-medium text-muted-foreground">{u.email}</td>
-                  <td className="px-4 py-3">
+                  </TableCell>
+                  <TableCell className="font-medium text-muted-foreground">{u.email}</TableCell>
+                  <TableCell>
                     {u.is_admin ? (
-                      <span className={`${chipClass} bg-page text-primary-dark`}>Admin</span>
+                      <Badge variant="secondary" className="text-primary">
+                        Admin
+                      </Badge>
                     ) : (
-                      <span className={`${chipClass} bg-page text-muted-foreground`}>Member</span>
+                      <Badge variant="secondary" className="text-muted-foreground">
+                        Member
+                      </Badge>
                     )}
-                  </td>
-                  <td className="px-4 py-3">
+                  </TableCell>
+                  <TableCell>
                     {u.is_active ? (
-                      <span className={`${chipClass} bg-page text-primary-dark`}>Active</span>
+                      <Badge variant="secondary" className="text-primary">
+                        Active
+                      </Badge>
                     ) : (
-                      <span className={`${chipClass} bg-danger/10 text-danger`}>Inactive</span>
+                      <Badge variant="destructive">Inactive</Badge>
                     )}
-                  </td>
-                  <td className="px-4 py-3 text-right whitespace-nowrap">
+                  </TableCell>
+                  <TableCell className="text-right">
                     {u.id !== me?.id && u.is_active && (
                       <Button
                         type="button"
@@ -348,11 +361,11 @@ export default function Users() {
                           Reactivate
                         </Button>
                       ))}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
     </main>
