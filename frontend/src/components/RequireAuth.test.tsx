@@ -40,6 +40,7 @@ describe('RequireAuth', () => {
       authValue: { user: makeUser({ name: 'Alex Member' }) },
     })
     expect(screen.getByText('protected-content')).toBeInTheDocument()
-    expect(screen.getByText('Alex Member')).toBeInTheDocument()
+    // The top bar renders its user menu (name now lives inside that menu).
+    expect(screen.getByRole('button', { name: 'Open user menu' })).toBeInTheDocument()
   })
 })

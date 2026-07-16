@@ -7,12 +7,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, method: string, body?: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method,
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
+async function handle<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let detail = res.statusText
     try {
@@ -29,9 +24,27 @@ async function request<T>(path: string, method: string, body?: unknown): Promise
   return (await res.json()) as T
 }
 
+async function request<T>(path: string, method: string, body?: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method,
+    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  return handle<T>(res)
+}
+
+// Multipart upload: let the browser set Content-Type (with the boundary), so
+// this path deliberately does NOT set the JSON header the request() helper does.
+async function upload<T>(path: string, method: string, data: FormData): Promise<T> {
+  const res = await fetch(path, { method, body: data })
+  return handle<T>(res)
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path, 'GET'),
   post: <T>(path: string, body?: unknown) => request<T>(path, 'POST', body),
   patch: <T>(path: string, body: unknown) => request<T>(path, 'PATCH', body),
-  del: (path: string) => request<undefined>(path, 'DELETE'),
+  del: <T = undefined>(path: string) => request<T>(path, 'DELETE'),
+  upload: <T>(path: string, method: 'PUT' | 'POST', data: FormData) =>
+    upload<T>(path, method, data),
 }

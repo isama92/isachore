@@ -62,6 +62,25 @@ describe('api wrapper', () => {
     expect(result).toBeUndefined()
   })
 
+  it('upload sends the FormData without a JSON content-type', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { id: 1 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const data = new FormData()
+    data.append('file', new File(['x'], 'a.png', { type: 'image/png' }))
+    const result = await api.upload<{ id: number }>('/api/v1/profile/avatar', 'PUT', data)
+
+    // No headers object at all: the browser must set multipart/form-data with
+    // its own boundary. A JSON Content-Type here would break the upload.
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/profile/avatar', {
+      method: 'PUT',
+      body: data,
+    })
+    const init = fetchMock.mock.calls[0][1]
+    expect(init.headers).toBeUndefined()
+    expect(result).toEqual({ id: 1 })
+  })
+
   it('throws ApiError with the detail from a JSON error body', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(409, { detail: 'Taken' })))
 
