@@ -9,6 +9,10 @@ overdue / due-today / due-soon views, JSON API for future mobile clients.
   check it for what's next and tick items off when they're done.
 - When requirements are ambiguous or a decision shapes UX/architecture, ask
   the user before building; don't assume.
+- Every feature ships with tests in the same step: backend endpoints get
+  `pytest` cases, frontend components/pages get `vitest` cases, covering the
+  negative paths too (not just the happy one). Both suites must be green before
+  you commit. See Verification for how to run them.
 - Commit per completed step (descriptive message; the pre-commit hook must pass).
 - Keep the standard ports (5173/8000/5432 dev, 80 prod). If a port is taken,
   another local project's stack probably holds it — never remap isachore's
@@ -35,6 +39,10 @@ docker compose exec backend python -m app.cli create-admin --email you@example.c
 
 cd backend && uv run ruff check . && uv run ruff format .
 cd frontend && npm run lint && npm run format && npm run build   # build also typechecks (tsc -b)
+
+docker compose exec backend uv run pytest          # backend tests (run in the container so host "db" resolves)
+docker compose exec backend uv run pytest --cov=app --cov-report=term-missing --cov-report=html  # + coverage -> backend/htmlcov/
+cd frontend && npm run test                        # frontend tests (npm run test:coverage -> frontend/coverage/)
 
 pre-commit run --all-files                         # what the git hook runs
 ```
@@ -75,14 +83,29 @@ pre-commit run --all-files                         # what the git hook runs
 
 ## Verification
 
-No test framework yet (pytest/vitest are on the TODO list). Verify by
-exercising the running dev stack:
+Every feature needs automated tests, and both suites must pass before you
+commit. Tests live in `backend/tests/` (pytest) and alongside the code as
+`frontend/src/**/*.test.{ts,tsx}` (vitest) — mirror the patterns already there.
 
-- API: curl against `http://localhost:8000/api/v1/...` with a cookie jar
-  (`-c/-b`); check negative cases (401/403/400/404/409), not just the happy path.
-- UI: headless browser via `puppeteer-core` (npm-install it in a scratch dir
-  outside the repo) driving the system Chrome at `/usr/bin/google-chrome` —
-  drive real flows against `http://localhost:5173` and screenshot results.
+- Backend: `docker compose exec backend uv run pytest` (in the container so host
+  `db` resolves). Fixtures spin up a throwaway `isachore_test` DB and roll each
+  test back via a SAVEPOINT, so tests are isolated and leave no residue; build
+  cases with the `client` / `make_user` / `auth_client` fixtures from
+  `tests/conftest.py`. Cover the negative paths (401/403/400/404/409), not just
+  the happy one. Coverage: add `--cov=app --cov-report=term-missing
+  --cov-report=html` (report at `backend/htmlcov/`).
+- Frontend: `cd frontend && npm run test` (coverage: `npm run test:coverage` ->
+  `frontend/coverage/`). Use `renderWithProviders` + the `fetch` mock from
+  `src/test/utils.tsx` and the synthetic fixtures in `src/test/fixtures.ts` —
+  never real personal data. `npm run build` (`tsc -b`) also typechecks tests via
+  `tsconfig.vitest.json`, so a type error in a test breaks the build.
+- Beyond the suites, still exercise the running dev stack for anything they
+  don't cover (visual/UX, integration across the proxy):
+  - API: curl against `http://localhost:8000/api/v1/...` with a cookie jar
+    (`-c/-b`).
+  - UI: headless browser via `puppeteer-core` (npm-install it in a scratch dir
+    outside the repo) driving the system Chrome at `/usr/bin/google-chrome`
+    against `http://localhost:5173`, and screenshot the results.
 - The local dev DB may already contain seed users created during earlier
   sessions (e.g. `admin@example.com` / `admin12345` — dev-only, this machine
   only). Create your own via the `create-admin` CLI if missing.
@@ -112,3 +135,8 @@ exercising the running dev stack:
 - To smoke-test prod compose without touching the running dev stack, use a
   separate project name: `docker compose -f compose.prod.yml -p isachore-prod
   up --build -d` (and `down -v` afterwards).
+- Test-infra quirks (all handled in the committed setup, don't undo them):
+  coverage needs `concurrency = ["greenlet"]` in `pyproject.toml` or async
+  SQLAlchemy endpoint bodies read as uncovered; pydantic `EmailStr` rejects
+  `.test` TLDs, so use `@example.com` in fixtures; httpx won't send a cookie set
+  with an explicit `domain="testserver"` — set it without a domain.
