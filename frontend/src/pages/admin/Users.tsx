@@ -4,6 +4,8 @@ import { useAuth } from '../../auth/useAuth'
 import { api, ApiError } from '../../lib/api'
 import type { User } from '../../lib/types'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 
 type FormState = {
   email: string
@@ -21,9 +23,6 @@ const emptyForm: FormState = {
   is_active: true,
 }
 
-const inputClass =
-  'rounded-input border-[1.5px] border-line bg-card px-4 py-2.5 text-[15px] font-semibold placeholder:font-medium placeholder:text-placeholder focus:border-primary focus:outline-none'
-const labelClass = 'text-[11.5px] font-bold tracking-wide text-muted-foreground uppercase'
 const chipClass = 'rounded-full px-2.5 py-0.5 text-[11px] font-bold'
 
 export default function Users() {
@@ -155,37 +154,37 @@ export default function Users() {
               {editing ? `Edit ${editing.name}` : 'New user'}
             </h2>
             <div className="grid gap-4 sm:grid-cols-2">
-              <label className="flex flex-col gap-1.5">
-                <span className={labelClass}>Name</span>
-                <input
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="user-name">Name</Label>
+                <Input
+                  id="user-name"
                   required
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  className={inputClass}
                 />
-              </label>
-              <label className="flex flex-col gap-1.5">
-                <span className={labelClass}>Email</span>
-                <input
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="user-email">Email</Label>
+                <Input
+                  id="user-email"
                   type="email"
                   required
                   value={form.email}
                   onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  className={inputClass}
                 />
-              </label>
-              <label className="flex flex-col gap-1.5">
-                <span className={labelClass}>Password</span>
-                <input
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="user-password">Password</Label>
+                <Input
+                  id="user-password"
                   type="password"
                   required={!editing}
                   minLength={8}
                   placeholder={editing ? 'Leave empty to keep current' : 'At least 8 characters'}
                   value={form.password}
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
-                  className={inputClass}
                 />
-              </label>
+              </div>
               <div className="flex items-center gap-5 self-end pb-3">
                 <label className="flex items-center gap-2.5">
                   <input

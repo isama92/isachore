@@ -3,6 +3,9 @@ import { Link, useNavigate } from 'react-router'
 import { api, ApiError } from '../lib/api'
 import { assignmentOptions, repeatOptions, todayISO } from '../lib/chores'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import type {
   AssignmentType,
   Chore,
@@ -22,9 +25,10 @@ type FormState = {
   tag_ids: number[]
 }
 
+// Retained for the still-native controls (the two selects and the date input),
+// which become shadcn Select / date picker in later steps.
 const inputClass =
   'rounded-input border-[1.5px] border-line bg-card px-4 py-2.5 text-[15px] font-semibold placeholder:font-medium placeholder:text-placeholder focus:border-primary focus:outline-none'
-const labelClass = 'text-[11.5px] font-bold tracking-wide text-muted-foreground uppercase'
 
 function chipClass(selected: boolean): string {
   return `flex items-center gap-2 rounded-full border-[1.5px] px-3 py-1.5 text-sm font-bold ${
@@ -108,30 +112,30 @@ export default function ChoreCreate() {
         <p className="font-medium text-muted-foreground">Loading…</p>
       ) : (
         <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-5">
-          <label className="flex flex-col gap-1.5">
-            <span className={labelClass}>Title</span>
-            <input
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="title">Title</Label>
+            <Input
+              id="title"
               required
               value={form.title}
               onChange={(e) => setForm({ ...form, title: e.target.value })}
               placeholder="Clean the bathroom"
-              className={inputClass}
             />
-          </label>
+          </div>
 
-          <label className="flex flex-col gap-1.5">
-            <span className={labelClass}>Notes</span>
-            <textarea
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="notes">Notes</Label>
+            <Textarea
+              id="notes"
               value={form.description}
               onChange={(e) => setForm({ ...form, description: e.target.value })}
               placeholder="Scrub the tub, replace the towels…"
               rows={3}
-              className={inputClass}
             />
-          </label>
+          </div>
 
-          <div className="flex flex-col gap-2">
-            <span className={labelClass}>Assignees</span>
+          <div className="flex flex-col gap-2" role="group" aria-labelledby="assignees-label">
+            <Label id="assignees-label">Assignees</Label>
             {members.length === 0 ? (
               <p className="text-sm font-medium text-muted-foreground">No household members yet.</p>
             ) : (
@@ -152,9 +156,10 @@ export default function ChoreCreate() {
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="flex flex-col gap-1.5">
-              <span className={labelClass}>Assignment</span>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="assignment">Assignment</Label>
               <select
+                id="assignment"
                 value={form.assignment_type}
                 onChange={(e) =>
                   setForm({ ...form, assignment_type: e.target.value as AssignmentType })
@@ -167,11 +172,12 @@ export default function ChoreCreate() {
                   </option>
                 ))}
               </select>
-            </label>
+            </div>
 
-            <label className="flex flex-col gap-1.5">
-              <span className={labelClass}>Repeats</span>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="repeats">Repeats</Label>
               <select
+                id="repeats"
                 value={form.repeats}
                 onChange={(e) => setForm({ ...form, repeats: e.target.value as RepeatPeriod })}
                 className={inputClass}
@@ -182,22 +188,23 @@ export default function ChoreCreate() {
                   </option>
                 ))}
               </select>
-            </label>
+            </div>
           </div>
 
-          <label className="flex flex-col gap-1.5">
-            <span className={labelClass}>Start date</span>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="start_date">Start date</Label>
             <input
               type="date"
+              id="start_date"
               required
               value={form.start_date}
               onChange={(e) => setForm({ ...form, start_date: e.target.value })}
               className={inputClass}
             />
-          </label>
+          </div>
 
-          <div className="flex flex-col gap-2">
-            <span className={labelClass}>Tags</span>
+          <div className="flex flex-col gap-2" role="group" aria-labelledby="tags-label">
+            <Label id="tags-label">Tags</Label>
             {tags.length === 0 ? (
               <p className="text-sm font-medium text-muted-foreground">No tags yet.</p>
             ) : (
