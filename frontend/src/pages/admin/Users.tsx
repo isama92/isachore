@@ -355,15 +355,32 @@ export default function Users() {
                           </AlertDialogContent>
                         </AlertDialog>
                       ) : (
-                        <Button
-                          type="button"
-                          variant="link"
-                          size="sm"
-                          className="ml-3 h-auto p-0 font-bold hover:text-primary-dark hover:no-underline"
-                          onClick={() => void setActive(u, true)}
-                        >
-                          Reactivate
-                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="link"
+                              size="sm"
+                              className="ml-3 h-auto p-0 font-bold hover:text-primary-dark hover:no-underline"
+                            >
+                              Reactivate
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Reactivate {u.name}?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                They will be able to sign in again.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => void setActive(u, true)}>
+                                Reactivate user
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
                       ))}
                   </TableCell>
                 </TableRow>

@@ -175,6 +175,47 @@ describe('Users', () => {
     expect(toastSpy).toHaveBeenCalledWith('User deactivated')
   })
 
+  it('reactivates only after confirming in the dialog', async () => {
+    const inactive = makeUser({
+      id: 2,
+      name: 'Bob Member',
+      email: 'bob@example.com',
+      is_active: false,
+    })
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'PATCH') return jsonBody({ ...inactive, is_active: true })
+      return jsonBody([me, inactive])
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    const toastSpy = vi.spyOn(toast, 'success')
+    renderWithProviders(<Users />, { authValue: { user: me } })
+    await screen.findByText('Bob Member')
+
+    // Cancelled -> no request
+    await user.click(screen.getByRole('button', { name: 'Reactivate' }))
+    await user.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Cancel' }),
+    )
+    expect(fetchMock.mock.calls.filter(([, i]) => i?.method === 'PATCH')).toHaveLength(0)
+
+    // Confirmed -> PATCH is_active: true
+    await user.click(screen.getByRole('button', { name: 'Reactivate' }))
+    await user.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', {
+        name: 'Reactivate user',
+      }),
+    )
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/users/2',
+        expect.objectContaining({ method: 'PATCH' }),
+      ),
+    )
+    expect(bodyOf(fetchMock, 'PATCH', '/api/v1/users/2')).toMatchObject({ is_active: true })
+    expect(toastSpy).toHaveBeenCalledWith('User reactivated')
+  })
+
   it('protects the current user from self login-as, deactivate, and role edits', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonBody([me, member])))
     const user = userEvent.setup({ pointerEventsCheck: 0 })
