@@ -4,6 +4,17 @@ import { api, ApiError } from '../lib/api'
 import { assignmentLabel, formatDate, repeatLabel } from '../lib/chores'
 import type { Chore } from '../lib/types'
 import { Button } from '@/components/ui/button'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 
 const chipClass = 'rounded-full px-2.5 py-0.5 text-[11px] font-bold'
 
@@ -29,7 +40,6 @@ export default function Chores() {
   }, [load])
 
   async function remove(chore: Chore) {
-    if (!window.confirm(`Delete "${chore.title}"? This cannot be undone.`)) return
     setError(null)
     try {
       await api.del(`/api/v1/chores/${chore.id}`)
@@ -122,15 +132,32 @@ export default function Chores() {
                     {formatDate(c.start_date)}
                   </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
-                    <Button
-                      type="button"
-                      variant="link"
-                      size="sm"
-                      className="h-auto p-0 font-bold text-destructive hover:no-underline hover:opacity-80"
-                      onClick={() => void remove(c)}
-                    >
-                      Delete
-                    </Button>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="link"
+                          size="sm"
+                          className="h-auto p-0 font-bold text-destructive hover:no-underline hover:opacity-80"
+                        >
+                          Delete
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Delete “{c.title}”?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This chore will be permanently removed. This cannot be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction variant="destructive" onClick={() => void remove(c)}>
+                            Delete chore
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   </td>
                 </tr>
               ))}

@@ -133,24 +133,30 @@ describe('Users', () => {
     expect(value.refresh).toHaveBeenCalled()
   })
 
-  it('deactivates only after the user confirms', async () => {
+  it('deactivates only after confirming in the dialog', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === 'DELETE') return jsonBody(undefined, 204)
       return jsonBody([me, member])
     })
     vi.stubGlobal('fetch', fetchMock)
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
     renderWithProviders(<Users />, { authValue: { user: me } })
     await screen.findByText('Bob Member')
 
-    // Declined -> no request
-    await userEvent.click(screen.getByRole('button', { name: 'Deactivate' }))
-    expect(confirmSpy).toHaveBeenCalled()
+    // Cancelled -> no request
+    await user.click(screen.getByRole('button', { name: 'Deactivate' }))
+    await user.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Cancel' }),
+    )
     expect(fetchMock.mock.calls.filter(([, i]) => i?.method === 'DELETE')).toHaveLength(0)
 
     // Confirmed -> DELETE
-    confirmSpy.mockReturnValue(true)
-    await userEvent.click(screen.getByRole('button', { name: 'Deactivate' }))
+    await user.click(screen.getByRole('button', { name: 'Deactivate' }))
+    await user.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', {
+        name: 'Deactivate user',
+      }),
+    )
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         '/api/v1/users/2',

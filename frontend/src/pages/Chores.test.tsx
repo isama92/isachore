@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import Chores from './Chores'
 import { jsonResponse, mockFetch, renderWithProviders } from '../test/utils'
@@ -43,8 +43,8 @@ describe('Chores', () => {
     expect(await screen.findByText('No chores yet.')).toBeInTheDocument()
   })
 
-  it('deletes a chore after confirmation and reloads', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
+  it('deletes a chore after confirming in the dialog and reloads', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
     let deleted = false
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input.toString()
@@ -58,7 +58,10 @@ describe('Chores', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     renderWithProviders(<Chores />, { authValue: { user: me } })
-    await userEvent.click(await screen.findByRole('button', { name: 'Delete' }))
+    await user.click(await screen.findByRole('button', { name: 'Delete' }))
+    await user.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete chore' }),
+    )
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -69,8 +72,8 @@ describe('Chores', () => {
     expect(await screen.findByText('No chores yet.')).toBeInTheDocument()
   })
 
-  it('does not delete when confirmation is cancelled', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false)
+  it('does not delete when the dialog is cancelled', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
     const fetchMock = mockFetch([
       {
         path: '/api/v1/chores',
@@ -79,7 +82,10 @@ describe('Chores', () => {
       },
     ])
     renderWithProviders(<Chores />, { authValue: { user: me } })
-    await userEvent.click(await screen.findByRole('button', { name: 'Delete' }))
+    await user.click(await screen.findByRole('button', { name: 'Delete' }))
+    await user.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Cancel' }),
+    )
 
     expect(fetchMock).not.toHaveBeenCalledWith(
       '/api/v1/chores/7',

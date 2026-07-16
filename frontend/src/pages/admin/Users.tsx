@@ -6,6 +6,17 @@ import type { User } from '../../lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 
 type FormState = {
   email: string
@@ -110,12 +121,6 @@ export default function Users() {
   }
 
   async function setActive(u: User, active: boolean) {
-    if (
-      !active &&
-      !window.confirm(`Deactivate ${u.name}? They will be logged out and unable to sign in.`)
-    ) {
-      return
-    }
     setError(null)
     try {
       if (active) {
@@ -284,15 +289,35 @@ export default function Users() {
                     </Button>
                     {u.id !== me?.id &&
                       (u.is_active ? (
-                        <Button
-                          type="button"
-                          variant="link"
-                          size="sm"
-                          className="ml-3 h-auto p-0 font-bold text-destructive hover:no-underline hover:opacity-80"
-                          onClick={() => void setActive(u, false)}
-                        >
-                          Deactivate
-                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="link"
+                              size="sm"
+                              className="ml-3 h-auto p-0 font-bold text-destructive hover:no-underline hover:opacity-80"
+                            >
+                              Deactivate
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Deactivate {u.name}?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                They will be logged out and unable to sign in.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction
+                                variant="destructive"
+                                onClick={() => void setActive(u, false)}
+                              >
+                                Deactivate user
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
                       ) : (
                         <Button
                           type="button"
