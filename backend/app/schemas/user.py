@@ -22,7 +22,8 @@ class UserRead(BaseModel):
 
     id: int
     email: str
-    name: str
+    first_name: str
+    last_name: str
     is_admin: bool
     is_active: bool
     created_at: datetime
@@ -46,14 +47,16 @@ class MeRead(UserRead):
 
 class UserCreate(BaseModel):
     email: NormalisedEmail
-    name: str = Field(min_length=1, max_length=255)
+    first_name: str = Field(min_length=1, max_length=255)
+    last_name: str = Field(min_length=1, max_length=255)
     password: str = Field(min_length=8)
     is_admin: bool = False
 
 
 class UserUpdate(BaseModel):
     email: NormalisedEmail | None = None
-    name: str | None = Field(default=None, min_length=1, max_length=255)
+    first_name: str | None = Field(default=None, min_length=1, max_length=255)
+    last_name: str | None = Field(default=None, min_length=1, max_length=255)
     password: str | None = Field(default=None, min_length=8)
     is_admin: bool | None = None
     is_active: bool | None = None
@@ -69,7 +72,8 @@ class ProfileUpdate(BaseModel):
     (the confirm-new-password field is a frontend-only check; the API takes the
     old and new passwords only)."""
 
-    name: str | None = Field(default=None, min_length=1, max_length=255)
+    first_name: str | None = Field(default=None, min_length=1, max_length=255)
+    last_name: str | None = Field(default=None, min_length=1, max_length=255)
     current_password: str | None = None
     new_password: str | None = Field(default=None, min_length=8)
 

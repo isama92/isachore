@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { useAuth } from '../../auth/useAuth'
 import { api, ApiError } from '../../lib/api'
+import { fullName } from '../../lib/user'
 import type { User } from '../../lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -39,7 +40,8 @@ import {
 
 type FormState = {
   email: string
-  name: string
+  first_name: string
+  last_name: string
   password: string
   is_admin: boolean
   is_active: boolean
@@ -47,7 +49,8 @@ type FormState = {
 
 const emptyForm: FormState = {
   email: '',
-  name: '',
+  first_name: '',
+  last_name: '',
   password: '',
   is_admin: false,
   is_active: true,
@@ -91,7 +94,8 @@ export default function Users() {
     setEditing(u)
     setForm({
       email: u.email,
-      name: u.name,
+      first_name: u.first_name,
+      last_name: u.last_name,
       password: '',
       is_admin: u.is_admin,
       is_active: u.is_active,
@@ -108,7 +112,8 @@ export default function Users() {
       if (editing) {
         const payload: Record<string, unknown> = {
           email: form.email,
-          name: form.name,
+          first_name: form.first_name,
+          last_name: form.last_name,
           is_admin: form.is_admin,
           is_active: form.is_active,
         }
@@ -131,7 +136,7 @@ export default function Users() {
     setError(null)
     try {
       await api.post<User>(`/api/v1/users/${u.id}/impersonate`)
-      toast.success(`Viewing as ${u.name}`)
+      toast.success(`Viewing as ${fullName(u)}`)
       await refresh()
       await navigate('/')
     } catch (err) {
@@ -175,19 +180,28 @@ export default function Users() {
         <DialogContent className="sm:max-w-lg">
           <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
             <DialogHeader>
-              <DialogTitle>{editing ? `Edit ${editing.name}` : 'New user'}</DialogTitle>
+              <DialogTitle>{editing ? `Edit ${fullName(editing)}` : 'New user'}</DialogTitle>
               <DialogDescription className="sr-only">
                 {editing ? 'Update this account.' : 'Create a new household member.'}
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="user-name">Name</Label>
+                <Label htmlFor="user-first-name">First name</Label>
                 <Input
-                  id="user-name"
+                  id="user-first-name"
                   required
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  value={form.first_name}
+                  onChange={(e) => setForm({ ...form, first_name: e.target.value })}
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="user-last-name">Last name</Label>
+                <Input
+                  id="user-last-name"
+                  required
+                  value={form.last_name}
+                  onChange={(e) => setForm({ ...form, last_name: e.target.value })}
                 />
               </div>
               <div className="flex flex-col gap-1.5">
@@ -276,7 +290,7 @@ export default function Users() {
               {users.map((u) => (
                 <TableRow key={u.id}>
                   <TableCell className="font-semibold">
-                    {u.name}
+                    {fullName(u)}
                     {u.id === me?.id && (
                       <span className="ml-2 text-[11px] font-bold text-placeholder">you</span>
                     )}
@@ -338,7 +352,7 @@ export default function Users() {
                           </AlertDialogTrigger>
                           <AlertDialogContent>
                             <AlertDialogHeader>
-                              <AlertDialogTitle>Deactivate {u.name}?</AlertDialogTitle>
+                              <AlertDialogTitle>Deactivate {fullName(u)}?</AlertDialogTitle>
                               <AlertDialogDescription>
                                 They will be logged out and unable to sign in.
                               </AlertDialogDescription>
@@ -368,7 +382,7 @@ export default function Users() {
                           </AlertDialogTrigger>
                           <AlertDialogContent>
                             <AlertDialogHeader>
-                              <AlertDialogTitle>Reactivate {u.name}?</AlertDialogTitle>
+                              <AlertDialogTitle>Reactivate {fullName(u)}?</AlertDialogTitle>
                               <AlertDialogDescription>
                                 They will be able to sign in again.
                               </AlertDialogDescription>

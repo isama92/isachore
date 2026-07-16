@@ -7,8 +7,19 @@ import Users from './Users'
 import { renderWithProviders } from '../../test/utils'
 import { makeUser } from '../../test/fixtures'
 
-const me = makeUser({ id: 1, name: 'Admin User', email: 'admin@example.com', is_admin: true })
-const member = makeUser({ id: 2, name: 'Bob Member', email: 'bob@example.com' })
+const me = makeUser({
+  id: 1,
+  first_name: 'Admin',
+  last_name: 'User',
+  email: 'admin@example.com',
+  is_admin: true,
+})
+const member = makeUser({
+  id: 2,
+  first_name: 'Bob',
+  last_name: 'Member',
+  email: 'bob@example.com',
+})
 
 type FetchMock = ReturnType<typeof vi.fn>
 
@@ -43,7 +54,8 @@ describe('Users', () => {
     await screen.findByText('Admin User')
 
     await user.click(screen.getByRole('button', { name: 'Add user' }))
-    await user.type(await screen.findByLabelText('Name'), 'New Person')
+    await user.type(await screen.findByLabelText('First name'), 'New')
+    await user.type(screen.getByLabelText('Last name'), 'Person')
     await user.type(screen.getByLabelText('Email'), 'new@example.com')
     await user.type(screen.getByLabelText('Password'), 'password12345')
     await user.click(screen.getByRole('checkbox', { name: 'Admin' }))
@@ -57,7 +69,8 @@ describe('Users', () => {
     )
     expect(bodyOf(fetchMock, 'POST', '/api/v1/users')).toMatchObject({
       email: 'new@example.com',
-      name: 'New Person',
+      first_name: 'New',
+      last_name: 'Person',
       password: 'password12345',
       is_admin: true,
     })
@@ -85,7 +98,11 @@ describe('Users', () => {
     )
     const body = bodyOf(fetchMock, 'PATCH', '/api/v1/users/2')
     expect(body).not.toHaveProperty('password')
-    expect(body).toMatchObject({ email: 'bob@example.com', name: 'Bob Member' })
+    expect(body).toMatchObject({
+      email: 'bob@example.com',
+      first_name: 'Bob',
+      last_name: 'Member',
+    })
   })
 
   it('includes the password on edit when provided', async () => {
@@ -178,7 +195,8 @@ describe('Users', () => {
   it('reactivates only after confirming in the dialog', async () => {
     const inactive = makeUser({
       id: 2,
-      name: 'Bob Member',
+      first_name: 'Bob',
+      last_name: 'Member',
       email: 'bob@example.com',
       is_active: false,
     })

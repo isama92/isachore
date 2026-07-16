@@ -5,6 +5,7 @@ import { CalendarIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '../lib/api'
 import { assignmentOptions, formatDate, repeatOptions, todayISO } from '../lib/chores'
+import { fullName } from '../lib/user'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -148,7 +149,7 @@ export default function ChoreCreate() {
               >
                 {members.map((m) => (
                   <ToggleGroupItem key={m.id} value={String(m.id)} className={chipItemClass}>
-                    {m.name}
+                    {fullName(m)}
                   </ToggleGroupItem>
                 ))}
               </ToggleGroup>

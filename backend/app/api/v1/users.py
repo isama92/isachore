@@ -68,7 +68,8 @@ async def create_user(
     await _ensure_email_free(session, payload.email)
     user = User(
         email=payload.email,
-        name=payload.name,
+        first_name=payload.first_name,
+        last_name=payload.last_name,
         password_hash=hash_password(payload.password),
         is_admin=payload.is_admin,
     )
@@ -114,9 +115,12 @@ async def update_user(
         await _ensure_email_free(session, payload.email, exclude_id=user.id)
         user.email = payload.email
         changed.append("email")
-    if payload.name is not None and payload.name != user.name:
-        user.name = payload.name
-        changed.append("name")
+    if payload.first_name is not None and payload.first_name != user.first_name:
+        user.first_name = payload.first_name
+        changed.append("first_name")
+    if payload.last_name is not None and payload.last_name != user.last_name:
+        user.last_name = payload.last_name
+        changed.append("last_name")
     if payload.is_admin is not None and payload.is_admin != user.is_admin:
         user.is_admin = payload.is_admin
         changed.append("is_admin")

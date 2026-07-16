@@ -132,14 +132,16 @@ def make_user(db_session: AsyncSession) -> Callable[..., Awaitable[User]]:
     async def _make(
         *,
         email: str = "member@example.com",
-        name: str = "Test Member",
+        first_name: str = "Test",
+        last_name: str = "Member",
         password: str = "password12345",
         is_admin: bool = False,
         is_active: bool = True,
     ) -> User:
         user = User(
             email=email,
-            name=name,
+            first_name=first_name,
+            last_name=last_name,
             password_hash=security.hash_password(password),
             is_admin=is_admin,
             is_active=is_active,

@@ -5,7 +5,8 @@ export function makeUser(overrides: Partial<User> = {}): User {
   return {
     id: 1,
     email: 'member@example.com',
-    name: 'Test Member',
+    first_name: 'Test',
+    last_name: 'Member',
     is_admin: false,
     is_active: true,
     created_at: '2026-01-01T00:00:00Z',

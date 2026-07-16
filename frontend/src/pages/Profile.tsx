@@ -2,7 +2,7 @@ import { useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { toast } from 'sonner'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
-import { initials } from '../lib/avatar'
+import { fullName, initials } from '../lib/user'
 import type { User } from '../lib/types'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -12,7 +12,8 @@ import { Label } from '@/components/ui/label'
 export default function Profile() {
   const { user, refresh } = useAuth()
 
-  const [name, setName] = useState(user?.name ?? '')
+  const [firstName, setFirstName] = useState(user?.first_name ?? '')
+  const [lastName, setLastName] = useState(user?.last_name ?? '')
   const [savingName, setSavingName] = useState(false)
   const [nameError, setNameError] = useState<string | null>(null)
 
@@ -33,7 +34,7 @@ export default function Profile() {
     setNameError(null)
     setSavingName(true)
     try {
-      await api.patch<User>('/api/v1/profile', { name })
+      await api.patch<User>('/api/v1/profile', { first_name: firstName, last_name: lastName })
       toast.success('Name updated')
       await refresh()
     } catch (err) {
@@ -116,9 +117,9 @@ export default function Profile() {
           <h2 className="mb-4 font-display text-lg font-bold tracking-tight">Photo</h2>
           <div className="flex items-center gap-5">
             <Avatar className="size-20">
-              {user.avatar_url && <AvatarImage src={user.avatar_url} alt={user.name} />}
+              {user.avatar_url && <AvatarImage src={user.avatar_url} alt={fullName(user)} />}
               <AvatarFallback className="bg-primary/10 text-xl font-bold text-primary">
-                {initials(user.name)}
+                {initials(user)}
               </AvatarFallback>
             </Avatar>
             <div className="flex flex-col gap-2">
@@ -164,14 +165,25 @@ export default function Profile() {
         <section className="rounded-2xl border border-line bg-card p-6">
           <h2 className="mb-4 font-display text-lg font-bold tracking-tight">Name</h2>
           <form onSubmit={(e) => void onNameSubmit(e)} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="profile-name">Name</Label>
-              <Input
-                id="profile-name"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="profile-first-name">First name</Label>
+                <Input
+                  id="profile-first-name"
+                  required
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="profile-last-name">Last name</Label>
+                <Input
+                  id="profile-last-name"
+                  required
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                />
+              </div>
             </div>
             {nameError && <p className="text-[13px] font-bold text-danger">{nameError}</p>}
             <div>

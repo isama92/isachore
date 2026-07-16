@@ -6,7 +6,7 @@ import ChoreCreate from './ChoreCreate'
 import { mockFetch, renderWithProviders } from '../test/utils'
 import { makeChore, makeHousehold, makeTag, makeUser } from '../test/fixtures'
 
-const me = makeUser({ id: 1, name: 'Alex' })
+const me = makeUser({ id: 1, first_name: 'Alex', last_name: 'Kim' })
 
 function postBody(mock: ReturnType<typeof mockFetch>): Record<string, unknown> {
   const call = mock.mock.calls.find(([, init]) => init?.method === 'POST')
@@ -20,13 +20,15 @@ describe('ChoreCreate', () => {
       {
         path: '/api/v1/households',
         method: 'GET',
-        body: [makeHousehold({ members: [makeUser({ id: 2, name: 'Jo' })] })],
+        body: [
+          makeHousehold({ members: [makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' })] }),
+        ],
       },
       { path: '/api/v1/tags', method: 'GET', body: [makeTag({ id: 3, name: 'deep-clean' })] },
     ])
     renderWithProviders(<ChoreCreate />, { authValue: { user: me }, route: '/chores/new' })
 
-    expect(await screen.findByRole('button', { name: 'Jo' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Jo Ng' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'deep-clean' })).toBeInTheDocument()
     expect(screen.getByLabelText('Title')).toBeInTheDocument()
   })
@@ -36,7 +38,9 @@ describe('ChoreCreate', () => {
       {
         path: '/api/v1/households',
         method: 'GET',
-        body: [makeHousehold({ members: [makeUser({ id: 2, name: 'Jo' })] })],
+        body: [
+          makeHousehold({ members: [makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' })] }),
+        ],
       },
       { path: '/api/v1/tags', method: 'GET', body: [makeTag({ id: 3, name: 'deep-clean' })] },
       { path: '/api/v1/chores', method: 'POST', status: 201, body: makeChore() },
@@ -51,7 +55,7 @@ describe('ChoreCreate', () => {
 
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     await user.type(await screen.findByLabelText('Title'), 'Scrub the tub')
-    await user.click(screen.getByRole('button', { name: 'Jo' }))
+    await user.click(screen.getByRole('button', { name: 'Jo Ng' }))
     await user.click(screen.getByRole('button', { name: 'deep-clean' }))
     await user.click(screen.getByRole('combobox', { name: 'Repeats' }))
     await user.click(await screen.findByRole('option', { name: 'Daily' }))

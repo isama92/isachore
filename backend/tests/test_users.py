@@ -71,7 +71,8 @@ async def test_create_user(make_user: Login, auth_client: AuthClient) -> None:
         "/api/v1/users",
         json={
             "email": "newbie@example.com",
-            "name": "New Member",
+            "first_name": "New",
+            "last_name": "Member",
             "password": "password12345",
         },
     )
@@ -79,6 +80,8 @@ async def test_create_user(make_user: Login, auth_client: AuthClient) -> None:
     assert resp.status_code == 201
     body = resp.json()
     assert body["email"] == "newbie@example.com"
+    assert body["first_name"] == "New"
+    assert body["last_name"] == "Member"
     assert body["is_admin"] is False
     assert body["is_active"] is True
     assert "password_hash" not in body
@@ -98,7 +101,12 @@ async def test_create_user_duplicate_email(make_user: Login, auth_client: AuthCl
 
     resp = await client.post(
         "/api/v1/users",
-        json={"email": "taken@example.com", "name": "Dup", "password": "password12345"},
+        json={
+            "email": "taken@example.com",
+            "first_name": "Dup",
+            "last_name": "Licate",
+            "password": "password12345",
+        },
     )
     assert resp.status_code == 409
 
@@ -110,7 +118,12 @@ async def test_create_user_normalises_email_case(make_user: Login, auth_client: 
 
     resp = await client.post(
         "/api/v1/users",
-        json={"email": "Mixed@Example.com", "name": "Mixed", "password": "password12345"},
+        json={
+            "email": "Mixed@Example.com",
+            "first_name": "Mixed",
+            "last_name": "Case",
+            "password": "password12345",
+        },
     )
     assert resp.status_code == 201
     assert resp.json()["email"] == "mixed@example.com"
@@ -125,7 +138,12 @@ async def test_create_user_duplicate_email_case_insensitive(
 
     resp = await client.post(
         "/api/v1/users",
-        json={"email": "Taken@Example.com", "name": "Dup", "password": "password12345"},
+        json={
+            "email": "Taken@Example.com",
+            "first_name": "Dup",
+            "last_name": "Licate",
+            "password": "password12345",
+        },
     )
     assert resp.status_code == 409
 
@@ -136,7 +154,26 @@ async def test_create_user_invalid_payload(make_user: Login, auth_client: AuthCl
 
     resp = await client.post(
         "/api/v1/users",
-        json={"email": "not-an-email", "name": "", "password": "short"},
+        json={"email": "not-an-email", "first_name": "", "last_name": "", "password": "short"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_create_user_blank_first_name_rejected(
+    make_user: Login, auth_client: AuthClient
+) -> None:
+    # Isolates the name min_length: everything else is valid, only first_name is empty.
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    client = await auth_client(admin)
+
+    resp = await client.post(
+        "/api/v1/users",
+        json={
+            "email": "blank@example.com",
+            "first_name": "",
+            "last_name": "Person",
+            "password": "password12345",
+        },
     )
     assert resp.status_code == 422
 
@@ -146,7 +183,12 @@ async def test_create_user_as_member_forbidden(make_user: Login, auth_client: Au
     client = await auth_client(member)
     resp = await client.post(
         "/api/v1/users",
-        json={"email": "x@example.com", "name": "X", "password": "password12345"},
+        json={
+            "email": "x@example.com",
+            "first_name": "Ex",
+            "last_name": "Ample",
+            "password": "password12345",
+        },
     )
     assert resp.status_code == 403
 
@@ -156,15 +198,16 @@ async def test_create_user_as_member_forbidden(make_user: Login, auth_client: Au
 
 async def test_update_user_name_and_email(make_user: Login, auth_client: AuthClient) -> None:
     admin = await make_user(email="admin@example.com", is_admin=True)
-    member = await make_user(email="member@example.com", name="Old Name")
+    member = await make_user(email="member@example.com", first_name="Old", last_name="Name")
     client = await auth_client(admin)
 
     resp = await client.patch(
         f"/api/v1/users/{member.id}",
-        json={"name": "New Name", "email": "renamed@example.com"},
+        json={"first_name": "New", "last_name": "Name", "email": "renamed@example.com"},
     )
     assert resp.status_code == 200
-    assert resp.json()["name"] == "New Name"
+    assert resp.json()["first_name"] == "New"
+    assert resp.json()["last_name"] == "Name"
     assert resp.json()["email"] == "renamed@example.com"
 
 
@@ -186,10 +229,11 @@ async def test_update_own_unchanged_email_allowed(
 
     resp = await client.patch(
         f"/api/v1/users/{admin.id}",
-        json={"email": "admin@example.com", "name": "Renamed Admin"},
+        json={"email": "admin@example.com", "first_name": "Renamed", "last_name": "Admin"},
     )
     assert resp.status_code == 200
-    assert resp.json()["name"] == "Renamed Admin"
+    assert resp.json()["first_name"] == "Renamed"
+    assert resp.json()["last_name"] == "Admin"
 
 
 async def test_update_self_demote_forbidden(make_user: Login, auth_client: AuthClient) -> None:
@@ -240,7 +284,7 @@ async def test_update_deactivate_revokes_tokens(
 async def test_update_missing_user(make_user: Login, auth_client: AuthClient) -> None:
     admin = await make_user(email="admin@example.com", is_admin=True)
     client = await auth_client(admin)
-    resp = await client.patch("/api/v1/users/999999", json={"name": "Nope"})
+    resp = await client.patch("/api/v1/users/999999", json={"first_name": "Nope"})
     assert resp.status_code == 404
 
 

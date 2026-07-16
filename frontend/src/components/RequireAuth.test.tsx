@@ -37,7 +37,7 @@ describe('RequireAuth', () => {
   it('renders the protected content and top bar for an authed user', () => {
     renderWithProviders(tree, {
       route: '/protected',
-      authValue: { user: makeUser({ name: 'Alex Member' }) },
+      authValue: { user: makeUser({ first_name: 'Alex', last_name: 'Member' }) },
     })
     expect(screen.getByText('protected-content')).toBeInTheDocument()
     // The top bar renders its user menu (name now lives inside that menu).

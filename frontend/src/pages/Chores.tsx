@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import { toast } from 'sonner'
 import { api, ApiError } from '../lib/api'
 import { assignmentLabel, formatDate, repeatLabel } from '../lib/chores'
+import { fullName } from '../lib/user'
 import type { Chore } from '../lib/types'
 import { Button } from '@/components/ui/button'
 import {
@@ -103,7 +104,7 @@ export default function Chores() {
                       <span className="flex flex-wrap gap-1.5">
                         {c.assignees.map((a) => (
                           <Badge key={a.id} variant="secondary">
-                            {a.name}
+                            {fullName(a)}
                           </Badge>
                         ))}
                       </span>

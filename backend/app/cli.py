@@ -1,6 +1,7 @@
 """Management commands. Run inside the backend container:
 
-docker compose exec backend python -m app.cli create-admin --email you@example.com --name You
+docker compose exec backend python -m app.cli create-admin \\
+    --email you@example.com --first-name You --last-name Example
 """
 
 import argparse
@@ -16,7 +17,7 @@ from app.db.session import async_session_factory
 from app.models import User
 
 
-async def create_admin(email: str, name: str, password: str) -> None:
+async def create_admin(email: str, first_name: str, last_name: str, password: str) -> None:
     # Normalise like the API schema does, since the CLI bypasses Pydantic (L3)
     email = email.lower()
     async with async_session_factory() as session:
@@ -25,7 +26,8 @@ async def create_admin(email: str, name: str, password: str) -> None:
             sys.exit(f"error: a user with email {email!r} already exists")
         user = User(
             email=email,
-            name=name,
+            first_name=first_name,
+            last_name=last_name,
             password_hash=hash_password(password),
             is_admin=True,
             is_active=True,
@@ -43,7 +45,8 @@ def main() -> None:
 
     create = subparsers.add_parser("create-admin", help="create an admin user")
     create.add_argument("--email", required=True)
-    create.add_argument("--name", required=True)
+    create.add_argument("--first-name", required=True)
+    create.add_argument("--last-name", required=True)
     create.add_argument("--password", help="prompted securely when omitted")
 
     args = parser.parse_args()
@@ -51,7 +54,7 @@ def main() -> None:
         password = args.password or getpass.getpass("Password: ")
         if len(password) < 8:
             sys.exit("error: password must be at least 8 characters")
-        asyncio.run(create_admin(args.email, args.name, password))
+        asyncio.run(create_admin(args.email, args.first_name, args.last_name, password))
 
 
 if __name__ == "__main__":

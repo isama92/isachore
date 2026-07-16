@@ -21,7 +21,7 @@ describe('TopBar', () => {
 
   it('shows the initials fallback when the user has no avatar', () => {
     renderWithProviders(<TopBar />, {
-      authValue: { user: makeUser({ name: 'Ada Lovelace', avatar_url: null }) },
+      authValue: { user: makeUser({ first_name: 'Ada', last_name: 'Lovelace', avatar_url: null }) },
     })
     expect(screen.getByText('AL')).toBeInTheDocument()
     expect(screen.queryByRole('img')).not.toBeInTheDocument()
@@ -44,7 +44,11 @@ describe('TopBar', () => {
 
     renderWithProviders(<TopBar />, {
       authValue: {
-        user: makeUser({ name: 'Ada Lovelace', avatar_url: '/api/v1/media/avatars/x.webp' }),
+        user: makeUser({
+          first_name: 'Ada',
+          last_name: 'Lovelace',
+          avatar_url: '/api/v1/media/avatars/x.webp',
+        }),
       },
     })
     const img = await screen.findByRole('img')
@@ -55,7 +59,9 @@ describe('TopBar', () => {
   it('shows name, email, Profile and a destructive Log out in the menu', async () => {
     const user = setup()
     renderWithProviders(<TopBar />, {
-      authValue: { user: makeUser({ name: 'Ada Lovelace', email: 'ada@example.com' }) },
+      authValue: {
+        user: makeUser({ first_name: 'Ada', last_name: 'Lovelace', email: 'ada@example.com' }),
+      },
     })
     const menu = await openMenu(user)
 
@@ -105,7 +111,10 @@ describe('TopBar', () => {
       { path: '/api/v1/auth/stop-impersonating', method: 'POST', body: makeUser() },
     ])
     const { value } = renderWithProviders(<TopBar />, {
-      authValue: { user: makeUser({ name: 'Bob Member' }), impersonating: true },
+      authValue: {
+        user: makeUser({ first_name: 'Bob', last_name: 'Member' }),
+        impersonating: true,
+      },
     })
 
     await userEvent.click(screen.getByRole('button', { name: 'Return to admin' }))
@@ -129,7 +138,10 @@ describe('TopBar', () => {
       },
     ])
     const { value } = renderWithProviders(<TopBar />, {
-      authValue: { user: makeUser({ name: 'Bob Member' }), impersonating: true },
+      authValue: {
+        user: makeUser({ first_name: 'Bob', last_name: 'Member' }),
+        impersonating: true,
+      },
     })
 
     await userEvent.click(screen.getByRole('button', { name: 'Return to admin' }))

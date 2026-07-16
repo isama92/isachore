@@ -8,21 +8,28 @@ import { makeUser } from '../test/fixtures'
 describe('Profile', () => {
   it('saves a new name via PATCH /profile and refreshes', async () => {
     const fetchMock = mockFetch([
-      { path: '/api/v1/profile', method: 'PATCH', body: makeUser({ name: 'New Name' }) },
+      {
+        path: '/api/v1/profile',
+        method: 'PATCH',
+        body: makeUser({ first_name: 'New', last_name: 'Name' }),
+      },
     ])
     const { value } = renderWithProviders(<Profile />, {
-      authValue: { user: makeUser({ name: 'Old Name' }) },
+      authValue: { user: makeUser({ first_name: 'Old', last_name: 'Name' }) },
     })
 
-    const name = screen.getByLabelText('Name')
-    await userEvent.clear(name)
-    await userEvent.type(name, 'New Name')
+    const firstName = screen.getByLabelText('First name')
+    await userEvent.clear(firstName)
+    await userEvent.type(firstName, 'New')
     await userEvent.click(screen.getByRole('button', { name: 'Save name' }))
 
     await waitFor(() => expect(value.refresh).toHaveBeenCalled())
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/profile',
-      expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ name: 'New Name' }) }),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ first_name: 'New', last_name: 'Name' }),
+      }),
     )
   })
 

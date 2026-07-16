@@ -6,14 +6,14 @@ import Chores from './Chores'
 import { jsonResponse, mockFetch, renderWithProviders } from '../test/utils'
 import { makeChore, makeTag, makeUser } from '../test/fixtures'
 
-const me = makeUser({ id: 1, name: 'Alex' })
+const me = makeUser({ id: 1, first_name: 'Alex', last_name: 'Kim' })
 
 describe('Chores', () => {
   it('lists chores with assignees, tags and labels', async () => {
     const chore = makeChore({
       id: 7,
       title: 'Scrub the tub',
-      assignees: [makeUser({ id: 2, name: 'Jo' })],
+      assignees: [makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' })],
       tags: [makeTag({ id: 3, name: 'deep-clean', color: '#0d9488' })],
       repeats: 'daily',
       assignment_type: 'least_done',
@@ -22,7 +22,7 @@ describe('Chores', () => {
     renderWithProviders(<Chores />, { authValue: { user: me } })
 
     expect(await screen.findByText('Scrub the tub')).toBeInTheDocument()
-    expect(screen.getByText('Jo')).toBeInTheDocument()
+    expect(screen.getByText('Jo Ng')).toBeInTheDocument()
     expect(screen.getByText('deep-clean')).toBeInTheDocument()
     expect(screen.getByText('Daily')).toBeInTheDocument()
     expect(screen.getByText('Least done')).toBeInTheDocument()

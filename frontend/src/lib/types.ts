@@ -1,7 +1,8 @@
 export type User = {
   id: number
   email: string
-  name: string
+  first_name: string
+  last_name: string
   is_admin: boolean
   is_active: boolean
   created_at: string
@@ -33,7 +34,7 @@ export type Chore = {
 }
 
 // The households endpoint only returns what the assignee picker needs.
-export type HouseholdMember = Pick<User, 'id' | 'name'>
+export type HouseholdMember = Pick<User, 'id' | 'first_name' | 'last_name'>
 
 export type Household = {
   id: number

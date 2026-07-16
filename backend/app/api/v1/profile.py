@@ -25,9 +25,12 @@ async def update_profile(
     reuse the user_updated audit action (actor == target); if an admin is doing
     this while impersonating, impersonator_id keeps the trail back to them."""
     changed: list[str] = []
-    if payload.name is not None and payload.name != user.name:
-        user.name = payload.name
-        changed.append("name")
+    if payload.first_name is not None and payload.first_name != user.first_name:
+        user.first_name = payload.first_name
+        changed.append("first_name")
+    if payload.last_name is not None and payload.last_name != user.last_name:
+        user.last_name = payload.last_name
+        changed.append("last_name")
 
     if payload.new_password is not None:
         if not verify_password(payload.current_password or "", user.password_hash):

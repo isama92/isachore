@@ -61,16 +61,19 @@ async def test_update_name(
     user = await make_user()
     client = await auth_client(user)
 
-    res = await client.patch("/api/v1/profile", json={"name": "Renamed"})
+    res = await client.patch(
+        "/api/v1/profile", json={"first_name": "Renamed", "last_name": "Person"}
+    )
     assert res.status_code == 200
-    assert res.json()["name"] == "Renamed"
+    assert res.json()["first_name"] == "Renamed"
+    assert res.json()["last_name"] == "Person"
     assert res.json()["avatar_url"] is None
     # A name-only edit must not touch sessions.
     assert await _token_count(db_session, user.id) == 1
 
 
 async def test_update_profile_requires_auth(client: AsyncClient) -> None:
-    assert (await client.patch("/api/v1/profile", json={"name": "x"})).status_code == 401
+    assert (await client.patch("/api/v1/profile", json={"first_name": "x"})).status_code == 401
     assert (await client.delete("/api/v1/profile/avatar")).status_code == 401
     res = await client.put(
         "/api/v1/profile/avatar", files={"file": ("a.png", _png_bytes(), "image/png")}

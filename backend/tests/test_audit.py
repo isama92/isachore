@@ -108,7 +108,8 @@ async def test_user_created_and_deactivated_are_audited(
         "/api/v1/users",
         json={
             "email": "new@example.com",
-            "name": "New Person",
+            "first_name": "New",
+            "last_name": "Person",
             "password": "password12345",
             "is_admin": False,
         },
@@ -142,7 +143,7 @@ async def test_update_while_impersonating_records_real_operator(
     client = await auth_client(admin)
 
     assert (await client.post(f"/api/v1/users/{other_admin.id}/impersonate")).status_code == 200
-    resp = await client.patch(f"/api/v1/users/{victim.id}", json={"name": "Bobby"})
+    resp = await client.patch(f"/api/v1/users/{victim.id}", json={"first_name": "Bobby"})
     assert resp.status_code == 200
 
     events = await _events(db_session, AuditAction.user_updated)
@@ -150,7 +151,25 @@ async def test_update_while_impersonating_records_real_operator(
     assert events[0].actor_user_id == other_admin.id  # the impersonated session identity
     assert events[0].impersonator_user_id == admin.id  # the real operator behind it
     assert events[0].target_user_id == victim.id
-    assert events[0].detail == "name"
+    assert events[0].detail == "first_name"
+
+
+async def test_update_both_names_records_both_in_detail(
+    make_user: Login, auth_client: AuthClient, db_session: AsyncSession
+) -> None:
+    # Changing both name fields records them both in the audit detail, in order.
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    member = await make_user(email="bob@example.com", first_name="Bob", last_name="Old")
+    client = await auth_client(admin)
+
+    resp = await client.patch(
+        f"/api/v1/users/{member.id}", json={"first_name": "Bobby", "last_name": "New"}
+    )
+    assert resp.status_code == 200
+
+    events = await _events(db_session, AuditAction.user_updated)
+    assert len(events) == 1
+    assert events[0].detail == "first_name,last_name"
 
 
 async def test_failed_mutation_is_not_audited(
@@ -166,7 +185,7 @@ async def test_failed_mutation_is_not_audited(
     assert await _events(db_session, AuditAction.user_updated) == []
 
     # 404 target: no user_updated row.
-    resp = await client.patch("/api/v1/users/999999", json={"name": "Ghost"})
+    resp = await client.patch("/api/v1/users/999999", json={"first_name": "Ghost"})
     assert resp.status_code == 404
     assert await _events(db_session, AuditAction.user_updated) == []
 
@@ -175,7 +194,8 @@ async def test_failed_mutation_is_not_audited(
         "/api/v1/users",
         json={
             "email": other.email,
-            "name": "Dup",
+            "first_name": "Dup",
+            "last_name": "Licate",
             "password": "password12345",
             "is_admin": False,
         },
@@ -231,7 +251,8 @@ async def test_create_and_deactivate_while_impersonating_record_operator(
         "/api/v1/users",
         json={
             "email": "new@example.com",
-            "name": "New",
+            "first_name": "New",
+            "last_name": "Person",
             "password": "password12345",
             "is_admin": False,
         },

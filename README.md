@@ -19,7 +19,7 @@ multiple people, with a JSON API so mobile clients can join later.
 cp .env.example .env
 docker compose up --build
 docker compose exec backend alembic upgrade head
-docker compose exec backend python -m app.cli create-admin --email you@example.com --name You
+docker compose exec backend python -m app.cli create-admin --email you@example.com --first-name You --last-name Example
 ```
 
 There is no self-registration: the first admin is created with the command

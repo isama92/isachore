@@ -29,8 +29,8 @@ AuthClient = Callable[[User], Awaitable[AsyncClient]]
 async def test_household_members_are_bidirectional(
     db_session, make_user: MakeUser, make_household: MakeHousehold
 ) -> None:
-    alice = await make_user(email="alice@example.com", name="Alice")
-    bob = await make_user(email="bob@example.com", name="Bob")
+    alice = await make_user(email="alice@example.com", first_name="Alice", last_name="A")
+    bob = await make_user(email="bob@example.com", first_name="Bob", last_name="B")
     household = await make_household(name="Flat 3B", members=[alice, bob])
 
     await db_session.refresh(household, attribute_names=["members"])
@@ -136,7 +136,12 @@ async def test_new_user_joins_default_household(
 
     resp = await client.post(
         "/api/v1/users",
-        json={"email": "newbie@example.com", "name": "Newbie", "password": "password12345"},
+        json={
+            "email": "newbie@example.com",
+            "first_name": "New",
+            "last_name": "Bie",
+            "password": "password12345",
+        },
     )
     assert resp.status_code == 201
     new_id = resp.json()["id"]
@@ -157,6 +162,11 @@ async def test_user_creation_without_household_is_noop(
 
     resp = await client.post(
         "/api/v1/users",
-        json={"email": "newbie@example.com", "name": "Newbie", "password": "password12345"},
+        json={
+            "email": "newbie@example.com",
+            "first_name": "New",
+            "last_name": "Bie",
+            "password": "password12345",
+        },
     )
     assert resp.status_code == 201

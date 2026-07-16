@@ -45,7 +45,7 @@ docker compose -f compose.prod.yml up --build      # prod: nginx on :80 serving 
 
 docker compose exec backend alembic revision --autogenerate -m "..."
 docker compose exec backend alembic upgrade head   # run alembic INSIDE the container so host "db" resolves
-docker compose exec backend python -m app.cli create-admin --email you@example.com --name You
+docker compose exec backend python -m app.cli create-admin --email you@example.com --first-name You --last-name Example
 
 cd backend && uv run ruff check . && uv run ruff format .
 cd frontend && npm run lint && npm run format && npm run build   # build also typechecks (tsc -b)
