@@ -1,0 +1,188 @@
+import { describe, expect, it, vi } from 'vitest'
+import { screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { Route, Routes } from 'react-router'
+import Users from './Users'
+import { renderWithProviders } from '../../test/utils'
+import { makeUser } from '../../test/fixtures'
+
+const me = makeUser({ id: 1, name: 'Admin User', email: 'admin@example.com', is_admin: true })
+const member = makeUser({ id: 2, name: 'Bob Member', email: 'bob@example.com' })
+
+type FetchMock = ReturnType<typeof vi.fn>
+
+function bodyOf(fetchMock: FetchMock, method: string, urlEnd: string): Record<string, unknown> {
+  const call = fetchMock.mock.calls.find(
+    ([url, init]) => String(url).endsWith(urlEnd) && init?.method === method,
+  )
+  return JSON.parse((call?.[1] as RequestInit).body as string)
+}
+
+describe('Users', () => {
+  it('renders a row per user with role, status and a "you" badge', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonBody([me, member])))
+    renderWithProviders(<Users />, { authValue: { user: me } })
+
+    expect(await screen.findByText('Admin User')).toBeInTheDocument()
+    expect(screen.getByText('Bob Member')).toBeInTheDocument()
+    expect(screen.getByText('Admin')).toBeInTheDocument()
+    expect(screen.getByText('Member')).toBeInTheDocument()
+    expect(screen.getByText('you')).toBeInTheDocument()
+  })
+
+  it('creates a user and reloads the list', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') return jsonBody(makeUser({ id: 3 }), 201)
+      return jsonBody([me])
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderWithProviders(<Users />, { authValue: { user: me } })
+    await screen.findByText('Admin User')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add user' }))
+    await userEvent.type(screen.getByLabelText('Name'), 'New Person')
+    await userEvent.type(screen.getByLabelText('Email'), 'new@example.com')
+    await userEvent.type(screen.getByLabelText('Password'), 'password12345')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/users',
+        expect.objectContaining({ method: 'POST' }),
+      ),
+    )
+    expect(bodyOf(fetchMock, 'POST', '/api/v1/users')).toMatchObject({
+      email: 'new@example.com',
+      name: 'New Person',
+      password: 'password12345',
+    })
+  })
+
+  it('omits the password on edit when left blank', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'PATCH') return jsonBody(member)
+      return jsonBody([me, member])
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderWithProviders(<Users />, { authValue: { user: me } })
+    await screen.findByText('Bob Member')
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'Edit' })[1])
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/users/2',
+        expect.objectContaining({ method: 'PATCH' }),
+      ),
+    )
+    const body = bodyOf(fetchMock, 'PATCH', '/api/v1/users/2')
+    expect(body).not.toHaveProperty('password')
+    expect(body).toMatchObject({ email: 'bob@example.com', name: 'Bob Member' })
+  })
+
+  it('includes the password on edit when provided', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'PATCH') return jsonBody(member)
+      return jsonBody([me, member])
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderWithProviders(<Users />, { authValue: { user: me } })
+    await screen.findByText('Bob Member')
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'Edit' })[1])
+    await userEvent.type(screen.getByLabelText('Password'), 'brandnew12345')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/users/2',
+        expect.objectContaining({ method: 'PATCH' }),
+      ),
+    )
+    expect(bodyOf(fetchMock, 'PATCH', '/api/v1/users/2')).toMatchObject({
+      password: 'brandnew12345',
+    })
+  })
+
+  it('impersonates a user, refreshes, and navigates home', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') return jsonBody(member)
+      return jsonBody([me, member])
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const tree = (
+      <Routes>
+        <Route path="/admin/users" element={<Users />} />
+        <Route path="/" element={<div>home-marker</div>} />
+      </Routes>
+    )
+    const { value } = renderWithProviders(tree, {
+      route: '/admin/users',
+      authValue: { user: me },
+    })
+    await screen.findByText('Bob Member')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Login as' }))
+
+    await waitFor(() => expect(screen.getByText('home-marker')).toBeInTheDocument())
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/users/2/impersonate',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(value.refresh).toHaveBeenCalled()
+  })
+
+  it('deactivates only after the user confirms', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'DELETE') return jsonBody(undefined, 204)
+      return jsonBody([me, member])
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    renderWithProviders(<Users />, { authValue: { user: me } })
+    await screen.findByText('Bob Member')
+
+    // Declined -> no request
+    await userEvent.click(screen.getByRole('button', { name: 'Deactivate' }))
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(fetchMock.mock.calls.filter(([, i]) => i?.method === 'DELETE')).toHaveLength(0)
+
+    // Confirmed -> DELETE
+    confirmSpy.mockReturnValue(true)
+    await userEvent.click(screen.getByRole('button', { name: 'Deactivate' }))
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/users/2',
+        expect.objectContaining({ method: 'DELETE' }),
+      ),
+    )
+  })
+
+  it('protects the current user from self login-as, deactivate, and role edits', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonBody([me, member])))
+    renderWithProviders(<Users />, { authValue: { user: me } })
+    await screen.findByText('Admin User')
+
+    // Only the member row (not self) exposes these actions
+    expect(screen.getAllByRole('button', { name: 'Login as' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Deactivate' })).toHaveLength(1)
+
+    // Editing yourself disables the Admin and Active toggles
+    await userEvent.click(screen.getAllByRole('button', { name: 'Edit' })[0])
+    const modal = screen.getByRole('heading', { name: /Edit Admin User/ }).closest('form')!
+    expect(within(modal).getByRole('checkbox', { name: 'Admin' })).toBeDisabled()
+    expect(within(modal).getByRole('checkbox', { name: 'Active' })).toBeDisabled()
+  })
+})
+
+// Minimal Response stand-in for the api wrapper (mirrors test/utils.jsonResponse
+// but local so the stateful mocks above can build responses inline).
+function jsonBody(data: unknown, status = 200): Response {
+  return {
+    ok: status < 400,
+    status,
+    statusText: `HTTP ${status}`,
+    json: async () => data,
+  } as Response
+}

@@ -61,7 +61,7 @@ hook, Docker dev/prod, hello world at `/`, login page UI at `/login`.
 - [ ] Due views: what is **overdue**, what has to be done **today**, what is due **in a few days**
 - [ ] Mark chore as done / completion history
 - [ ] API keys for mobile / 3rd-party clients (reuse `auth_tokens` via `Authorization: Bearer`)
-- [ ] Tests: pytest (backend) + vitest (frontend)
+- [x] Tests: pytest (backend) + vitest (frontend)
 - [ ] CI (lint + test on push)
 - [ ] Prod deploy hardening (TLS, real secrets management, DB backups)
 
