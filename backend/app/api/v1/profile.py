@@ -21,9 +21,10 @@ async def update_profile(
     session: SessionDep,
     request: Request,
 ) -> User:
-    """Update the current user's own name and/or password. Self-service edits
-    reuse the user_updated audit action (actor == target); if an admin is doing
-    this while impersonating, impersonator_id keeps the trail back to them."""
+    """Update the current user's own name, appearance (theme/accent) and/or
+    password. Self-service edits reuse the user_updated audit action
+    (actor == target); if an admin is doing this while impersonating,
+    impersonator_id keeps the trail back to them."""
     changed: list[str] = []
     if payload.first_name is not None and payload.first_name != user.first_name:
         user.first_name = payload.first_name
@@ -31,6 +32,12 @@ async def update_profile(
     if payload.last_name is not None and payload.last_name != user.last_name:
         user.last_name = payload.last_name
         changed.append("last_name")
+    if payload.theme is not None and payload.theme != user.theme:
+        user.theme = payload.theme
+        changed.append("theme")
+    if payload.accent_color is not None and payload.accent_color != user.accent_color:
+        user.accent_color = payload.accent_color
+        changed.append("accent_color")
 
     if payload.new_password is not None:
         if not verify_password(payload.current_password or "", user.password_hash):

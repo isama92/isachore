@@ -1,6 +1,7 @@
 import { type CSSProperties } from 'react'
 import { Toaster as Sonner, type ToasterProps } from 'sonner'
 import { useTheme } from '@/theme/useTheme'
+import { isDark } from '@/theme/themes'
 import {
   CircleCheckIcon,
   InfoIcon,
@@ -14,7 +15,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
 
   return (
     <Sonner
-      theme={theme}
+      theme={isDark(theme) ? 'dark' : 'light'}
       position="top-right"
       className="toaster group"
       icons={{

@@ -42,7 +42,7 @@ type FormState = {
 // Brand pill styling for the assignee/tag ToggleGroupItems; the on/off look is
 // driven by data-[state=on] instead of a selected flag.
 const chipItemClass =
-  'flex h-auto items-center gap-2 rounded-full border-[1.5px] border-line bg-card px-3 py-1.5 text-sm font-bold text-muted-foreground hover:border-primary hover:bg-card hover:text-muted-foreground data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-white'
+  'flex h-auto items-center gap-2 rounded-full border-[1.5px] border-line bg-card px-3 py-1.5 text-sm font-bold text-muted-foreground hover:border-primary hover:bg-card hover:text-muted-foreground data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-primary-foreground'
 
 export default function ChoreCreate() {
   const navigate = useNavigate()

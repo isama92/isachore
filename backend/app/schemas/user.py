@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import (
     AfterValidator,
@@ -16,6 +16,27 @@ from pydantic import (
 # so an optional email left unset stays None.
 NormalisedEmail = Annotated[EmailStr, AfterValidator(lambda v: v.lower())]
 
+# Appearance preference value sets, kept in sync with the frontend theme module
+# (frontend/src/theme). A Literal both documents the closed set and makes an
+# unknown value a 422 on write.
+Flavour = Literal["latte", "frappe", "macchiato", "mocha"]
+Accent = Literal[
+    "rosewater",
+    "flamingo",
+    "pink",
+    "mauve",
+    "red",
+    "maroon",
+    "peach",
+    "yellow",
+    "green",
+    "teal",
+    "sky",
+    "sapphire",
+    "blue",
+    "lavender",
+]
+
 
 class UserRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -27,6 +48,10 @@ class UserRead(BaseModel):
     is_admin: bool
     is_active: bool
     created_at: datetime
+    # Appearance preference; None means the client follows its OS-preferred
+    # default (the SPA applies these on load).
+    theme: Flavour | None = None
+    accent_color: Accent | None = None
     # Raw stored filename, read from the ORM object but never serialised; the
     # client only ever sees the derived avatar_url below.
     avatar_path: str | None = Field(default=None, exclude=True)
@@ -76,6 +101,8 @@ class ProfileUpdate(BaseModel):
     last_name: str | None = Field(default=None, min_length=1, max_length=255)
     current_password: str | None = None
     new_password: str | None = Field(default=None, min_length=8)
+    theme: Flavour | None = None
+    accent_color: Accent | None = None
 
     @model_validator(mode="after")
     def _password_pair(self) -> "ProfileUpdate":

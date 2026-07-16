@@ -81,6 +81,39 @@ async def test_update_profile_requires_auth(client: AsyncClient) -> None:
     assert res.status_code == 401
 
 
+# --- appearance (theme + accent) ------------------------------------------
+
+
+async def test_update_theme_and_accent(
+    make_user: Login, auth_client: AuthClient, db_session: AsyncSession
+) -> None:
+    user = await make_user()
+    client = await auth_client(user)
+
+    res = await client.patch("/api/v1/profile", json={"theme": "mocha", "accent_color": "mauve"})
+    assert res.status_code == 200
+    assert res.json()["theme"] == "mocha"
+    assert res.json()["accent_color"] == "mauve"
+    # A cosmetic edit must not revoke sessions.
+    assert await _token_count(db_session, user.id) == 1
+    # And /auth/me reflects it so the SPA can apply it on load.
+    me = await client.get("/api/v1/auth/me")
+    assert me.json()["theme"] == "mocha"
+    assert me.json()["accent_color"] == "mauve"
+
+
+async def test_update_theme_rejects_unknown_values(
+    make_user: Login, auth_client: AuthClient
+) -> None:
+    user = await make_user()
+    client = await auth_client(user)
+
+    assert (await client.patch("/api/v1/profile", json={"theme": "solarized"})).status_code == 422
+    assert (
+        await client.patch("/api/v1/profile", json={"accent_color": "chartreuse"})
+    ).status_code == 422
+
+
 # --- password -------------------------------------------------------------
 
 

@@ -1,38 +1,64 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { ThemeContext, type Theme } from './context'
+import { ThemeContext, type Accent, type Flavour } from './context'
+import {
+  DEFAULT_ACCENT,
+  DEFAULT_DARK,
+  DEFAULT_LIGHT,
+  isAccent,
+  isDark,
+  isFlavour,
+  migrateLegacy,
+} from './themes'
 
-const STORAGE_KEY = 'isachore-theme'
+const THEME_KEY = 'isachore-theme'
+const ACCENT_KEY = 'isachore-accent'
 
-// Read the persisted choice, else fall back to the OS preference. Runs in the
-// useState initializer (not an effect) so the first render already matches the
-// class the pre-hydration script in index.html put on <html>.
-function getInitialTheme(): Theme {
-  const stored = localStorage.getItem(STORAGE_KEY)
-  if (stored === 'light' || stored === 'dark') return stored
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+// Read the persisted flavour, migrating the old light/dark toggle values, else
+// fall back to the OS preference. Runs in the useState initializer (not an
+// effect) so the first render already matches what the pre-hydration script in
+// index.html put on <html>. Keep this logic in sync with that script.
+function getInitialTheme(): Flavour {
+  const stored = localStorage.getItem(THEME_KEY)
+  if (isFlavour(stored)) return stored
+  const legacy = migrateLegacy(stored)
+  if (legacy) return legacy
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? DEFAULT_DARK : DEFAULT_LIGHT
+}
+
+function getInitialAccent(): Accent {
+  const stored = localStorage.getItem(ACCENT_KEY)
+  return isAccent(stored) ? stored : DEFAULT_ACCENT
 }
 
 export default function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(getInitialTheme)
+  const [theme, setThemeState] = useState<Flavour>(getInitialTheme)
+  const [accent, setAccentState] = useState<Accent>(getInitialAccent)
 
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark')
+    const root = document.documentElement
+    root.dataset.theme = theme
+    // Keep the .dark class in step with the flavour's group so the `dark:`
+    // Tailwind variant and shadcn dark styles still work.
+    root.classList.toggle('dark', isDark(theme))
   }, [theme])
 
-  // Persist only on an explicit choice, so a user who never touches the toggle
-  // keeps following their OS preference on each visit (the mount effect above
-  // never writes localStorage).
-  const setTheme = useCallback((next: Theme) => {
-    localStorage.setItem(STORAGE_KEY, next)
+  useEffect(() => {
+    document.documentElement.dataset.accent = accent
+  }, [accent])
+
+  // Persist only on an explicit choice, so a user who never picks a theme keeps
+  // following their OS preference on each visit (the mount effects never write).
+  const setTheme = useCallback((next: Flavour) => {
+    localStorage.setItem(THEME_KEY, next)
     setThemeState(next)
   }, [])
-  const toggleTheme = useCallback(
-    () => setTheme(theme === 'dark' ? 'light' : 'dark'),
-    [theme, setTheme],
-  )
+  const setAccent = useCallback((next: Accent) => {
+    localStorage.setItem(ACCENT_KEY, next)
+    setAccentState(next)
+  }, [])
 
   return (
-    <ThemeContext.Provider value={{ theme, setTheme, toggleTheme }}>
+    <ThemeContext.Provider value={{ theme, setTheme, accent, setAccent }}>
       {children}
     </ThemeContext.Provider>
   )

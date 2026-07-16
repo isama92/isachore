@@ -1,12 +1,27 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { api } from '../lib/api'
 import type { Me, User } from '../lib/types'
+import { useTheme } from '../theme/useTheme'
 import { AuthContext } from './context'
 
 export default function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [impersonating, setImpersonating] = useState(false)
   const [loading, setLoading] = useState(true)
+  const { setTheme, setAccent } = useTheme()
+
+  // Adopt the user's saved appearance (mirrored into localStorage by setTheme /
+  // setAccent). Skip while impersonating so the admin's own preference is never
+  // overwritten by the impersonated user's; a null field means "no choice", so
+  // the current OS-default stays.
+  const syncAppearance = useCallback(
+    (u: Pick<Me, 'theme' | 'accent_color'> & { impersonating?: boolean }) => {
+      if (u.impersonating) return
+      if (u.theme) setTheme(u.theme)
+      if (u.accent_color) setAccent(u.accent_color)
+    },
+    [setTheme, setAccent],
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -16,6 +31,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         if (cancelled) return
         setUser(me)
         setImpersonating(me.impersonating)
+        syncAppearance(me)
       })
       .catch(() => {
         if (cancelled) return
@@ -28,23 +44,29 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [syncAppearance])
 
   const refresh = useCallback(async () => {
     try {
       const me = await api.get<Me>('/api/v1/auth/me')
       setUser(me)
       setImpersonating(me.impersonating)
+      syncAppearance(me)
     } catch {
       setUser(null)
       setImpersonating(false)
     }
-  }, [])
+  }, [syncAppearance])
 
-  const login = useCallback(async (email: string, password: string) => {
-    setUser(await api.post<User>('/api/v1/auth/login', { email, password }))
-    setImpersonating(false)
-  }, [])
+  const login = useCallback(
+    async (email: string, password: string) => {
+      const me = await api.post<User>('/api/v1/auth/login', { email, password })
+      setUser(me)
+      setImpersonating(false)
+      syncAppearance(me)
+    },
+    [syncAppearance],
+  )
 
   const logout = useCallback(async () => {
     await api.post('/api/v1/auth/logout')

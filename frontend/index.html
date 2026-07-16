@@ -4,19 +4,54 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0D9488" />
+    <meta name="theme-color" content="#eff1f5" />
     <title>isachore</title>
     <script>
-      // Apply the saved (or OS-preferred) theme before first paint to avoid a
-      // flash. Kept in sync with src/theme/ThemeProvider.tsx.
+      // Apply the saved (or OS-preferred) Catppuccin flavour + accent before
+      // first paint to avoid a flash. Mirrors src/theme/ThemeProvider.tsx and
+      // src/theme/themes.ts -- the flavour/accent sets, the dark-flavour set,
+      // the legacy light/dark mapping and the theme-color bases are duplicated
+      // here because this inline script can't import the TS module. Keep in sync.
       ;(function () {
         try {
-          var t = localStorage.getItem('isachore-theme')
-          var osDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-          // Mirror getInitialTheme: a stored 'light'/'dark' wins, else the OS.
-          if (t === 'dark' || (t !== 'light' && t !== 'dark' && osDark)) {
-            document.documentElement.classList.add('dark')
+          var DARK = { frappe: 1, macchiato: 1, mocha: 1 }
+          var FLAVOURS = { latte: 1, frappe: 1, macchiato: 1, mocha: 1 }
+          var ACCENTS = {
+            rosewater: 1,
+            flamingo: 1,
+            pink: 1,
+            mauve: 1,
+            red: 1,
+            maroon: 1,
+            peach: 1,
+            yellow: 1,
+            green: 1,
+            teal: 1,
+            sky: 1,
+            sapphire: 1,
+            blue: 1,
+            lavender: 1,
           }
+          var BASE = { latte: '#eff1f5', frappe: '#303446', macchiato: '#24273a', mocha: '#1e1e2e' }
+
+          var stored = localStorage.getItem('isachore-theme')
+          var flavour
+          if (FLAVOURS[stored]) flavour = stored
+          else if (stored === 'light') flavour = 'latte'
+          else if (stored === 'dark') flavour = 'mocha'
+          else
+            flavour = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'mocha' : 'latte'
+
+          var accent = localStorage.getItem('isachore-accent')
+          if (!ACCENTS[accent]) accent = 'teal'
+
+          var root = document.documentElement
+          root.dataset.theme = flavour
+          root.dataset.accent = accent
+          if (DARK[flavour]) root.classList.add('dark')
+
+          var meta = document.querySelector('meta[name="theme-color"]')
+          if (meta && BASE[flavour]) meta.setAttribute('content', BASE[flavour])
         } catch (e) {
           /* ignore */
         }

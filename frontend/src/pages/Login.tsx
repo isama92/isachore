@@ -37,7 +37,7 @@ export default function Login() {
     <main className="flex min-h-dvh items-center justify-center px-7 py-10">
       <div className="w-full max-w-sm">
         <div className="mb-10 flex items-center gap-2.5">
-          <div className="grid size-10 place-items-center rounded-xl bg-primary text-[22px] font-extrabold text-white shadow-logo">
+          <div className="grid size-10 place-items-center rounded-xl bg-primary text-[22px] font-extrabold text-primary-foreground shadow-logo">
             ✓
           </div>
           <span className="font-display text-[22px] font-extrabold tracking-tight">isachore</span>

@@ -65,11 +65,16 @@ printf 'n\n' | npx shadcn@latest add <component>
 docker compose exec frontend npm install
 ```
 
-- **Design tokens & theming** live only in `frontend/src/index.css`. The teal
-  brand is preserved; the light/dark palettes are the `:root` / `.dark` blocks.
-- **Dark mode**: `useTheme()` from `frontend/src/theme/`, toggled from the top
-  bar. It follows the OS preference until the user picks a side (persisted to
-  `localStorage`); the calendar starts weeks on Monday.
+- **Design tokens & theming** live only in `frontend/src/index.css`. The four
+  Catppuccin flavours are `[data-theme]` blocks (Latte = light; Frappé /
+  Macchiato / Mocha = dark) and the accent colour is re-pointed by
+  `:root[data-accent]` rules; `frontend/src/theme/themes.ts` holds the metadata.
+- **Theme**: `useTheme()` from `frontend/src/theme/` exposes `theme` (flavour) +
+  `accent`. Both are a per-user preference chosen on the profile page, persisted
+  server-side (`users.theme` / `users.accent_color`) and mirrored to
+  `localStorage` (with a pre-paint script in `index.html` to avoid a flash). It
+  follows the OS preference until the user picks a flavour; the calendar starts
+  weeks on Monday.
 - **Toasts**: `import { toast } from 'sonner'` and call `toast.success(...)`
   for success feedback; the single `<Toaster />` is mounted in `main.tsx`.
 

@@ -1,3 +1,5 @@
+import type { Accent, Flavour } from '../theme/context'
+
 export type User = {
   id: number
   email: string
@@ -7,6 +9,10 @@ export type User = {
   is_active: boolean
   created_at: string
   avatar_url: string | null
+  // Appearance preference; null means the client follows its OS-preferred
+  // default. The API field is `accent_color`; the theme context calls it `accent`.
+  theme: Flavour | null
+  accent_color: Accent | null
 }
 
 export type Me = User & { impersonating: boolean }

@@ -93,14 +93,6 @@ describe('TopBar', () => {
     expect(menu.queryByRole('menuitem', { name: 'Admin' })).not.toBeInTheDocument()
   })
 
-  it('toggles the colour theme', async () => {
-    renderWithProviders(<TopBar />, { authValue: { user: makeUser() } })
-    expect(document.documentElement).not.toHaveClass('dark')
-
-    await userEvent.click(screen.getByRole('button', { name: 'Toggle theme' }))
-    expect(document.documentElement).toHaveClass('dark')
-  })
-
   it('shows the chores link for any user', () => {
     renderWithProviders(<TopBar />, { authValue: { user: makeUser({ is_admin: false }) } })
     expect(screen.getByRole('link', { name: 'Chores' })).toHaveAttribute('href', '/chores')

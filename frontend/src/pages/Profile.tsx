@@ -1,16 +1,34 @@
 import { useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { toast } from 'sonner'
 import { useAuth } from '../auth/useAuth'
+import { useTheme } from '../theme/useTheme'
+import type { Accent, Flavour } from '../theme/context'
+import { ACCENTS, THEMES, supportsAccent } from '../theme/themes'
 import { api, ApiError } from '../lib/api'
 import { fullName, initials } from '../lib/user'
 import type { User } from '../lib/types'
+import { cn } from '@/lib/utils'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 export default function Profile() {
   const { user, refresh } = useAuth()
+  const { theme, setTheme, accent, setAccent } = useTheme()
+
+  const [savingAppearance, setSavingAppearance] = useState(false)
+  const [appearanceError, setAppearanceError] = useState<string | null>(null)
 
   const [firstName, setFirstName] = useState(user?.first_name ?? '')
   const [lastName, setLastName] = useState(user?.last_name ?? '')
@@ -41,6 +59,29 @@ export default function Profile() {
       setNameError(err instanceof ApiError ? err.message : 'Could not update your name')
     } finally {
       setSavingName(false)
+    }
+  }
+
+  // Theme + accent save as one PATCH. Apply optimistically for an instant
+  // preview, then roll back if the server rejects it. Separate handler from the
+  // name form so it emits its own {theme, accent_color} request.
+  async function saveAppearance(nextTheme: Flavour, nextAccent: Accent) {
+    const prevTheme = theme
+    const prevAccent = accent
+    setAppearanceError(null)
+    setSavingAppearance(true)
+    setTheme(nextTheme)
+    setAccent(nextAccent)
+    try {
+      await api.patch<User>('/api/v1/profile', { theme: nextTheme, accent_color: nextAccent })
+      toast.success('Appearance updated')
+      await refresh()
+    } catch (err) {
+      setTheme(prevTheme)
+      setAccent(prevAccent)
+      setAppearanceError(err instanceof ApiError ? err.message : 'Could not update your appearance')
+    } finally {
+      setSavingAppearance(false)
     }
   }
 
@@ -192,6 +233,74 @@ export default function Profile() {
               </Button>
             </div>
           </form>
+        </section>
+
+        {/* Appearance */}
+        <section className="rounded-2xl border border-line bg-card p-6">
+          <h2 className="mb-4 font-display text-lg font-bold tracking-tight">Appearance</h2>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="theme-select">Theme</Label>
+              <Select
+                value={theme}
+                disabled={savingAppearance}
+                onValueChange={(v) => void saveAppearance(v as Flavour, accent)}
+              >
+                <SelectTrigger id="theme-select" className="w-full sm:w-72">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectLabel>Light</SelectLabel>
+                    {THEMES.filter((t) => t.group === 'light').map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                  <SelectSeparator />
+                  <SelectGroup>
+                    <SelectLabel>Dark</SelectLabel>
+                    {THEMES.filter((t) => t.group === 'dark').map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {supportsAccent(theme) && (
+              <div className="flex flex-col gap-1.5">
+                <Label>Accent colour</Label>
+                <div className="flex flex-wrap gap-2">
+                  {ACCENTS.map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      aria-label={a.label}
+                      aria-pressed={accent === a.id}
+                      title={a.label}
+                      disabled={savingAppearance}
+                      onClick={() => void saveAppearance(theme, a.id)}
+                      className={cn(
+                        'size-7 rounded-full ring-offset-2 ring-offset-card transition disabled:opacity-50',
+                        accent === a.id
+                          ? 'ring-2 ring-ring'
+                          : 'ring-1 ring-border hover:ring-foreground/30',
+                      )}
+                      style={{ background: `var(--ctp-${a.id})` }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {appearanceError && (
+              <p className="text-[13px] font-bold text-danger">{appearanceError}</p>
+            )}
+          </div>
         </section>
 
         {/* Password */}

@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import AuthProvider from './AuthProvider'
 import { useAuth } from './useAuth'
+import ThemeProvider from '../theme/ThemeProvider'
 import { jsonResponse, mockFetch } from '../test/utils'
 import { makeMe, makeUser } from '../test/fixtures'
 
@@ -21,10 +22,14 @@ function Harness() {
 }
 
 function renderProvider() {
+  // AuthProvider reads useTheme() to sync saved appearance, so it needs a
+  // ThemeProvider ancestor (matches the real tree in main.tsx).
   return render(
-    <AuthProvider>
-      <Harness />
-    </AuthProvider>,
+    <ThemeProvider>
+      <AuthProvider>
+        <Harness />
+      </AuthProvider>
+    </ThemeProvider>,
   )
 }
 
@@ -108,5 +113,42 @@ describe('AuthProvider', () => {
     await userEvent.click(screen.getByText('refresh'))
 
     await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('second@example.com'))
+  })
+
+  it('adopts the server flavour + accent from /auth/me', async () => {
+    mockFetch([
+      {
+        path: '/api/v1/auth/me',
+        body: makeMe({ email: 'ada@example.com', theme: 'frappe', accent_color: 'mauve' }),
+      },
+    ])
+    renderProvider()
+
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('ada@example.com'))
+    expect(document.documentElement.dataset.theme).toBe('frappe')
+    expect(document.documentElement.dataset.accent).toBe('mauve')
+    expect(localStorage.getItem('isachore-theme')).toBe('frappe')
+    expect(localStorage.getItem('isachore-accent')).toBe('mauve')
+  })
+
+  it('does not adopt or persist the theme while impersonating', async () => {
+    mockFetch([
+      {
+        path: '/api/v1/auth/me',
+        body: makeMe({
+          email: 'ada@example.com',
+          theme: 'frappe',
+          accent_color: 'mauve',
+          impersonating: true,
+        }),
+      },
+    ])
+    renderProvider()
+
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('ada@example.com'))
+    // Stays on the OS default (Latte); the admin's own choice is left untouched.
+    expect(document.documentElement.dataset.theme).toBe('latte')
+    expect(localStorage.getItem('isachore-theme')).toBeNull()
+    expect(localStorage.getItem('isachore-accent')).toBeNull()
   })
 })

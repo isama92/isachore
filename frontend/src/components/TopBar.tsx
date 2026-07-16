@@ -1,8 +1,6 @@
-import { Moon, Sun } from 'lucide-react'
 import { Link, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { useAuth } from '../auth/useAuth'
-import { useTheme } from '../theme/useTheme'
 import { api } from '../lib/api'
 import { fullName, initials } from '../lib/user'
 import { Button } from '@/components/ui/button'
@@ -18,7 +16,6 @@ import {
 
 export default function TopBar() {
   const { user, impersonating, logout, refresh } = useAuth()
-  const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
   if (!user) return null
 
@@ -39,7 +36,7 @@ export default function TopBar() {
     <header className="border-b border-line bg-card">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-3">
         <Link to="/" className="flex items-center gap-2">
-          <span className="grid size-7 place-items-center rounded-lg bg-primary text-sm font-extrabold text-white shadow-logo">
+          <span className="grid size-7 place-items-center rounded-lg bg-primary text-sm font-extrabold text-primary-foreground shadow-logo">
             ✓
           </span>
           <span className="font-display text-lg font-extrabold tracking-tight">isachore</span>
@@ -59,16 +56,6 @@ export default function TopBar() {
           <Link to="/chores" className="text-sm font-bold text-primary hover:text-primary-dark">
             Chores
           </Link>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label="Toggle theme"
-            className="text-muted-foreground hover:text-foreground"
-            onClick={toggleTheme}
-          >
-            {theme === 'dark' ? <Sun /> : <Moon />}
-          </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button

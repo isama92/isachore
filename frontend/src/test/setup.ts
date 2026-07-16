@@ -34,8 +34,11 @@ afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
-  // The theme provider writes localStorage and toggles the <html> class; reset
-  // both so a dark-mode test cannot leak into the next test's initial theme.
+  // The theme provider writes localStorage and sets the <html> class and
+  // data-theme / data-accent attributes; reset them all so one test's flavour
+  // cannot leak into the next test's initial theme.
   localStorage.clear()
   document.documentElement.classList.remove('dark')
+  document.documentElement.removeAttribute('data-theme')
+  document.documentElement.removeAttribute('data-accent')
 })

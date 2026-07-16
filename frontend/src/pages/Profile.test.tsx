@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import Profile from './Profile'
 import { mockFetch, renderWithProviders } from '../test/utils'
@@ -31,6 +31,57 @@ describe('Profile', () => {
         body: JSON.stringify({ first_name: 'New', last_name: 'Name' }),
       }),
     )
+  })
+
+  it('saves an accent choice via PATCH /profile and applies it', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    const fetchMock = mockFetch([{ path: '/api/v1/profile', method: 'PATCH', body: makeUser() }])
+    const { value } = renderWithProviders(<Profile />, { authValue: { user: makeUser() } })
+
+    // Default flavour is Latte + accent teal; pick the Mauve swatch.
+    await user.click(screen.getByRole('button', { name: 'Mauve' }))
+
+    await waitFor(() => expect(value.refresh).toHaveBeenCalled())
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/profile',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ theme: 'latte', accent_color: 'mauve' }),
+      }),
+    )
+    expect(document.documentElement.dataset.accent).toBe('mauve')
+  })
+
+  it('saves a flavour choice via the grouped theme select', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    const fetchMock = mockFetch([{ path: '/api/v1/profile', method: 'PATCH', body: makeUser() }])
+    const { value } = renderWithProviders(<Profile />, { authValue: { user: makeUser() } })
+
+    await user.click(screen.getByRole('combobox', { name: 'Theme' }))
+    const listbox = within(await screen.findByRole('listbox'))
+    await user.click(listbox.getByRole('option', { name: 'Catppuccin Mocha' }))
+
+    await waitFor(() => expect(value.refresh).toHaveBeenCalled())
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/profile',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ theme: 'mocha', accent_color: 'teal' }),
+      }),
+    )
+    expect(document.documentElement.dataset.theme).toBe('mocha')
+  })
+
+  it('rolls back and shows an inline error when the appearance save fails', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    mockFetch([{ path: '/api/v1/profile', method: 'PATCH', status: 400, body: { detail: 'Nope' } }])
+    renderWithProviders(<Profile />, { authValue: { user: makeUser() } })
+
+    await user.click(screen.getByRole('button', { name: 'Mauve' }))
+
+    expect(await screen.findByText('Nope')).toBeInTheDocument()
+    // Optimistic accent was rolled back to the default.
+    expect(document.documentElement.dataset.accent).toBe('teal')
   })
 
   it('rejects a password mismatch inline without calling the API', async () => {
