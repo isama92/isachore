@@ -11,6 +11,136 @@ MakeChore = Callable[..., Awaitable[Chore]]
 AuthClient = Callable[[User], Awaitable[AsyncClient]]
 
 
+def _payload(**overrides: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "title": "Clean the bathroom",
+        "start_date": "2026-07-16",
+        "repeats": "weekly",
+        "assignment_type": "manual",
+    }
+    base.update(overrides)
+    return base
+
+
+# --- create ---
+
+
+async def test_create_chore(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_tag: MakeTag,
+    auth_client: AuthClient,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    tag = await make_tag(household=household, name="deep-clean")
+    client = await auth_client(user)
+
+    resp = await client.post(
+        "/api/v1/chores",
+        json=_payload(
+            title="Scrub the tub",
+            description="Replace the towels",
+            repeats="daily",
+            assignment_type="least_done",
+            assignee_ids=[user.id],
+            tag_ids=[tag.id],
+        ),
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["title"] == "Scrub the tub"
+    assert body["description"] == "Replace the towels"
+    assert body["repeats"] == "daily"
+    assert body["assignment_type"] == "least_done"
+    assert [a["id"] for a in body["assignees"]] == [user.id]
+    assert [t["name"] for t in body["tags"]] == ["deep-clean"]
+
+    listed = await client.get("/api/v1/chores")
+    assert len(listed.json()) == 1
+
+
+async def test_create_chore_minimal(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    user = await make_user()
+    await make_household(members=[user])
+    client = await auth_client(user)
+
+    resp = await client.post("/api/v1/chores", json=_payload())
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["assignees"] == []
+    assert body["tags"] == []
+    assert body["description"] is None
+
+
+async def test_create_chore_foreign_assignee_rejected(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    user = await make_user(email="me@example.com")
+    await make_household(name="Mine", members=[user])
+    outsider = await make_user(email="outsider@example.com")
+    client = await auth_client(user)
+
+    resp = await client.post("/api/v1/chores", json=_payload(assignee_ids=[outsider.id]))
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "Assignees must be members of your household"
+
+
+async def test_create_chore_foreign_tag_rejected(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_tag: MakeTag,
+    auth_client: AuthClient,
+) -> None:
+    user = await make_user(email="me@example.com")
+    await make_household(name="Mine", members=[user])
+    other = await make_household(name="Other")
+    other_tag = await make_tag(household=other, name="not-mine")
+    client = await auth_client(user)
+
+    resp = await client.post("/api/v1/chores", json=_payload(tag_ids=[other_tag.id]))
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "Tags must belong to your household"
+
+
+async def test_create_chore_empty_title_rejected(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    user = await make_user()
+    await make_household(members=[user])
+    client = await auth_client(user)
+
+    resp = await client.post("/api/v1/chores", json=_payload(title=""))
+    assert resp.status_code == 422
+
+
+async def test_create_chore_bad_enum_rejected(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    user = await make_user()
+    await make_household(members=[user])
+    client = await auth_client(user)
+
+    resp = await client.post("/api/v1/chores", json=_payload(repeats="fortnightly"))
+    assert resp.status_code == 422
+
+
+async def test_create_chore_without_household(make_user: MakeUser, auth_client: AuthClient) -> None:
+    user = await make_user()
+    client = await auth_client(user)
+
+    resp = await client.post("/api/v1/chores", json=_payload())
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "You are not a member of any household"
+
+
+async def test_create_chore_requires_auth(client: AsyncClient) -> None:
+    resp = await client.post("/api/v1/chores", json=_payload())
+    assert resp.status_code == 401
+
+
 # --- list ---
 
 

@@ -82,7 +82,7 @@ The app is organised into four areas (context for future work):
 - [x] Admin section: users CRUD at `/admin/users` (create, edit, deactivate/reactivate, login as)
 - [x] Household / chore / tag models + migration (n-m households, chores, tags; single seeded household)
 - [x] Chores table page — list all chores of the household (`/chores`)
-- [ ] Chore creation page — add a chore (assignees, rotation, tags, period, start date)
+- [x] Chore creation page — add a chore (assignees, rotation, tags, period, start date) (`/chores/new`)
 - [ ] Tags management (create/edit/delete tags)
 - [ ] Admin: server settings
 - [ ] Due views: what is **overdue**, what has to be done **today**, what is due **in a few days**

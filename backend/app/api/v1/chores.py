@@ -3,8 +3,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentHousehold, SessionDep
-from app.models import Chore
-from app.schemas import ChoreRead
+from app.models import Chore, Household, Tag, User, household_members
+from app.schemas import ChoreCreate, ChoreRead
 
 router = APIRouter()
 
@@ -19,6 +19,61 @@ async def _get_chore_or_404(session: SessionDep, household_id: int, chore_id: in
     if chore is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chore not found")
     return chore
+
+
+async def _resolve_assignees(
+    session: SessionDep, household: Household, ids: list[int]
+) -> list[User]:
+    if not ids:
+        return []
+    result = await session.execute(
+        select(User)
+        .join(household_members, household_members.c.user_id == User.id)
+        .where(household_members.c.household_id == household.id, User.id.in_(ids))
+    )
+    users = list(result.scalars())
+    if len(users) != len(set(ids)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Assignees must be members of your household",
+        )
+    return users
+
+
+async def _resolve_tags(session: SessionDep, household: Household, ids: list[int]) -> list[Tag]:
+    if not ids:
+        return []
+    result = await session.execute(
+        select(Tag).where(Tag.household_id == household.id, Tag.id.in_(ids))
+    )
+    tags = list(result.scalars())
+    if len(tags) != len(set(ids)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tags must belong to your household",
+        )
+    return tags
+
+
+@router.post("", response_model=ChoreRead, status_code=status.HTTP_201_CREATED)
+async def create_chore(
+    payload: ChoreCreate, household: CurrentHousehold, session: SessionDep
+) -> Chore:
+    assignees = await _resolve_assignees(session, household, payload.assignee_ids)
+    tags = await _resolve_tags(session, household, payload.tag_ids)
+    chore = Chore(
+        household_id=household.id,
+        title=payload.title,
+        description=payload.description,
+        start_date=payload.start_date,
+        repeats=payload.repeats,
+        assignment_type=payload.assignment_type,
+        assignees=assignees,
+        tags=tags,
+    )
+    session.add(chore)
+    await session.commit()
+    return await _get_chore_or_404(session, household.id, chore.id)
 
 
 @router.get("", response_model=list[ChoreRead])

@@ -24,6 +24,14 @@ export function assignmentLabel(value: AssignmentType): string {
   return assignmentOptions.find((o) => o.value === value)?.label ?? value
 }
 
+// Today's date as a local (timezone-safe) "YYYY-MM-DD" string.
+export function todayISO(): string {
+  const d = new Date()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${month}-${day}`
+}
+
 // Local (timezone-safe) formatting of an ISO date-only string like "2026-07-16".
 export function formatDate(iso: string): string {
   const [year, month, day] = iso.split('-').map(Number)

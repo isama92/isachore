@@ -1,10 +1,12 @@
 from app.schemas.chore import ChoreCreate, ChoreRead
+from app.schemas.household import HouseholdRead
 from app.schemas.tag import TagRead
 from app.schemas.user import LoginRequest, MeRead, UserCreate, UserRead, UserUpdate
 
 __all__ = [
     "ChoreCreate",
     "ChoreRead",
+    "HouseholdRead",
     "LoginRequest",
     "MeRead",
     "TagRead",
