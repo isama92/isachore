@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 from sqlalchemy import delete, select
 
 from app.api.deps import AdminUser, SessionDep, get_request_token
+from app.core.households import add_to_default_household
 from app.core.security import (
     ADMIN_COOKIE_NAME,
     TOKEN_TTL,
@@ -57,6 +58,8 @@ async def create_user(payload: UserCreate, _: AdminUser, session: SessionDep) ->
         is_admin=payload.is_admin,
     )
     session.add(user)
+    await session.flush()
+    await add_to_default_household(session, user.id)
     await session.commit()
     await session.refresh(user)
     return user

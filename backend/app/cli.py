@@ -10,6 +10,7 @@ import sys
 
 from sqlalchemy import select
 
+from app.core.households import add_to_default_household
 from app.core.security import hash_password
 from app.db.session import async_session_factory
 from app.models import User
@@ -20,15 +21,16 @@ async def create_admin(email: str, name: str, password: str) -> None:
         existing = await session.execute(select(User.id).where(User.email == email))
         if existing.scalar_one_or_none() is not None:
             sys.exit(f"error: a user with email {email!r} already exists")
-        session.add(
-            User(
-                email=email,
-                name=name,
-                password_hash=hash_password(password),
-                is_admin=True,
-                is_active=True,
-            )
+        user = User(
+            email=email,
+            name=name,
+            password_hash=hash_password(password),
+            is_admin=True,
+            is_active=True,
         )
+        session.add(user)
+        await session.flush()
+        await add_to_default_household(session, user.id)
         await session.commit()
     print(f"admin user {email!r} created")
 

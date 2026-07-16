@@ -8,7 +8,7 @@ from sqlalchemy.orm import joinedload
 
 from app.core.security import COOKIE_NAME, hash_token
 from app.db.session import get_session
-from app.models import AuthToken, User
+from app.models import AuthToken, Household, User, household_members
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
@@ -63,3 +63,24 @@ async def require_admin(user: CurrentUser) -> User:
 
 
 AdminUser = Annotated[User, Depends(require_admin)]
+
+
+async def get_current_household(user: CurrentUser, session: SessionDep) -> Household:
+    """The current user's household (lowest id while a user has just one)."""
+    result = await session.execute(
+        select(Household)
+        .join(household_members, household_members.c.household_id == Household.id)
+        .where(household_members.c.user_id == user.id)
+        .order_by(Household.id)
+        .limit(1)
+    )
+    household = result.scalar_one_or_none()
+    if household is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="You are not a member of any household",
+        )
+    return household
+
+
+CurrentHousehold = Annotated[Household, Depends(get_current_household)]
