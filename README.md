@@ -47,6 +47,24 @@ uv tool install pre-commit
 pre-commit install
 ```
 
+## Tests
+
+Backend uses pytest, frontend uses vitest; both can report coverage. Run the
+backend suite inside the container so the `db` host resolves.
+
+```bash
+docker compose exec backend uv run pytest                          # backend
+cd frontend && npm run test                                        # frontend
+
+# with coverage:
+docker compose exec backend uv run pytest --cov=app --cov-report=term-missing --cov-report=html
+cd frontend && npm run test:coverage
+```
+
+Coverage prints a per-file table in the terminal and writes a browsable HTML
+report — open `backend/htmlcov/index.html` or `frontend/coverage/index.html`.
+Every feature should ship with tests; both suites must pass before committing.
+
 ## TODO
 
 The idea, step by step. Done so far: project scaffold, linters + pre-commit
