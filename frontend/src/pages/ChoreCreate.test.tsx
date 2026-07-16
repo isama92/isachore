@@ -49,12 +49,15 @@ describe('ChoreCreate', () => {
       { authValue: { user: me }, route: '/chores/new' },
     )
 
-    await userEvent.type(await screen.findByLabelText('Title'), 'Scrub the tub')
-    await userEvent.click(screen.getByRole('button', { name: 'Jo' }))
-    await userEvent.click(screen.getByRole('button', { name: 'deep-clean' }))
-    await userEvent.selectOptions(screen.getByLabelText('Repeats'), 'daily')
-    await userEvent.selectOptions(screen.getByLabelText('Assignment'), 'least_done')
-    await userEvent.click(screen.getByRole('button', { name: 'Add chore' }))
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    await user.type(await screen.findByLabelText('Title'), 'Scrub the tub')
+    await user.click(screen.getByRole('button', { name: 'Jo' }))
+    await user.click(screen.getByRole('button', { name: 'deep-clean' }))
+    await user.click(screen.getByRole('combobox', { name: 'Repeats' }))
+    await user.click(await screen.findByRole('option', { name: 'Daily' }))
+    await user.click(screen.getByRole('combobox', { name: 'Assignment' }))
+    await user.click(await screen.findByRole('option', { name: 'Least done' }))
+    await user.click(screen.getByRole('button', { name: 'Add chore' }))
 
     expect(await screen.findByText('chores-list')).toBeInTheDocument()
     expect(postBody(fetchMock)).toMatchObject({
@@ -64,6 +67,30 @@ describe('ChoreCreate', () => {
       assignee_ids: [2],
       tag_ids: [3],
     })
+  })
+
+  it('picks a start date from the calendar and submits it', async () => {
+    const fetchMock = mockFetch([
+      { path: '/api/v1/households', method: 'GET', body: [makeHousehold()] },
+      { path: '/api/v1/tags', method: 'GET', body: [] },
+      { path: '/api/v1/chores', method: 'POST', status: 201, body: makeChore() },
+    ])
+    renderWithProviders(
+      <Routes>
+        <Route path="/chores/new" element={<ChoreCreate />} />
+        <Route path="/chores" element={<div>chores-list</div>} />
+      </Routes>,
+      { authValue: { user: me }, route: '/chores/new' },
+    )
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    await user.type(await screen.findByLabelText('Title'), 'Dust the shelves')
+    await user.click(screen.getByRole('button', { name: /Start date/ }))
+    await user.click(await screen.findByText('15'))
+    await user.click(screen.getByRole('button', { name: 'Add chore' }))
+
+    await screen.findByText('chores-list')
+    expect(String(postBody(fetchMock).start_date)).toMatch(/-15$/)
   })
 
   it('surfaces a create error and stays on the form', async () => {

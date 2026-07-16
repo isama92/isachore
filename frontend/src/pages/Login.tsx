@@ -2,6 +2,9 @@ import { useState, type FormEvent } from 'react'
 import { Navigate, useLocation } from 'react-router'
 import { useAuth } from '../auth/useAuth'
 import { ApiError } from '../lib/api'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 
 export default function Login() {
   const { user, loading, login } = useAuth()
@@ -43,16 +46,15 @@ export default function Login() {
         <h1 className="font-display text-3xl leading-tight font-bold tracking-tight">
           Welcome back.
         </h1>
-        <p className="mt-1.5 mb-7 text-[14.5px] font-medium text-muted">
+        <p className="mt-1.5 mb-7 text-[14.5px] font-medium text-muted-foreground">
           Sign in to see what your flat needs today.
         </p>
 
         <form className="flex flex-col gap-4" onSubmit={(e) => void onSubmit(e)}>
-          <label className="flex flex-col gap-1.5">
-            <span className="text-[11.5px] font-bold tracking-wide text-muted uppercase">
-              Email
-            </span>
-            <input
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="email">Email</Label>
+            <Input
+              id="email"
               type="email"
               name="email"
               autoComplete="email"
@@ -60,15 +62,13 @@ export default function Login() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="rounded-input border-[1.5px] border-line bg-white px-4 py-3 text-[15px] font-semibold placeholder:font-medium placeholder:text-placeholder focus:border-primary focus:outline-none"
             />
-          </label>
+          </div>
 
-          <label className="flex flex-col gap-1.5">
-            <span className="text-[11.5px] font-bold tracking-wide text-muted uppercase">
-              Password
-            </span>
-            <input
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="password">Password</Label>
+            <Input
+              id="password"
               type="password"
               name="password"
               autoComplete="current-password"
@@ -76,22 +76,22 @@ export default function Login() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="rounded-input border-[1.5px] border-line bg-white px-4 py-3 text-[15px] font-semibold placeholder:font-medium placeholder:text-placeholder focus:border-primary focus:outline-none"
             />
-          </label>
+          </div>
 
           {error && <p className="text-[13px] font-bold text-danger">{error}</p>}
 
-          <button
+          <Button
             type="submit"
+            size="lg"
             disabled={submitting}
-            className="rounded-button bg-primary p-[15px] text-[15.5px] font-extrabold text-white shadow-glow transition hover:bg-primary-dark disabled:opacity-60"
+            className="h-11 w-full text-[15.5px]"
           >
             {submitting ? 'Signing in…' : 'Sign in'}
-          </button>
+          </Button>
         </form>
 
-        <p className="mt-6 text-center text-[13.5px] font-medium text-muted">
+        <p className="mt-6 text-center text-[13.5px] font-medium text-muted-foreground">
           New here? Ask your household admin for an account.
         </p>
       </div>

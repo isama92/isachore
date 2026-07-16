@@ -1,8 +1,41 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router'
+import { toast } from 'sonner'
 import { useAuth } from '../../auth/useAuth'
 import { api, ApiError } from '../../lib/api'
 import type { User } from '../../lib/types'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Badge } from '@/components/ui/badge'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 
 type FormState = {
   email: string
@@ -19,11 +52,6 @@ const emptyForm: FormState = {
   is_admin: false,
   is_active: true,
 }
-
-const inputClass =
-  'rounded-input border-[1.5px] border-line bg-white px-4 py-2.5 text-[15px] font-semibold placeholder:font-medium placeholder:text-placeholder focus:border-primary focus:outline-none'
-const labelClass = 'text-[11.5px] font-bold tracking-wide text-muted uppercase'
-const chipClass = 'rounded-full px-2.5 py-0.5 text-[11px] font-bold'
 
 export default function Users() {
   const { user: me, refresh } = useAuth()
@@ -89,6 +117,7 @@ export default function Users() {
       } else {
         await api.post<User>('/api/v1/users', form)
       }
+      toast.success(editing ? 'User updated' : 'User created')
       setShowForm(false)
       await load()
     } catch (err) {
@@ -102,6 +131,7 @@ export default function Users() {
     setError(null)
     try {
       await api.post<User>(`/api/v1/users/${u.id}/impersonate`)
+      toast.success(`Viewing as ${u.name}`)
       await refresh()
       await navigate('/')
     } catch (err) {
@@ -110,12 +140,6 @@ export default function Users() {
   }
 
   async function setActive(u: User, active: boolean) {
-    if (
-      !active &&
-      !window.confirm(`Deactivate ${u.name}? They will be logged out and unable to sign in.`)
-    ) {
-      return
-    }
     setError(null)
     try {
       if (active) {
@@ -123,6 +147,7 @@ export default function Users() {
       } else {
         await api.del(`/api/v1/users/${u.id}`)
       }
+      toast.success(active ? 'User reactivated' : 'User deactivated')
       await load()
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Update failed')
@@ -133,181 +158,235 @@ export default function Users() {
     <main className="mx-auto max-w-5xl px-5 py-8">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="font-display text-2xl font-bold tracking-tight">Users</h1>
-        <button
-          onClick={openCreate}
-          className="rounded-button bg-primary px-4 py-2 text-sm font-extrabold text-white shadow-glow hover:bg-primary-dark"
-        >
+        <Button type="button" size="lg" onClick={openCreate}>
           Add user
-        </button>
+        </Button>
       </div>
 
       {error && !showForm && <p className="mb-4 text-[13px] font-bold text-danger">{error}</p>}
 
-      {showForm && (
-        <div
-          className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4"
-          onClick={() => setShowForm(false)}
-        >
-          <form
-            onSubmit={(e) => void onSubmit(e)}
-            onClick={(e) => e.stopPropagation()}
-            className="flex w-full max-w-lg flex-col gap-4 rounded-2xl bg-white p-6 shadow-2xl"
-          >
-            <h2 className="font-display text-lg font-bold tracking-tight">
-              {editing ? `Edit ${editing.name}` : 'New user'}
-            </h2>
+      <Dialog
+        open={showForm}
+        onOpenChange={(open) => {
+          setShowForm(open)
+          if (!open) setError(null)
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
+            <DialogHeader>
+              <DialogTitle>{editing ? `Edit ${editing.name}` : 'New user'}</DialogTitle>
+              <DialogDescription className="sr-only">
+                {editing ? 'Update this account.' : 'Create a new household member.'}
+              </DialogDescription>
+            </DialogHeader>
             <div className="grid gap-4 sm:grid-cols-2">
-              <label className="flex flex-col gap-1.5">
-                <span className={labelClass}>Name</span>
-                <input
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="user-name">Name</Label>
+                <Input
+                  id="user-name"
                   required
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  className={inputClass}
                 />
-              </label>
-              <label className="flex flex-col gap-1.5">
-                <span className={labelClass}>Email</span>
-                <input
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="user-email">Email</Label>
+                <Input
+                  id="user-email"
                   type="email"
                   required
                   value={form.email}
                   onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  className={inputClass}
                 />
-              </label>
-              <label className="flex flex-col gap-1.5">
-                <span className={labelClass}>Password</span>
-                <input
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="user-password">Password</Label>
+                <Input
+                  id="user-password"
                   type="password"
                   required={!editing}
                   minLength={8}
                   placeholder={editing ? 'Leave empty to keep current' : 'At least 8 characters'}
                   value={form.password}
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
-                  className={inputClass}
                 />
-              </label>
+              </div>
               <div className="flex items-center gap-5 self-end pb-3">
-                <label className="flex items-center gap-2.5">
-                  <input
-                    type="checkbox"
+                <div className="flex items-center gap-2.5">
+                  <Checkbox
+                    id="is-admin"
                     checked={form.is_admin}
                     disabled={editing?.id === me?.id}
-                    onChange={(e) => setForm({ ...form, is_admin: e.target.checked })}
-                    className="size-4 accent-(--color-primary)"
+                    onCheckedChange={(v) => setForm({ ...form, is_admin: v === true })}
                   />
-                  <span className="text-sm font-bold text-ink">Admin</span>
-                </label>
+                  <Label
+                    htmlFor="is-admin"
+                    className="text-sm font-bold tracking-normal text-foreground normal-case"
+                  >
+                    Admin
+                  </Label>
+                </div>
                 {editing && (
-                  <label className="flex items-center gap-2.5">
-                    <input
-                      type="checkbox"
+                  <div className="flex items-center gap-2.5">
+                    <Checkbox
+                      id="is-active"
                       checked={form.is_active}
                       disabled={editing.id === me?.id}
-                      onChange={(e) => setForm({ ...form, is_active: e.target.checked })}
-                      className="size-4 accent-(--color-primary)"
+                      onCheckedChange={(v) => setForm({ ...form, is_active: v === true })}
                     />
-                    <span className="text-sm font-bold text-ink">Active</span>
-                  </label>
+                    <Label
+                      htmlFor="is-active"
+                      className="text-sm font-bold tracking-normal text-foreground normal-case"
+                    >
+                      Active
+                    </Label>
+                  </div>
                 )}
               </div>
             </div>
             {error && <p className="text-[13px] font-bold text-danger">{error}</p>}
-            <div className="flex gap-3">
-              <button
-                type="submit"
-                disabled={saving}
-                className="rounded-button bg-primary px-5 py-2.5 text-sm font-extrabold text-white shadow-glow hover:bg-primary-dark disabled:opacity-60"
-              >
-                {saving ? 'Saving…' : 'Save'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowForm(false)}
-                className="rounded-button px-5 py-2.5 text-sm font-bold text-muted hover:text-ink"
-              >
+            <DialogFooter>
+              <Button type="button" variant="ghost" size="lg" onClick={() => setShowForm(false)}>
                 Cancel
-              </button>
-            </div>
+              </Button>
+              <Button type="submit" size="lg" disabled={saving}>
+                {saving ? 'Saving…' : 'Save'}
+              </Button>
+            </DialogFooter>
           </form>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
 
       {loading ? (
-        <p className="font-medium text-muted">Loading…</p>
+        <p className="font-medium text-muted-foreground">Loading…</p>
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-line bg-white">
-          <table className="w-full min-w-[640px] text-left text-sm">
-            <thead>
-              <tr className="border-b border-line text-[11.5px] font-bold tracking-wide text-muted uppercase">
-                <th className="px-4 py-3">Name</th>
-                <th className="px-4 py-3">Email</th>
-                <th className="px-4 py-3">Role</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
+        <div className="overflow-hidden rounded-2xl border border-line bg-card">
+          <Table className="min-w-[640px]">
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>Name</TableHead>
+                <TableHead>Email</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {users.map((u) => (
-                <tr key={u.id} className="border-b border-line/60 last:border-0">
-                  <td className="px-4 py-3 font-semibold">
+                <TableRow key={u.id}>
+                  <TableCell className="font-semibold">
                     {u.name}
                     {u.id === me?.id && (
                       <span className="ml-2 text-[11px] font-bold text-placeholder">you</span>
                     )}
-                  </td>
-                  <td className="px-4 py-3 font-medium text-muted">{u.email}</td>
-                  <td className="px-4 py-3">
+                  </TableCell>
+                  <TableCell className="font-medium text-muted-foreground">{u.email}</TableCell>
+                  <TableCell>
                     {u.is_admin ? (
-                      <span className={`${chipClass} bg-page text-primary-dark`}>Admin</span>
+                      <Badge variant="secondary" className="text-primary">
+                        Admin
+                      </Badge>
                     ) : (
-                      <span className={`${chipClass} bg-page text-muted`}>Member</span>
+                      <Badge variant="secondary" className="text-muted-foreground">
+                        Member
+                      </Badge>
                     )}
-                  </td>
-                  <td className="px-4 py-3">
+                  </TableCell>
+                  <TableCell>
                     {u.is_active ? (
-                      <span className={`${chipClass} bg-page text-primary-dark`}>Active</span>
+                      <Badge variant="secondary" className="text-primary">
+                        Active
+                      </Badge>
                     ) : (
-                      <span className={`${chipClass} bg-danger/10 text-danger`}>Inactive</span>
+                      <Badge variant="destructive">Inactive</Badge>
                     )}
-                  </td>
-                  <td className="px-4 py-3 text-right whitespace-nowrap">
+                  </TableCell>
+                  <TableCell className="text-right">
                     {u.id !== me?.id && u.is_active && (
-                      <button
+                      <Button
+                        type="button"
+                        variant="link"
+                        size="sm"
+                        className="mr-3 h-auto p-0 font-bold text-muted-foreground hover:text-foreground hover:no-underline"
                         onClick={() => void loginAs(u)}
-                        className="mr-3 font-bold text-muted hover:text-ink"
                       >
                         Login as
-                      </button>
+                      </Button>
                     )}
-                    <button
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="sm"
+                      className="h-auto p-0 font-bold hover:text-primary-dark hover:no-underline"
                       onClick={() => openEdit(u)}
-                      className="font-bold text-primary hover:text-primary-dark"
                     >
                       Edit
-                    </button>
+                    </Button>
                     {u.id !== me?.id &&
                       (u.is_active ? (
-                        <button
-                          onClick={() => void setActive(u, false)}
-                          className="ml-3 font-bold text-danger hover:opacity-80"
-                        >
-                          Deactivate
-                        </button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="link"
+                              size="sm"
+                              className="ml-3 h-auto p-0 font-bold text-destructive hover:no-underline hover:opacity-80"
+                            >
+                              Deactivate
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Deactivate {u.name}?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                They will be logged out and unable to sign in.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction
+                                variant="destructive"
+                                onClick={() => void setActive(u, false)}
+                              >
+                                Deactivate user
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
                       ) : (
-                        <button
-                          onClick={() => void setActive(u, true)}
-                          className="ml-3 font-bold text-primary hover:text-primary-dark"
-                        >
-                          Reactivate
-                        </button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="link"
+                              size="sm"
+                              className="ml-3 h-auto p-0 font-bold hover:text-primary-dark hover:no-underline"
+                            >
+                              Reactivate
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Reactivate {u.name}?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                They will be able to sign in again.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => void setActive(u, true)}>
+                                Reactivate user
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
                       ))}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
     </main>

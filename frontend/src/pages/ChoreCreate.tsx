@@ -1,7 +1,24 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
+import { format } from 'date-fns'
+import { CalendarIcon } from 'lucide-react'
+import { toast } from 'sonner'
 import { api, ApiError } from '../lib/api'
-import { assignmentOptions, repeatOptions, todayISO } from '../lib/chores'
+import { assignmentOptions, formatDate, repeatOptions, todayISO } from '../lib/chores'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Calendar } from '@/components/ui/calendar'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import type {
   AssignmentType,
   Chore,
@@ -21,17 +38,10 @@ type FormState = {
   tag_ids: number[]
 }
 
-const inputClass =
-  'rounded-input border-[1.5px] border-line bg-white px-4 py-2.5 text-[15px] font-semibold placeholder:font-medium placeholder:text-placeholder focus:border-primary focus:outline-none'
-const labelClass = 'text-[11.5px] font-bold tracking-wide text-muted uppercase'
-
-function chipClass(selected: boolean): string {
-  return `flex items-center gap-2 rounded-full border-[1.5px] px-3 py-1.5 text-sm font-bold ${
-    selected
-      ? 'border-primary bg-primary text-white'
-      : 'border-line bg-white text-muted hover:border-primary'
-  }`
-}
+// Brand pill styling for the assignee/tag ToggleGroupItems; the on/off look is
+// driven by data-[state=on] instead of a selected flag.
+const chipItemClass =
+  'flex h-auto items-center gap-2 rounded-full border-[1.5px] border-line bg-card px-3 py-1.5 text-sm font-bold text-muted-foreground hover:border-primary hover:bg-card hover:text-muted-foreground data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-white'
 
 export default function ChoreCreate() {
   const navigate = useNavigate()
@@ -40,6 +50,7 @@ export default function ChoreCreate() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [dateOpen, setDateOpen] = useState(false)
   const [form, setForm] = useState<FormState>(() => ({
     title: '',
     description: '',
@@ -70,13 +81,6 @@ export default function ChoreCreate() {
     }
   }, [])
 
-  function toggle(key: 'assignee_ids' | 'tag_ids', id: number) {
-    setForm((f) => ({
-      ...f,
-      [key]: f[key].includes(id) ? f[key].filter((x) => x !== id) : [...f[key], id],
-    }))
-  }
-
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setSaving(true)
@@ -91,6 +95,7 @@ export default function ChoreCreate() {
         assignee_ids: form.assignee_ids,
         tag_ids: form.tag_ids,
       })
+      toast.success('Chore created')
       await navigate('/chores')
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not create the chore')
@@ -104,138 +109,165 @@ export default function ChoreCreate() {
       <h1 className="mb-6 font-display text-2xl font-bold tracking-tight">New chore</h1>
 
       {loading ? (
-        <p className="font-medium text-muted">Loading…</p>
+        <p className="font-medium text-muted-foreground">Loading…</p>
       ) : (
         <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-5">
-          <label className="flex flex-col gap-1.5">
-            <span className={labelClass}>Title</span>
-            <input
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="title">Title</Label>
+            <Input
+              id="title"
               required
               value={form.title}
               onChange={(e) => setForm({ ...form, title: e.target.value })}
               placeholder="Clean the bathroom"
-              className={inputClass}
             />
-          </label>
+          </div>
 
-          <label className="flex flex-col gap-1.5">
-            <span className={labelClass}>Notes</span>
-            <textarea
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="notes">Notes</Label>
+            <Textarea
+              id="notes"
               value={form.description}
               onChange={(e) => setForm({ ...form, description: e.target.value })}
               placeholder="Scrub the tub, replace the towels…"
               rows={3}
-              className={inputClass}
             />
-          </label>
+          </div>
 
           <div className="flex flex-col gap-2">
-            <span className={labelClass}>Assignees</span>
+            <Label id="assignees-label">Assignees</Label>
             {members.length === 0 ? (
-              <p className="text-sm font-medium text-muted">No household members yet.</p>
+              <p className="text-sm font-medium text-muted-foreground">No household members yet.</p>
             ) : (
-              <div className="flex flex-wrap gap-2">
+              <ToggleGroup
+                type="multiple"
+                aria-labelledby="assignees-label"
+                value={form.assignee_ids.map(String)}
+                onValueChange={(ids) => setForm((f) => ({ ...f, assignee_ids: ids.map(Number) }))}
+                className="w-full flex-wrap"
+              >
                 {members.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => toggle('assignee_ids', m.id)}
-                    aria-pressed={form.assignee_ids.includes(m.id)}
-                    className={chipClass(form.assignee_ids.includes(m.id))}
-                  >
+                  <ToggleGroupItem key={m.id} value={String(m.id)} className={chipItemClass}>
                     {m.name}
-                  </button>
+                  </ToggleGroupItem>
                 ))}
-              </div>
+              </ToggleGroup>
             )}
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="flex flex-col gap-1.5">
-              <span className={labelClass}>Assignment</span>
-              <select
+            <div className="flex flex-col gap-1.5">
+              <Label id="assignment-label" htmlFor="assignment">
+                Assignment
+              </Label>
+              <Select
                 value={form.assignment_type}
-                onChange={(e) =>
-                  setForm({ ...form, assignment_type: e.target.value as AssignmentType })
-                }
-                className={inputClass}
+                onValueChange={(v) => setForm({ ...form, assignment_type: v as AssignmentType })}
               >
-                {assignmentOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+                <SelectTrigger
+                  id="assignment"
+                  aria-labelledby="assignment-label"
+                  className="w-full"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {assignmentOptions.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-            <label className="flex flex-col gap-1.5">
-              <span className={labelClass}>Repeats</span>
-              <select
+            <div className="flex flex-col gap-1.5">
+              <Label id="repeats-label" htmlFor="repeats">
+                Repeats
+              </Label>
+              <Select
                 value={form.repeats}
-                onChange={(e) => setForm({ ...form, repeats: e.target.value as RepeatPeriod })}
-                className={inputClass}
+                onValueChange={(v) => setForm({ ...form, repeats: v as RepeatPeriod })}
               >
-                {repeatOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+                <SelectTrigger id="repeats" aria-labelledby="repeats-label" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {repeatOptions.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
-          <label className="flex flex-col gap-1.5">
-            <span className={labelClass}>Start date</span>
-            <input
-              type="date"
-              required
-              value={form.start_date}
-              onChange={(e) => setForm({ ...form, start_date: e.target.value })}
-              className={inputClass}
-            />
-          </label>
+          <div className="flex flex-col gap-1.5">
+            <Label id="start-date-label" htmlFor="start-date">
+              Start date
+            </Label>
+            <Popover open={dateOpen} onOpenChange={setDateOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  id="start-date"
+                  type="button"
+                  aria-labelledby="start-date-label start-date-value"
+                  className="flex h-10 w-full items-center justify-between rounded-input border border-input bg-transparent px-3 text-base outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30"
+                >
+                  <span id="start-date-value">{formatDate(form.start_date)}</span>
+                  <CalendarIcon className="size-4 text-muted-foreground" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  required
+                  selected={new Date(`${form.start_date}T00:00:00`)}
+                  onSelect={(d) => {
+                    if (d) setForm({ ...form, start_date: format(d, 'yyyy-MM-dd') })
+                    setDateOpen(false)
+                  }}
+                  autoFocus
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
 
           <div className="flex flex-col gap-2">
-            <span className={labelClass}>Tags</span>
+            <Label id="tags-label">Tags</Label>
             {tags.length === 0 ? (
-              <p className="text-sm font-medium text-muted">No tags yet.</p>
+              <p className="text-sm font-medium text-muted-foreground">No tags yet.</p>
             ) : (
-              <div className="flex flex-wrap gap-2">
+              <ToggleGroup
+                type="multiple"
+                aria-labelledby="tags-label"
+                value={form.tag_ids.map(String)}
+                onValueChange={(ids) => setForm((f) => ({ ...f, tag_ids: ids.map(Number) }))}
+                className="w-full flex-wrap"
+              >
                 {tags.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => toggle('tag_ids', t.id)}
-                    aria-pressed={form.tag_ids.includes(t.id)}
-                    className={chipClass(form.tag_ids.includes(t.id))}
-                  >
+                  <ToggleGroupItem key={t.id} value={String(t.id)} className={chipItemClass}>
                     <span
                       className="inline-block size-2.5 rounded-full"
                       style={{ backgroundColor: t.color }}
                     />
                     {t.name}
-                  </button>
+                  </ToggleGroupItem>
                 ))}
-              </div>
+              </ToggleGroup>
             )}
           </div>
 
           {error && <p className="text-[13px] font-bold text-danger">{error}</p>}
 
           <div className="flex gap-3">
-            <button
-              type="submit"
-              disabled={saving}
-              className="rounded-button bg-primary px-5 py-2.5 text-sm font-extrabold text-white shadow-glow hover:bg-primary-dark disabled:opacity-60"
-            >
+            <Button type="submit" size="lg" disabled={saving}>
               {saving ? 'Saving…' : 'Add chore'}
-            </button>
-            <Link
-              to="/chores"
-              className="rounded-button px-5 py-2.5 text-sm font-bold text-muted hover:text-ink"
-            >
-              Cancel
-            </Link>
+            </Button>
+            <Button asChild variant="ghost" size="lg">
+              <Link to="/chores">Cancel</Link>
+            </Button>
           </div>
         </form>
       )}

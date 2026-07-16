@@ -9,7 +9,7 @@ multiple people, with a JSON API so mobile clients can join later.
 | Layer    | Tech                                                              |
 | -------- | ----------------------------------------------------------------- |
 | Backend  | FastAPI · async SQLAlchemy 2 · asyncpg · Alembic · Python 3.13 (uv) |
-| Frontend | React 19 · TypeScript · Vite · Tailwind CSS v4 · react-router 8   |
+| Frontend | React 19 · TypeScript · Vite · Tailwind CSS v4 · react-router 8 · shadcn/ui (Radix) |
 | Database | PostgreSQL 18                                                     |
 | Infra    | Docker everywhere (dev and prod)                                  |
 
@@ -47,6 +47,37 @@ uv tool install pre-commit
 pre-commit install
 ```
 
+## Frontend UI
+
+The UI is built on [shadcn/ui](https://ui.shadcn.com) (the `radix-nova` style,
+Radix UI under the hood). Components you own and can edit live in
+`frontend/src/components/ui/`; the config is `frontend/components.json`. Import
+them through the `@/` alias (e.g. `@/components/ui/button`) and combine classes
+with the `cn()` helper in `frontend/src/lib/utils.ts`.
+
+Add more components with the CLI (run from `frontend/`):
+
+```bash
+# NOTE: this prompts to overwrite the brand-customised button.tsx — decline it,
+# which the piped "n" does. If it changed package.json, also install in the
+# container (a named volume shadows the container's node_modules).
+printf 'n\n' | npx shadcn@latest add <component>
+docker compose exec frontend npm install
+```
+
+- **Design tokens & theming** live only in `frontend/src/index.css`. The teal
+  brand is preserved; the light/dark palettes are the `:root` / `.dark` blocks.
+- **Dark mode**: `useTheme()` from `frontend/src/theme/`, toggled from the top
+  bar. It follows the OS preference until the user picks a side (persisted to
+  `localStorage`); the calendar starts weeks on Monday.
+- **Toasts**: `import { toast } from 'sonner'` and call `toast.success(...)`
+  for success feedback; the single `<Toaster />` is mounted in `main.tsx`.
+
+Libraries the migration added: `radix-ui`, `class-variance-authority`, `clsx`,
+`tailwind-merge`, `lucide-react` (icons), `tw-animate-css`, `shadcn` (provides
+`shadcn/tailwind.css`), `react-day-picker` + `date-fns` (date picker) and
+`sonner` (toasts).
+
 ## Tests
 
 Backend uses pytest, frontend uses vitest; both can report coverage. Run the
@@ -68,7 +99,8 @@ Every feature should ship with tests; both suites must pass before committing.
 ## TODO
 
 The idea, step by step. Done so far: project scaffold, linters + pre-commit
-hook, Docker dev/prod, hello world at `/`, login page UI at `/login`.
+hook, Docker dev/prod, hello world at `/`, login page UI at `/login`, chores +
+users management UI, and a shadcn/ui component kit with light/dark theming.
 
 The app is organised into four areas (context for future work):
 

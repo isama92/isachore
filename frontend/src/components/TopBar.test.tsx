@@ -22,6 +22,14 @@ describe('TopBar', () => {
     expect(value.logout).toHaveBeenCalled()
   })
 
+  it('toggles the colour theme', async () => {
+    renderWithProviders(<TopBar />, { authValue: { user: makeUser() } })
+    expect(document.documentElement).not.toHaveClass('dark')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Toggle theme' }))
+    expect(document.documentElement).toHaveClass('dark')
+  })
+
   it('hides the admin link for a member', () => {
     renderWithProviders(<TopBar />, { authValue: { user: makeUser({ is_admin: false }) } })
     expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument()

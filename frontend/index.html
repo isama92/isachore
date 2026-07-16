@@ -6,6 +6,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0D9488" />
     <title>isachore</title>
+    <script>
+      // Apply the saved (or OS-preferred) theme before first paint to avoid a
+      // flash. Kept in sync with src/theme/ThemeProvider.tsx.
+      ;(function () {
+        try {
+          var t = localStorage.getItem('isachore-theme')
+          var osDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+          // Mirror getInitialTheme: a stored 'light'/'dark' wins, else the OS.
+          if (t === 'dark' || (t !== 'light' && t !== 'dark' && osDark)) {
+            document.documentElement.classList.add('dark')
+          }
+        } catch (e) {
+          /* ignore */
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router'
+import { toast } from 'sonner'
 import Users from './Users'
 import { renderWithProviders } from '../../test/utils'
 import { makeUser } from '../../test/fixtures'
@@ -36,14 +37,17 @@ describe('Users', () => {
       return jsonBody([me])
     })
     vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    const toastSpy = vi.spyOn(toast, 'success')
     renderWithProviders(<Users />, { authValue: { user: me } })
     await screen.findByText('Admin User')
 
-    await userEvent.click(screen.getByRole('button', { name: 'Add user' }))
-    await userEvent.type(screen.getByLabelText('Name'), 'New Person')
-    await userEvent.type(screen.getByLabelText('Email'), 'new@example.com')
-    await userEvent.type(screen.getByLabelText('Password'), 'password12345')
-    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await user.click(screen.getByRole('button', { name: 'Add user' }))
+    await user.type(await screen.findByLabelText('Name'), 'New Person')
+    await user.type(screen.getByLabelText('Email'), 'new@example.com')
+    await user.type(screen.getByLabelText('Password'), 'password12345')
+    await user.click(screen.getByRole('checkbox', { name: 'Admin' }))
+    await user.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -55,7 +59,9 @@ describe('Users', () => {
       email: 'new@example.com',
       name: 'New Person',
       password: 'password12345',
+      is_admin: true,
     })
+    expect(toastSpy).toHaveBeenCalledWith('User created')
   })
 
   it('omits the password on edit when left blank', async () => {
@@ -64,11 +70,12 @@ describe('Users', () => {
       return jsonBody([me, member])
     })
     vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderWithProviders(<Users />, { authValue: { user: me } })
     await screen.findByText('Bob Member')
 
-    await userEvent.click(screen.getAllByRole('button', { name: 'Edit' })[1])
-    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await user.click(screen.getAllByRole('button', { name: 'Edit' })[1])
+    await user.click(await screen.findByRole('button', { name: 'Save' }))
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -87,12 +94,13 @@ describe('Users', () => {
       return jsonBody([me, member])
     })
     vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderWithProviders(<Users />, { authValue: { user: me } })
     await screen.findByText('Bob Member')
 
-    await userEvent.click(screen.getAllByRole('button', { name: 'Edit' })[1])
-    await userEvent.type(screen.getByLabelText('Password'), 'brandnew12345')
-    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await user.click(screen.getAllByRole('button', { name: 'Edit' })[1])
+    await user.type(await screen.findByLabelText('Password'), 'brandnew12345')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -133,34 +141,84 @@ describe('Users', () => {
     expect(value.refresh).toHaveBeenCalled()
   })
 
-  it('deactivates only after the user confirms', async () => {
+  it('deactivates only after confirming in the dialog', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === 'DELETE') return jsonBody(undefined, 204)
       return jsonBody([me, member])
     })
     vi.stubGlobal('fetch', fetchMock)
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const toastSpy = vi.spyOn(toast, 'success')
     renderWithProviders(<Users />, { authValue: { user: me } })
     await screen.findByText('Bob Member')
 
-    // Declined -> no request
-    await userEvent.click(screen.getByRole('button', { name: 'Deactivate' }))
-    expect(confirmSpy).toHaveBeenCalled()
+    // Cancelled -> no request
+    await user.click(screen.getByRole('button', { name: 'Deactivate' }))
+    await user.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Cancel' }),
+    )
     expect(fetchMock.mock.calls.filter(([, i]) => i?.method === 'DELETE')).toHaveLength(0)
 
     // Confirmed -> DELETE
-    confirmSpy.mockReturnValue(true)
-    await userEvent.click(screen.getByRole('button', { name: 'Deactivate' }))
+    await user.click(screen.getByRole('button', { name: 'Deactivate' }))
+    await user.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', {
+        name: 'Deactivate user',
+      }),
+    )
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         '/api/v1/users/2',
         expect.objectContaining({ method: 'DELETE' }),
       ),
     )
+    expect(toastSpy).toHaveBeenCalledWith('User deactivated')
+  })
+
+  it('reactivates only after confirming in the dialog', async () => {
+    const inactive = makeUser({
+      id: 2,
+      name: 'Bob Member',
+      email: 'bob@example.com',
+      is_active: false,
+    })
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'PATCH') return jsonBody({ ...inactive, is_active: true })
+      return jsonBody([me, inactive])
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    const toastSpy = vi.spyOn(toast, 'success')
+    renderWithProviders(<Users />, { authValue: { user: me } })
+    await screen.findByText('Bob Member')
+
+    // Cancelled -> no request
+    await user.click(screen.getByRole('button', { name: 'Reactivate' }))
+    await user.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Cancel' }),
+    )
+    expect(fetchMock.mock.calls.filter(([, i]) => i?.method === 'PATCH')).toHaveLength(0)
+
+    // Confirmed -> PATCH is_active: true
+    await user.click(screen.getByRole('button', { name: 'Reactivate' }))
+    await user.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', {
+        name: 'Reactivate user',
+      }),
+    )
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/users/2',
+        expect.objectContaining({ method: 'PATCH' }),
+      ),
+    )
+    expect(bodyOf(fetchMock, 'PATCH', '/api/v1/users/2')).toMatchObject({ is_active: true })
+    expect(toastSpy).toHaveBeenCalledWith('User reactivated')
   })
 
   it('protects the current user from self login-as, deactivate, and role edits', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonBody([me, member])))
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderWithProviders(<Users />, { authValue: { user: me } })
     await screen.findByText('Admin User')
 
@@ -169,10 +227,10 @@ describe('Users', () => {
     expect(screen.getAllByRole('button', { name: 'Deactivate' })).toHaveLength(1)
 
     // Editing yourself disables the Admin and Active toggles
-    await userEvent.click(screen.getAllByRole('button', { name: 'Edit' })[0])
-    const modal = screen.getByRole('heading', { name: /Edit Admin User/ }).closest('form')!
-    expect(within(modal).getByRole('checkbox', { name: 'Admin' })).toBeDisabled()
-    expect(within(modal).getByRole('checkbox', { name: 'Active' })).toBeDisabled()
+    await user.click(screen.getAllByRole('button', { name: 'Edit' })[0])
+    const dialog = await screen.findByRole('dialog', { name: /Edit Admin User/ })
+    expect(within(dialog).getByRole('checkbox', { name: 'Admin' })).toBeDisabled()
+    expect(within(dialog).getByRole('checkbox', { name: 'Active' })).toBeDisabled()
   })
 })
 

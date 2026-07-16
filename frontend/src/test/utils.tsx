@@ -2,6 +2,7 @@ import { render } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { vi } from 'vitest'
 import { AuthContext } from '../auth/context'
+import ThemeProvider from '../theme/ThemeProvider'
 import type { ReactElement } from 'react'
 import type { AuthContextValue } from '../auth/context'
 
@@ -28,9 +29,11 @@ export function renderWithProviders(ui: ReactElement, options: RenderOptions = {
   const value = makeAuthValue(authValue)
   const entry = state === undefined ? route : { pathname: route, state }
   const result = render(
-    <AuthContext.Provider value={value}>
-      <MemoryRouter initialEntries={[entry]}>{ui}</MemoryRouter>
-    </AuthContext.Provider>,
+    <ThemeProvider>
+      <AuthContext.Provider value={value}>
+        <MemoryRouter initialEntries={[entry]}>{ui}</MemoryRouter>
+      </AuthContext.Provider>
+    </ThemeProvider>,
   )
   return { value, ...result }
 }
