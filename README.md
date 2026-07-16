@@ -70,12 +70,21 @@ Every feature should ship with tests; both suites must pass before committing.
 The idea, step by step. Done so far: project scaffold, linters + pre-commit
 hook, Docker dev/prod, hello world at `/`, login page UI at `/login`.
 
+The app is organised into four areas (context for future work):
+
+- **Homepage**: due views for the active user (what is overdue, due today, due soon).
+- **Admin**: manage server settings (not yet implemented), users, and anything else that comes up.
+- **Chores management**: manage the household's chores.
+- **Tags management**: create, edit and delete tags.
+
 - [x] User model + first Alembic migration (`users`, `auth_tokens`)
 - [x] Auth backend: cookie login/logout with DB-backed opaque tokens, `create-admin` CLI, login page wired
 - [x] Admin section: users CRUD at `/admin/users` (create, edit, deactivate/reactivate, login as)
-- [ ] Household / chore models + migrations
+- [x] Household / chore / tag models + migration (n-m households, chores, tags; single seeded household)
 - [ ] Chores table page — list all chores of the household
 - [ ] Chore creation page — add a chore (assignees, rotation, tags, period, start date)
+- [ ] Tags management (create/edit/delete tags)
+- [ ] Admin: server settings
 - [ ] Due views: what is **overdue**, what has to be done **today**, what is due **in a few days**
 - [ ] Mark chore as done / completion history
 - [ ] API keys for mobile / 3rd-party clients (reuse `auth_tokens` via `Authorization: Bearer`)

@@ -1,5 +1,5 @@
 from collections.abc import AsyncIterator, Awaitable, Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 import pytest_asyncio
@@ -17,7 +17,15 @@ from app.core.security import generate_token, hash_token
 from app.db.base import Base
 from app.db.session import get_session
 from app.main import app
-from app.models import AuthToken, User
+from app.models import (
+    AssignmentType,
+    AuthToken,
+    Chore,
+    Household,
+    RepeatPeriod,
+    Tag,
+    User,
+)
 
 # A throwaway database in the same Postgres instance as dev, resolved from the
 # configured URL so it works both in-container (host "db") and host-side.
@@ -114,6 +122,74 @@ def make_user(db_session: AsyncSession) -> Callable[..., Awaitable[User]]:
         await db_session.commit()
         await db_session.refresh(user)
         return user
+
+    return _make
+
+
+@pytest.fixture
+def make_household(db_session: AsyncSession) -> Callable[..., Awaitable[Household]]:
+    async def _make(
+        *,
+        name: str = "Test Household",
+        members: list[User] | None = None,
+    ) -> Household:
+        household = Household(name=name)
+        if members:
+            household.members.extend(members)
+        db_session.add(household)
+        await db_session.commit()
+        await db_session.refresh(household)
+        return household
+
+    return _make
+
+
+@pytest.fixture
+def make_tag(db_session: AsyncSession) -> Callable[..., Awaitable[Tag]]:
+    async def _make(
+        *,
+        household: Household,
+        name: str = "cleaning",
+        color: str = "#0d9488",
+    ) -> Tag:
+        tag = Tag(household_id=household.id, name=name, color=color)
+        db_session.add(tag)
+        await db_session.commit()
+        await db_session.refresh(tag)
+        return tag
+
+    return _make
+
+
+@pytest.fixture
+def make_chore(db_session: AsyncSession) -> Callable[..., Awaitable[Chore]]:
+    async def _make(
+        *,
+        household: Household,
+        title: str = "Clean the bathroom",
+        description: str | None = None,
+        start_date: date | None = None,
+        repeats: RepeatPeriod = RepeatPeriod.weekly,
+        assignment_type: AssignmentType = AssignmentType.manual,
+        assignees: list[User] | None = None,
+        tags: list[Tag] | None = None,
+    ) -> Chore:
+        chore = Chore(
+            household_id=household.id,
+            title=title,
+            description=description,
+            start_date=start_date or date(2026, 7, 16),
+            repeats=repeats,
+            assignment_type=assignment_type,
+        )
+        if assignees:
+            chore.assignees.extend(assignees)
+        if tags:
+            chore.tags.extend(tags)
+        db_session.add(chore)
+        await db_session.commit()
+        await db_session.refresh(chore, attribute_names=["assignees", "tags"])
+        return chore
 
     return _make
 

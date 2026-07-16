@@ -8,6 +8,8 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.models.auth_token import AuthToken
+    from app.models.chore import Chore
+    from app.models.household import Household
 
 
 class User(Base):
@@ -26,4 +28,10 @@ class User(Base):
 
     tokens: Mapped[list["AuthToken"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
+    )
+    households: Mapped[list["Household"]] = relationship(
+        secondary="household_members", back_populates="members"
+    )
+    chores: Mapped[list["Chore"]] = relationship(
+        secondary="chore_assignees", back_populates="assignees"
     )
