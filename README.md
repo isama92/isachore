@@ -100,7 +100,9 @@ Every feature should ship with tests; both suites must pass before committing.
 
 The idea, step by step. Done so far: project scaffold, linters + pre-commit
 hook, Docker dev/prod, hello world at `/`, login page UI at `/login`, chores +
-users management UI, and a shadcn/ui component kit with light/dark theming.
+users management UI, a shadcn/ui component kit with light/dark theming, and a
+self-service profile page (name / password / avatar upload) reached from an
+avatar menu in the top bar.
 
 The app is organised into four areas (context for future work):
 

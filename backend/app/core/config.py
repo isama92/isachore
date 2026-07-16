@@ -35,5 +35,19 @@ class Settings(BaseSettings):
     # the prod nginx, which sets the header.
     trust_forwarded_for: bool = False
 
+    # Where uploaded files live, relative to the backend working dir (/app in the
+    # container). Avatars go under <storage_dir>/avatars. Backed by a host bind
+    # mount in dev and a named volume in prod so they survive restarts.
+    storage_dir: str = "storage"
+    # Upper bound on the raw uploaded bytes, checked before decoding (bounds the
+    # compressed upload). ~5 MB.
+    avatar_max_bytes: int = 5 * 1024 * 1024
+    # Upper bound on the decoded pixel count, checked from the image header
+    # before allocating the bitmap (bounds memory / decompression bombs). 50 MP
+    # comfortably covers real phone photos.
+    avatar_max_pixels: int = 50_000_000
+    # Side length (px) of the square avatar we re-encode and store.
+    avatar_px: int = 512
+
 
 settings = Settings()

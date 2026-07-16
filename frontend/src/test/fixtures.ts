@@ -9,6 +9,7 @@ export function makeUser(overrides: Partial<User> = {}): User {
     is_admin: false,
     is_active: true,
     created_at: '2026-01-01T00:00:00Z',
+    avatar_url: null,
     ...overrides,
   }
 }

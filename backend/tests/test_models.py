@@ -101,6 +101,26 @@ async def test_tag_name_reusable_across_households(
     assert tag2.id is not None
 
 
+async def test_avatar_path_unique_across_users(db_session, make_user: MakeUser) -> None:
+    alice = await make_user(email="alice@example.com")
+    bob = await make_user(email="bob@example.com")
+    alice.avatar_path = "shared.webp"
+    await db_session.commit()
+
+    bob.avatar_path = "shared.webp"
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
+
+
+async def test_avatar_path_allows_multiple_nulls(db_session, make_user: MakeUser) -> None:
+    # "No avatar" is NULL, and Postgres treats NULLs as distinct, so the unique
+    # constraint must not collide across users who haven't set a picture.
+    alice = await make_user(email="alice@example.com")
+    bob = await make_user(email="bob@example.com")
+    assert alice.avatar_path is None
+    assert bob.avatar_path is None
+
+
 # --- auto-join on user creation ---
 
 

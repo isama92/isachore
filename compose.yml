@@ -41,6 +41,9 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
+      # Uploaded avatars land here; the host bind mount keeps them across
+      # container restarts and lets you inspect them directly in dev.
+      - ./backend/storage:/app/storage
     depends_on:
       db:
         condition: service_healthy

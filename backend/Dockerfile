@@ -30,6 +30,9 @@ FROM python:3.13-slim AS prod
 RUN groupadd -r app && useradd -r -g app app
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder --chown=app:app /app /app
+# Create the avatars storage dir owned by the non-root app user so the mounted
+# named volume inherits writable ownership on first mount.
+RUN mkdir -p /app/storage/avatars && chown -R app:app /app/storage
 ENV PATH="/opt/venv/bin:$PATH"
 WORKDIR /app
 USER app

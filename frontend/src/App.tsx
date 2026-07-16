@@ -6,6 +6,7 @@ import ChoreCreate from './pages/ChoreCreate'
 import Chores from './pages/Chores'
 import Home from './pages/Home'
 import Login from './pages/Login'
+import Profile from './pages/Profile'
 
 export default function App() {
   return (
@@ -13,6 +14,7 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route element={<RequireAuth />}>
         <Route path="/" element={<Home />} />
+        <Route path="/profile" element={<Profile />} />
         <Route path="/chores" element={<Chores />} />
         <Route path="/chores/new" element={<ChoreCreate />} />
         <Route element={<RequireAdmin />}>

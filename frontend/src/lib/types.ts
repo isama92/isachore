@@ -5,6 +5,7 @@ export type User = {
   is_admin: boolean
   is_active: boolean
   created_at: string
+  avatar_url: string | null
 }
 
 export type Me = User & { impersonating: boolean }
