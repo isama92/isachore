@@ -34,13 +34,16 @@ describe('RequireAuth', () => {
     expect(screen.getByTestId('login')).toHaveTextContent('from:/protected')
   })
 
-  it('renders the protected content and top bar for an authed user', () => {
+  it('renders the protected content, sidebar and top bar for an authed user', () => {
     renderWithProviders(tree, {
       route: '/protected',
       authValue: { user: makeUser({ first_name: 'Alex', last_name: 'Member' }) },
     })
     expect(screen.getByText('protected-content')).toBeInTheDocument()
-    // The top bar renders its user menu (name now lives inside that menu).
-    expect(screen.getByRole('button', { name: 'Open user menu' })).toBeInTheDocument()
+    // The slim top bar exposes the sidebar toggle.
+    expect(screen.getByRole('button', { name: 'Toggle sidebar' })).toBeInTheDocument()
+    // The sidebar shows the identity block and primary nav.
+    expect(screen.getByText('Alex Member')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument()
   })
 })

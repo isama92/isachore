@@ -8,7 +8,7 @@ export default function Home() {
   const { user } = useAuth()
   const { t } = useTranslation()
   return (
-    <main className="grid min-h-[calc(100dvh-57px)] place-items-center px-7">
+    <main className="grid min-h-[calc(100svh-3.5rem)] place-items-center px-7">
       <div className="text-center">
         <h1 className="font-display text-3xl font-bold tracking-tight">
           {user ? t('home.greeting', { name: fullName(user) }) : 'isachore'}

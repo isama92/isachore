@@ -58,6 +58,16 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
+  /* shadcn sidebar surface -> runtime vars (theme-aware, defined in :root) */
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
   /* isachore legacy utilities kept working AND made theme-aware.
      NOTE: text-muted was renamed to text-muted-foreground so that --muted can
      serve shadcn's background semantic without breaking the brand text grey. */
@@ -81,6 +91,20 @@
 
 :root {
   --radius: 0.9375rem; /* theme-invariant */
+
+  /* Sidebar (shadcn) surface. These alias the runtime colour vars, which are
+     redefined per Catppuccin flavour below; because custom properties resolve
+     lazily, one definition here recolours correctly for every theme/accent, so
+     no per-flavour duplication is needed. --sidebar tracks --card (mantle) so
+     the panel reads as distinct from the page --background (base). */
+  --sidebar: var(--card);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
 }
 
 /* Latte (light). Also serves as the no-attribute fallback via :root. */

@@ -13,12 +13,16 @@
   },
   "topbar": {
     "backToAccount": "Di nuovo nel tuo account",
-    "returnToAdmin": "Torna all'admin",
-    "chores": "Faccende",
-    "openMenu": "Apri il menu utente",
+    "returnToAdmin": "Torna all'admin"
+  },
+  "sidebar": {
+    "nav": "Navigazione principale",
+    "home": "Home",
+    "chores": "Gestione faccende",
     "profile": "Profilo",
     "admin": "Admin",
-    "logout": "Esci"
+    "logout": "Esci",
+    "toggle": "Attiva/disattiva barra laterale"
   },
   "login": {
     "welcome": "Bentornato.",

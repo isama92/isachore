@@ -13,12 +13,16 @@
   },
   "topbar": {
     "backToAccount": "Back to your account",
-    "returnToAdmin": "Return to admin",
-    "chores": "Chores",
-    "openMenu": "Open user menu",
+    "returnToAdmin": "Return to admin"
+  },
+  "sidebar": {
+    "nav": "Main navigation",
+    "home": "Home",
+    "chores": "Chores Management",
     "profile": "Profile",
     "admin": "Admin",
-    "logout": "Log out"
+    "logout": "Log out",
+    "toggle": "Toggle sidebar"
   },
   "login": {
     "welcome": "Welcome back.",

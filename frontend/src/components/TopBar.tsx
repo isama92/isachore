@@ -1,24 +1,15 @@
 import { useTranslation } from 'react-i18next'
-import { Link, useNavigate } from 'react-router'
+import { PanelLeft } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '../auth/useAuth'
 import { api } from '../lib/api'
-import { fullName, initials } from '../lib/user'
 import { Button } from '@/components/ui/button'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
+import { useSidebar } from '@/components/ui/sidebar'
 
 export default function TopBar() {
-  const { user, impersonating, logout, refresh } = useAuth()
+  const { user, impersonating, refresh } = useAuth()
   const { t } = useTranslation()
-  const navigate = useNavigate()
+  const { toggleSidebar } = useSidebar()
   if (!user) return null
 
   async function returnToAdmin() {
@@ -35,70 +26,27 @@ export default function TopBar() {
   }
 
   return (
-    <header className="border-b border-line bg-card">
-      <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-3">
-        <Link to="/" className="flex items-center gap-2">
-          <span className="grid size-7 place-items-center rounded-lg bg-primary text-sm font-extrabold text-primary-foreground shadow-logo">
-            ✓
-          </span>
-          <span className="font-display text-lg font-extrabold tracking-tight">isachore</span>
-        </Link>
-        <nav className="flex items-center gap-4">
-          {impersonating && (
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              className="rounded-full font-bold"
-              onClick={() => void returnToAdmin()}
-            >
-              {t('topbar.returnToAdmin')}
-            </Button>
-          )}
-          <Link to="/chores" className="text-sm font-bold text-primary hover:text-primary-dark">
-            {t('topbar.chores')}
-          </Link>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                aria-label={t('topbar.openMenu')}
-                className="rounded-full outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50"
-              >
-                <Avatar size="lg">
-                  {user.avatar_url && <AvatarImage src={user.avatar_url} alt={fullName(user)} />}
-                  <AvatarFallback className="bg-primary/10 font-bold text-primary">
-                    {initials(user)}
-                  </AvatarFallback>
-                </Avatar>
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel className="font-normal">
-                <span className="block truncate text-sm font-bold text-foreground">
-                  {fullName(user)}
-                </span>
-                <span className="block truncate text-xs font-medium text-muted-foreground">
-                  {user.email}
-                </span>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => void navigate('/profile')}>
-                {t('topbar.profile')}
-              </DropdownMenuItem>
-              {user.is_admin && (
-                <DropdownMenuItem onSelect={() => void navigate('/admin/users')}>
-                  {t('topbar.admin')}
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem variant="destructive" onSelect={() => void logout()}>
-                {t('topbar.logout')}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </nav>
-      </div>
+    <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line bg-card px-4">
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        onClick={toggleSidebar}
+        aria-label={t('sidebar.toggle')}
+      >
+        <PanelLeft />
+      </Button>
+      {impersonating && (
+        <Button
+          type="button"
+          variant="destructive"
+          size="sm"
+          className="ml-auto rounded-full font-bold"
+          onClick={() => void returnToAdmin()}
+        >
+          {t('topbar.returnToAdmin')}
+        </Button>
+      )}
     </header>
   )
 }
