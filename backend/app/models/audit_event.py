@@ -17,6 +17,7 @@ class AuditAction(enum.StrEnum):
     user_created = "user_created"
     user_updated = "user_updated"
     user_deactivated = "user_deactivated"
+    user_confirmed = "user_confirmed"
 
 
 class AuditEvent(Base):

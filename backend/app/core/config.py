@@ -49,5 +49,27 @@ class Settings(BaseSettings):
     # Side length (px) of the square avatar we re-encode and store.
     avatar_px: int = 512
 
+    # Public base URL of the SPA, used to build the confirmation link emailed to
+    # a new user (<app_base_url>/confirm?token=...). Dev default is the Vite
+    # server; prod must set it to the real origin.
+    app_base_url: str = "http://localhost:5173"
+
+    # SMTP for account-confirmation and test emails. All optional so the app
+    # boots without email configured; "require confirmation" and the test-email
+    # button are gated on smtp_configured() (host + from address). In dev,
+    # compose points these at the mailpit service; prod supplies real values.
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    # Envelope/From address, e.g. "isachore <no-reply@example.com>".
+    smtp_from: str | None = None
+    # STARTTLS upgrade on a plaintext connection (typical for port 587). Turn off
+    # for a dev mailhog/mailpit that speaks plain SMTP.
+    smtp_starttls: bool = True
+    # Implicit TLS from connect (typical for port 465). Mutually exclusive with
+    # smtp_starttls in practice.
+    smtp_use_tls: bool = False
+
 
 settings = Settings()

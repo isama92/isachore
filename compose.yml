@@ -29,6 +29,14 @@ services:
       retries: 10
       start_period: 5s
 
+  mailpit:
+    image: axllent/mailpit:latest
+    # Dev SMTP sink. SMTP (1025) is in-network only (reachable as "mailpit:1025",
+    # like redis); the web UI is published so you can read captured emails at
+    # http://localhost:8025.
+    ports:
+      - "8025:8025"
+
   backend:
     build:
       context: ./backend
@@ -37,6 +45,14 @@ services:
     environment:
       # In-network Redis host; overrides any REDIS_URL from .env.
       REDIS_URL: redis://redis:6379/0
+      # Dev email goes to the in-network mailpit (plain SMTP, no TLS/auth), so
+      # confirmation works out of the box. Prod supplies real SMTP_* via .env.
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_STARTTLS: "false"
+      SMTP_USE_TLS: "false"
+      SMTP_FROM: "isachore <no-reply@isachore.local>"
+      APP_BASE_URL: http://localhost:5173
     ports:
       - "8000:8000"
     volumes:
@@ -49,6 +65,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      mailpit:
+        condition: service_started
 
   frontend:
     build:

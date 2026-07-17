@@ -19,12 +19,21 @@ multiple people, with a JSON API so mobile clients can join later.
 cp .env.example .env
 docker compose up --build
 docker compose exec backend alembic upgrade head
-docker compose exec backend python -m app.cli create-admin --email you@example.com --first-name You --last-name Example
+docker compose exec backend python -m app.cli init --email you@example.com --first-name You --last-name Example
 ```
 
-There is no self-registration: the first admin is created with the command
-above (it prompts for a password), and every other user is created by an
-admin in the UI under **Admin → Users**.
+There is no self-registration. The first admin is bootstrapped with the `init`
+command above (it prompts for a password). `init` is a one-time bootstrap: it
+does nothing if an admin already exists, so it's safe to leave in a deploy
+script. Every other user is created by an admin in the UI under
+**Admin → Users**.
+
+If **Admin → Server settings → Require user confirmation** is on, a new user
+starts as *waiting confirmation* and receives an email with a link to set their
+own password; only then does the account become active. When it's off, the
+admin sets the password in the create form and the user is active immediately.
+Confirmation needs SMTP configured (see `.env.example`); in dev, emails are
+captured by mailpit at http://localhost:8025.
 
 | Service       | URL                                     |
 | ------------- | --------------------------------------- |
@@ -33,6 +42,7 @@ admin in the UI under **Admin → Users**.
 | API docs      | http://localhost:8000/docs              |
 | Health check  | http://localhost:5173/api/v1/health     |
 | Postgres      | localhost:5432                          |
+| Mailpit (dev email) | http://localhost:8025             |
 
 Production build (serves everything on port 80 via nginx):
 
@@ -116,19 +126,21 @@ The idea, step by step. Done so far: project scaffold, linters + pre-commit
 hook, Docker dev/prod, hello world at `/`, login page UI at `/login`, chores +
 users management UI, a shadcn/ui component kit with light/dark theming, a
 self-service profile page (name / password / avatar upload) reached from an
-avatar menu in the top bar, and English/Italian UI translations (react-i18next)
-picked per user on the profile page.
+avatar menu in the top bar, English/Italian UI translations (react-i18next)
+picked per user on the profile page, and email-based user confirmation with a
+server-settings page (SMTP, mailpit in dev) plus the one-time `init` bootstrap.
 
 The app is organised into four areas (context for future work):
 
 - **Homepage**: due views for the active user (what is overdue, due today, due soon).
-- **Admin**: manage server settings (not yet implemented), users, and anything else that comes up.
+- **Admin**: manage server settings, users, and anything else that comes up.
 - **Chores management**: manage the household's chores.
 - **Tags management**: create, edit and delete tags.
 
 - [ ] Tags management (create/edit/delete tags)
 - [ ] Household crud
-- [ ] Admin: server settings
+- [x] user email confirmation (waiting_confirmation → active via emailed link)
+- [x] Admin: server settings (require-confirmation toggle + test email button)
 - [ ] Due views: what is **overdue**, what has to be done **today**, what is due **in a few days**
 - [ ] chores changes log (see who changed the chores)
 - [ ] Mark chore as done / completion history

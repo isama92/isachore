@@ -28,6 +28,7 @@ from app.models import (
     RepeatPeriod,
     Tag,
     User,
+    UserStatus,
 )
 
 # A throwaway database in the same Postgres instance as dev, resolved from the
@@ -136,15 +137,21 @@ def make_user(db_session: AsyncSession) -> Callable[..., Awaitable[User]]:
         last_name: str = "Member",
         password: str = "password12345",
         is_admin: bool = False,
-        is_active: bool = True,
+        status: UserStatus = UserStatus.active,
+        confirmed_at: datetime | None = None,
     ) -> User:
+        # An active user has, by definition, completed setup, so default
+        # confirmed_at unless a test wants the "active but unconfirmed" edge.
+        if confirmed_at is None and status == UserStatus.active:
+            confirmed_at = datetime.now(UTC)
         user = User(
             email=email,
             first_name=first_name,
             last_name=last_name,
             password_hash=security.hash_password(password),
             is_admin=is_admin,
-            is_active=is_active,
+            status=status,
+            confirmed_at=confirmed_at,
         )
         db_session.add(user)
         await db_session.commit()
@@ -152,6 +159,36 @@ def make_user(db_session: AsyncSession) -> Callable[..., Awaitable[User]]:
         return user
 
     return _make
+
+
+@pytest.fixture(autouse=True)
+def _reset_smtp(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hermetic default: SMTP unconfigured regardless of the container's env
+    (compose sets SMTP_* to point at mailpit in dev). Tests that need a
+    configured relay opt in via the `smtp` fixture, which runs after this
+    autouse one and re-sets the values."""
+    monkeypatch.setattr(settings, "smtp_host", None)
+    monkeypatch.setattr(settings, "smtp_from", None)
+
+
+@pytest.fixture
+def smtp(monkeypatch: pytest.MonkeyPatch) -> list:
+    """Configure SMTP and capture outgoing mail without hitting the network.
+
+    Patches the single chokepoint (aiosmtplib.send) so the real send_email /
+    send_confirmation_email code runs and every path (users, server_settings,
+    resend) is captured. Returns the list of sent EmailMessage objects.
+    """
+    monkeypatch.setattr(settings, "smtp_host", "mailpit")
+    monkeypatch.setattr(settings, "smtp_from", "isachore <no-reply@example.com>")
+    sent: list = []
+
+    async def _fake_send(message, **kwargs):
+        sent.append(message)
+        return {}, "OK"
+
+    monkeypatch.setattr("aiosmtplib.send", _fake_send)
+    return sent
 
 
 @pytest.fixture

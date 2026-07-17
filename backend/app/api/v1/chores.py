@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentHousehold, SessionDep
-from app.models import Chore, Household, Tag, User, household_members
+from app.models import Chore, Household, Tag, User, UserStatus, household_members
 from app.schemas import ChoreCreate, ChoreRead
 
 router = APIRouter()
@@ -32,7 +32,7 @@ async def _resolve_assignees(
         .where(
             household_members.c.household_id == household.id,
             User.id.in_(ids),
-            User.is_active.is_(True),
+            User.status == UserStatus.active,
         )
     )
     users = list(result.scalars())

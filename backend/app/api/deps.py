@@ -10,7 +10,7 @@ from sqlalchemy.orm import joinedload
 from app.core.security import ADMIN_COOKIE_NAME, COOKIE_NAME, hash_token
 from app.db.redis import get_redis
 from app.db.session import get_session
-from app.models import AuthToken, Household, User, household_members
+from app.models import AuthToken, Household, User, UserStatus, household_members
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 RedisDep = Annotated[Redis, Depends(get_redis)]
@@ -43,7 +43,7 @@ async def get_user_by_token(session: AsyncSession, token: str) -> User | None:
         )
     )
     auth_token = result.scalar_one_or_none()
-    if auth_token is None or not auth_token.user.is_active:
+    if auth_token is None or auth_token.user.status != UserStatus.active:
         return None
     return auth_token.user
 

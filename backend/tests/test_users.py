@@ -6,7 +6,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import generate_token, hash_token
-from app.models import AuthToken, User
+from app.models import AuthToken, ConfirmationToken, User, UserStatus
+from app.models.app_settings import APP_SETTINGS_ID, AppSettings
 
 Login = Callable[..., Awaitable[User]]
 AuthClient = Callable[[User], Awaitable[AsyncClient]]
@@ -83,7 +84,8 @@ async def test_create_user(make_user: Login, auth_client: AuthClient) -> None:
     assert body["first_name"] == "New"
     assert body["last_name"] == "Member"
     assert body["is_admin"] is False
-    assert body["is_active"] is True
+    assert body["status"] == "active"
+    assert body["confirmed_at"] is not None
     assert "password_hash" not in body
 
     # password stored hashed -> the new credentials actually work
@@ -247,7 +249,7 @@ async def test_update_self_demote_forbidden(make_user: Login, auth_client: AuthC
 async def test_update_self_deactivate_forbidden(make_user: Login, auth_client: AuthClient) -> None:
     admin = await make_user(email="admin@example.com", is_admin=True)
     client = await auth_client(admin)
-    resp = await client.patch(f"/api/v1/users/{admin.id}", json={"is_active": False})
+    resp = await client.patch(f"/api/v1/users/{admin.id}", json={"status": "disabled"})
     assert resp.status_code == 400
 
 
@@ -274,10 +276,10 @@ async def test_update_deactivate_revokes_tokens(
     await _issue_token(db_session, member)
     client = await auth_client(admin)
 
-    resp = await client.patch(f"/api/v1/users/{member.id}", json={"is_active": False})
+    resp = await client.patch(f"/api/v1/users/{member.id}", json={"status": "disabled"})
 
     assert resp.status_code == 200
-    assert resp.json()["is_active"] is False
+    assert resp.json()["status"] == "disabled"
     assert await _token_count(db_session, member.id) == 0
 
 
@@ -329,7 +331,7 @@ async def test_impersonate_self_forbidden(make_user: Login, auth_client: AuthCli
 
 async def test_impersonate_inactive_forbidden(make_user: Login, auth_client: AuthClient) -> None:
     admin = await make_user(email="admin@example.com", is_admin=True)
-    member = await make_user(email="member@example.com", is_active=False)
+    member = await make_user(email="member@example.com", status=UserStatus.disabled)
     client = await auth_client(admin)
     resp = await client.post(f"/api/v1/users/{member.id}/impersonate")
     assert resp.status_code == 400
@@ -421,7 +423,7 @@ async def test_impersonating_admin_cannot_deactivate_real_operator(
     assert resp.status_code == 400
     assert resp.json()["detail"] == "You cannot deactivate yourself"
     await db_session.refresh(admin)
-    assert admin.is_active is True
+    assert admin.status == UserStatus.active
 
 
 async def test_impersonating_admin_cannot_demote_current_session(
@@ -484,11 +486,11 @@ async def test_delete_user_soft(
 
     assert resp.status_code == 204
     assert await _token_count(db_session, member.id) == 0
-    # Row still present, just deactivated (soft delete)
+    # Row still present, just disabled (soft delete)
     refreshed = await db_session.get(User, member.id)
     assert refreshed is not None
     await db_session.refresh(refreshed)
-    assert refreshed.is_active is False
+    assert refreshed.status == UserStatus.disabled
 
 
 async def test_delete_self_forbidden(make_user: Login, auth_client: AuthClient) -> None:
@@ -512,3 +514,221 @@ async def test_delete_as_member_forbidden(make_user: Login, auth_client: AuthCli
     client = await auth_client(member)
     resp = await client.delete(f"/api/v1/users/{target.id}")
     assert resp.status_code == 403
+
+
+# --- confirmation flow --------------------------------------------------
+
+
+async def _enable_confirmation(session: AsyncSession) -> None:
+    settings_row = await session.get(AppSettings, APP_SETTINGS_ID)
+    if settings_row is None:
+        settings_row = AppSettings(id=APP_SETTINGS_ID, require_confirmation=True)
+        session.add(settings_row)
+    else:
+        settings_row.require_confirmation = True
+    await session.commit()
+
+
+async def _confirmation_count(session: AsyncSession, user_id: int) -> int:
+    query = (
+        select(func.count())
+        .select_from(ConfirmationToken)
+        .where(ConfirmationToken.user_id == user_id)
+    )
+    return await session.scalar(query) or 0
+
+
+async def test_create_user_confirmation_on_starts_waiting_and_emails(
+    make_user: Login, auth_client: AuthClient, db_session: AsyncSession, smtp: list
+) -> None:
+    await _enable_confirmation(db_session)
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    client = await auth_client(admin)
+
+    resp = await client.post(
+        "/api/v1/users",
+        json={"email": "newbie@example.com", "first_name": "New", "last_name": "Member"},
+    )
+
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["status"] == "waiting_confirmation"
+    assert body["confirmed_at"] is None
+    assert await _confirmation_count(db_session, body["id"]) == 1
+    assert len(smtp) == 1
+    assert smtp[0]["To"] == "newbie@example.com"
+
+
+async def test_create_user_confirmation_on_ignores_password(
+    make_user: Login, auth_client: AuthClient, db_session: AsyncSession, smtp: list
+) -> None:
+    # A password in the payload is ignored; login must fail until they confirm.
+    await _enable_confirmation(db_session)
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    client = await auth_client(admin)
+
+    await client.post(
+        "/api/v1/users",
+        json={
+            "email": "newbie@example.com",
+            "first_name": "New",
+            "last_name": "Member",
+            "password": "password12345",
+        },
+    )
+    login = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "newbie@example.com", "password": "password12345"},
+    )
+    assert login.status_code == 401
+
+
+async def test_create_user_confirmation_on_without_smtp_rejected(
+    make_user: Login, auth_client: AuthClient, db_session: AsyncSession
+) -> None:
+    # Defensive guard: confirmation enabled but SMTP unset (no smtp fixture).
+    await _enable_confirmation(db_session)
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    client = await auth_client(admin)
+
+    resp = await client.post(
+        "/api/v1/users",
+        json={"email": "newbie@example.com", "first_name": "New", "last_name": "Member"},
+    )
+    assert resp.status_code == 400
+
+
+async def test_create_user_no_password_when_confirmation_off_rejected(
+    make_user: Login, auth_client: AuthClient
+) -> None:
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    client = await auth_client(admin)
+
+    resp = await client.post(
+        "/api/v1/users",
+        json={"email": "newbie@example.com", "first_name": "New", "last_name": "Member"},
+    )
+    assert resp.status_code == 400
+
+
+async def test_force_active_unconfirmed_allowed(
+    make_user: Login, auth_client: AuthClient, db_session: AsyncSession
+) -> None:
+    # The status Select applies as-is (no coercion): an admin may force a
+    # never-confirmed user active. confirmed_at stays null (the UI warns).
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    member = await make_user(email="member@example.com", status=UserStatus.waiting_confirmation)
+    client = await auth_client(admin)
+
+    resp = await client.patch(f"/api/v1/users/{member.id}", json={"status": "active"})
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "active"
+    assert resp.json()["confirmed_at"] is None
+
+
+async def test_update_to_waiting_resends_confirmation(
+    make_user: Login, auth_client: AuthClient, db_session: AsyncSession, smtp: list
+) -> None:
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    member = await make_user(email="member@example.com")
+    client = await auth_client(admin)
+
+    resp = await client.patch(f"/api/v1/users/{member.id}", json={"status": "waiting_confirmation"})
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "waiting_confirmation"
+    assert await _confirmation_count(db_session, member.id) == 1
+    assert len(smtp) == 1
+
+
+async def test_resend_confirmation(
+    make_user: Login, auth_client: AuthClient, db_session: AsyncSession, smtp: list
+) -> None:
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    member = await make_user(email="member@example.com", status=UserStatus.waiting_confirmation)
+    client = await auth_client(admin)
+
+    resp = await client.post(f"/api/v1/users/{member.id}/resend-confirmation")
+
+    assert resp.status_code == 204
+    assert await _confirmation_count(db_session, member.id) == 1
+    assert len(smtp) == 1
+    assert smtp[0]["To"] == "member@example.com"
+
+
+async def test_resend_confirmation_not_waiting_rejected(
+    make_user: Login, auth_client: AuthClient, smtp: list
+) -> None:
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    member = await make_user(email="member@example.com")  # active
+    client = await auth_client(admin)
+
+    resp = await client.post(f"/api/v1/users/{member.id}/resend-confirmation")
+    assert resp.status_code == 400
+
+
+async def test_resend_confirmation_without_smtp_rejected(
+    make_user: Login, auth_client: AuthClient
+) -> None:
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    member = await make_user(email="member@example.com", status=UserStatus.waiting_confirmation)
+    client = await auth_client(admin)
+
+    resp = await client.post(f"/api/v1/users/{member.id}/resend-confirmation")
+    assert resp.status_code == 400
+
+
+async def test_resend_confirmation_as_member_forbidden(
+    make_user: Login, auth_client: AuthClient, smtp: list
+) -> None:
+    member = await make_user(email="member@example.com")
+    target = await make_user(email="target@example.com", status=UserStatus.waiting_confirmation)
+    client = await auth_client(member)
+    resp = await client.post(f"/api/v1/users/{target.id}/resend-confirmation")
+    assert resp.status_code == 403
+
+
+async def test_deactivate_revokes_confirmation_tokens(
+    make_user: Login, auth_client: AuthClient, db_session: AsyncSession, smtp: list
+) -> None:
+    # A disabled account must not be re-activatable via a still-valid emailed
+    # confirmation link, so disabling revokes outstanding confirmation tokens.
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    member = await make_user(email="member@example.com", status=UserStatus.waiting_confirmation)
+    client = await auth_client(admin)
+    await client.post(f"/api/v1/users/{member.id}/resend-confirmation")
+    assert await _confirmation_count(db_session, member.id) == 1
+
+    resp = await client.delete(f"/api/v1/users/{member.id}")
+
+    assert resp.status_code == 204
+    assert await _confirmation_count(db_session, member.id) == 0
+
+
+async def test_update_to_disabled_revokes_confirmation_tokens(
+    make_user: Login, auth_client: AuthClient, db_session: AsyncSession, smtp: list
+) -> None:
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    member = await make_user(email="member@example.com", status=UserStatus.waiting_confirmation)
+    client = await auth_client(admin)
+    await client.post(f"/api/v1/users/{member.id}/resend-confirmation")
+    assert await _confirmation_count(db_session, member.id) == 1
+
+    resp = await client.patch(f"/api/v1/users/{member.id}", json={"status": "disabled"})
+
+    assert resp.status_code == 200
+    assert await _confirmation_count(db_session, member.id) == 0
+
+
+async def test_update_to_waiting_without_smtp_rejected(
+    make_user: Login, auth_client: AuthClient
+) -> None:
+    # No smtp fixture -> SMTP unconfigured; moving to waiting_confirmation is
+    # refused so the user isn't stranded with no way to confirm.
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    member = await make_user(email="member@example.com")
+    client = await auth_client(admin)
+
+    resp = await client.patch(f"/api/v1/users/{member.id}", json={"status": "waiting_confirmation"})
+    assert resp.status_code == 400

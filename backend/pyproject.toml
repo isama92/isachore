@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "isachore API - chore management for households"
 requires-python = ">=3.13"
 dependencies = [
+    "aiosmtplib>=3.0.0",
     "alembic>=1.18.5",
     "asyncpg>=0.31.0",
     "fastapi>=0.139.0",

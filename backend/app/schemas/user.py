@@ -11,6 +11,8 @@ from pydantic import (
     model_validator,
 )
 
+from app.models.user import UserStatus
+
 # Emails are stored and compared lower-cased so a differently-cased address is
 # the same account (L3). The validator runs only on the non-None union member,
 # so an optional email left unset stays None.
@@ -48,7 +50,10 @@ class UserRead(BaseModel):
     first_name: str
     last_name: str
     is_admin: bool
-    is_active: bool
+    status: UserStatus
+    # When the user completed setup; None means they never confirmed. Drives the
+    # "active but unconfirmed" warning in the admin UI.
+    confirmed_at: datetime | None = None
     created_at: datetime
     # Appearance preference; None means the client follows its OS-preferred
     # default (the SPA applies these on load).
@@ -78,7 +83,9 @@ class UserCreate(BaseModel):
     email: NormalisedEmail
     first_name: str = Field(min_length=1, max_length=255)
     last_name: str = Field(min_length=1, max_length=255)
-    password: str = Field(min_length=8)
+    # Optional: required only when confirmation is off (admin sets it); when
+    # confirmation is on the user sets it via the emailed link, so it's ignored.
+    password: str | None = Field(default=None, min_length=8)
     is_admin: bool = False
 
 
@@ -88,7 +95,7 @@ class UserUpdate(BaseModel):
     last_name: str | None = Field(default=None, min_length=1, max_length=255)
     password: str | None = Field(default=None, min_length=8)
     is_admin: bool | None = None
-    is_active: bool | None = None
+    status: UserStatus | None = None
 
 
 class LoginRequest(BaseModel):
@@ -114,3 +121,16 @@ class ProfileUpdate(BaseModel):
         if self.new_password is not None and not self.current_password:
             raise ValueError("current_password is required to set a new password")
         return self
+
+
+class ConfirmTokenInfo(BaseModel):
+    """Public info returned for a valid confirmation token so the set-password
+    page can greet the user before they submit."""
+
+    email: str
+    first_name: str
+    last_name: str
+
+
+class ConfirmRequest(BaseModel):
+    password: str = Field(min_length=8)

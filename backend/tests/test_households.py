@@ -2,7 +2,7 @@ from collections.abc import Awaitable, Callable
 
 from httpx import AsyncClient
 
-from app.models import Household, User
+from app.models import Household, User, UserStatus
 
 MakeUser = Callable[..., Awaitable[User]]
 MakeHousehold = Callable[..., Awaitable[Household]]
@@ -33,7 +33,10 @@ async def test_list_households_excludes_inactive_members(
 ) -> None:
     alice = await make_user(email="alice@example.com", first_name="Alice", last_name="Adams")
     ghost = await make_user(
-        email="ghost@example.com", first_name="Ghost", last_name="Gone", is_active=False
+        email="ghost@example.com",
+        first_name="Ghost",
+        last_name="Gone",
+        status=UserStatus.disabled,
     )
     await make_household(name="Flat 3B", members=[alice, ghost])
     client = await auth_client(alice)

@@ -2,7 +2,7 @@ from collections.abc import Awaitable, Callable
 
 from httpx import AsyncClient
 
-from app.models import Chore, Household, Tag, User
+from app.models import Chore, Household, Tag, User, UserStatus
 
 MakeUser = Callable[..., Awaitable[User]]
 MakeHousehold = Callable[..., Awaitable[Household]]
@@ -92,7 +92,7 @@ async def test_create_chore_inactive_assignee_rejected(
     make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
 ) -> None:
     user = await make_user(email="me@example.com")
-    inactive = await make_user(email="ghost@example.com", is_active=False)
+    inactive = await make_user(email="ghost@example.com", status=UserStatus.disabled)
     await make_household(name="Mine", members=[user, inactive])
     client = await auth_client(user)
 

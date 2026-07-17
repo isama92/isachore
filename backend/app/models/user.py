@@ -1,4 +1,5 @@
 from datetime import datetime
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, String, func
@@ -9,7 +10,19 @@ from app.db.base import Base
 if TYPE_CHECKING:
     from app.models.auth_token import AuthToken
     from app.models.chore import Chore
+    from app.models.confirmation_token import ConfirmationToken
     from app.models.household import Household
+
+
+class UserStatus(StrEnum):
+    """Account lifecycle. A user is created either waiting_confirmation (they
+    set their own password via an emailed link) or active (an admin set the
+    password directly); disabled is the soft-deleted / suspended state. Only an
+    active user can log in or be impersonated."""
+
+    waiting_confirmation = "waiting_confirmation"
+    active = "active"
+    disabled = "disabled"
 
 
 class User(Base):
@@ -36,13 +49,25 @@ class User(Base):
     # theme/accent above.
     language: Mapped[str | None] = mapped_column(String(32), default=None)
     is_admin: Mapped[bool] = mapped_column(default=False)
-    is_active: Mapped[bool] = mapped_column(default=True)
+    # Account lifecycle. Stored as a plain String (closed set enforced at the
+    # schema layer, same approach as theme/accent/language above) so adding a
+    # future status stays migration-free. StrEnum members compare equal to their
+    # string value, so `user.status == UserStatus.active` works on the raw value.
+    status: Mapped[str] = mapped_column(String(32), default=UserStatus.active)
+    # When the user completed account setup (set their password), whether via
+    # the emailed confirmation link or an admin creating them active directly.
+    # NULL means they never confirmed, so an admin forcing them active leaves a
+    # visible "active but unconfirmed" warning in the UI.
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
     tokens: Mapped[list["AuthToken"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    confirmation_tokens: Mapped[list["ConfirmationToken"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
     households: Mapped[list["Household"]] = relationship(

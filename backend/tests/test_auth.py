@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import generate_token, hash_token
-from app.models import AuditAction, AuditEvent, AuthToken, User
+from app.models import AuditAction, AuditEvent, AuthToken, User, UserStatus
 
 Login = Callable[..., Awaitable[User]]
 
@@ -65,7 +65,7 @@ async def test_login_unknown_email(client: AsyncClient) -> None:
 
 
 async def test_login_inactive_user(client: AsyncClient, make_user: Login) -> None:
-    await make_user(email="ghost@example.com", password="password12345", is_active=False)
+    await make_user(email="ghost@example.com", password="password12345", status=UserStatus.disabled)
     resp = await client.post(
         "/api/v1/auth/login",
         json={"email": "ghost@example.com", "password": "password12345"},

@@ -1,6 +1,15 @@
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation } from 'react-router'
-import { ChevronRight, CircleUser, ClipboardList, Home, LogOut, Shield, Users } from 'lucide-react'
+import {
+  ChevronRight,
+  CircleUser,
+  ClipboardList,
+  Home,
+  LogOut,
+  Settings,
+  Shield,
+  Users,
+} from 'lucide-react'
 import { useAuth } from '../auth/useAuth'
 import { fullName, initials } from '../lib/user'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -38,7 +47,10 @@ export default function AppSidebar() {
 
   // Admin section: a foldable parent (links nowhere) with one sub-item per
   // admin page. Add future admin pages here.
-  const adminItems = [{ to: '/admin/users', icon: Users, label: t('sidebar.users') }]
+  const adminItems = [
+    { to: '/admin/users', icon: Users, label: t('sidebar.users') },
+    { to: '/admin/server-settings', icon: Settings, label: t('sidebar.serverSettings') },
+  ]
   const adminActive = pathname.startsWith('/admin')
 
   // Home is exact; other sections also match their nested routes (e.g.

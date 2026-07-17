@@ -78,6 +78,7 @@
   --color-danger: var(--destructive);
   --color-placeholder: var(--placeholder);
   --color-primary-dark: var(--primary-dark);
+  --color-warning: var(--warning);
 }
 
 /* Theme palettes = the four Catppuccin flavours. Each [data-theme] block sets
@@ -105,6 +106,12 @@
   --sidebar-accent-foreground: var(--accent-foreground);
   --sidebar-border: var(--border);
   --sidebar-ring: var(--ring);
+
+  /* Attention / pending state (waiting confirmation, and active-but-unconfirmed
+     which must stand out from a normal active user). Tracks the active
+     flavour's peach; resolves lazily per theme like --sidebar above, so one
+     definition works for every flavour. */
+  --warning: var(--ctp-peach);
 }
 
 /* Latte (light). Also serves as the no-attribute fallback via :root. */

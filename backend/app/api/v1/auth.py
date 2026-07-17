@@ -30,7 +30,7 @@ from app.core.security import (
     verify_password,
 )
 from app.core.tokens import purge_expired_tokens
-from app.models import AuditAction, AuthToken, User
+from app.models import AuditAction, AuthToken, User, UserStatus
 from app.schemas import LoginRequest, MeRead, UserRead
 
 router = APIRouter()
@@ -56,7 +56,7 @@ async def login(
     password_ok = verify_password(
         payload.password, user.password_hash if user else DUMMY_PASSWORD_HASH
     )
-    if user is None or not password_ok or not user.is_active:
+    if user is None or not password_ok or user.status != UserStatus.active:
         await record_login_failure(redis, email=email, ip=ip)
         # Persist the failed attempt (actor unknown; the attempted email goes in
         # detail) even though the request itself fails with 401.

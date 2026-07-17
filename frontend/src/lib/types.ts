@@ -1,13 +1,19 @@
 import type { Accent, Flavour } from '../theme/context'
 import type { Language } from '../i18n/languages'
 
+// Account lifecycle, kept in sync with the backend UserStatus enum.
+export type UserStatus = 'waiting_confirmation' | 'active' | 'disabled'
+
 export type User = {
   id: number
   email: string
   first_name: string
   last_name: string
   is_admin: boolean
-  is_active: boolean
+  status: UserStatus
+  // When the user completed setup; null means they never confirmed (drives the
+  // "active but unconfirmed" warning in the admin UI).
+  confirmed_at: string | null
   created_at: string
   avatar_url: string | null
   // Appearance preference; null means the client follows its OS-preferred
@@ -19,6 +25,12 @@ export type User = {
 }
 
 export type Me = User & { impersonating: boolean }
+
+// Server-wide settings from GET /api/v1/settings (admin-only).
+export type ServerSettings = {
+  require_confirmation: boolean
+  smtp_configured: boolean
+}
 
 export type RepeatPeriod = 'manual' | 'hourly' | 'daily' | 'weekly' | 'monthly' | 'yearly'
 

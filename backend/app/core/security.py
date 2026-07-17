@@ -8,6 +8,9 @@ from pwdlib import PasswordHash
 from app.core.config import settings
 
 TOKEN_TTL = timedelta(days=30)
+# Account-confirmation links are longer-lived than a login session but still
+# expire so a stale invite can't be redeemed indefinitely; the admin can resend.
+CONFIRMATION_TOKEN_TTL = timedelta(days=7)
 COOKIE_NAME = "isachore_token"
 # Holds the original admin session while impersonating another user
 ADMIN_COOKIE_NAME = "isachore_admin_token"

@@ -45,7 +45,7 @@ docker compose -f compose.prod.yml up --build      # prod: nginx on :80 serving 
 
 docker compose exec backend alembic revision --autogenerate -m "..."
 docker compose exec backend alembic upgrade head   # run alembic INSIDE the container so host "db" resolves
-docker compose exec backend python -m app.cli create-admin --email you@example.com --first-name You --last-name Example
+docker compose exec backend python -m app.cli init --email you@example.com --first-name You --last-name Example  # one-time bootstrap of the first admin; no-op if an admin exists
 
 cd backend && uv run ruff check . && uv run ruff format .
 cd frontend && npm run lint && npm run format && npm run build   # build also typechecks (tsc -b)
@@ -70,10 +70,26 @@ pre-commit run --all-files                         # what the git hook runs
   `Base.metadata` for autogenerate. Pydantic schemas live in `app/schemas/`.
 - Auth: DB-backed opaque tokens (`auth_tokens` table, SHA-256 hashed), sent as
   an httpOnly `isachore_token` cookie or `Authorization: Bearer`. NO
-  self-registration — admins create users; the first admin comes from the
-  `create-admin` CLI. Passwords hashed with Argon2 (pwdlib). Protect endpoints
-  by reusing `CurrentUser` / `AdminUser` from `app/api/deps.py`; soft delete
-  only (`is_active=false`), and users may never demote or deactivate themselves.
+  self-registration — admins create users; the first admin comes from the one-
+  time `init` CLI (no-op if an admin already exists). Passwords hashed with
+  Argon2 (pwdlib). Protect endpoints by reusing `CurrentUser` / `AdminUser` from
+  `app/api/deps.py`; users may never demote or deactivate themselves.
+- User lifecycle: `users.status` is a `UserStatus` StrEnum
+  (`waiting_confirmation` / `active` / `disabled`; stored as a plain String,
+  closed set enforced at the schema layer like theme/accent/language) plus a
+  `confirmed_at` timestamp. Only `active` users can log in or be impersonated;
+  deactivation is a soft delete (`status=disabled`). Login/impersonation gate on
+  `status == UserStatus.active`.
+- Email confirmation: server-wide `app_settings.require_confirmation` (single-
+  row table, `get_app_settings`) toggles it. When on, creating a user emails a
+  `confirmation_tokens` link (same hashed-opaque-token pattern as auth tokens);
+  the public `/api/v1/confirm/{token}` GET/POST sets the password, flips to
+  `active` + `confirmed_at`, and auto-logs-in. SMTP is env-only
+  (`app/core/config.py`, optional at boot; `smtp_configured()` in
+  `app/core/email.py`); enabling confirmation or the test-email button needs it.
+  Emails are English-only (backend has no i18n). Server settings live under
+  `/api/v1/settings` (admin) and the **Admin → Server settings** page. Dev SMTP
+  goes to the mailpit compose service (http://localhost:8025).
 - Impersonation: `POST /users/{id}/impersonate` swaps the session cookie to the
   target user and parks the admin's own token in the `isachore_admin_token`
   cookie; `POST /auth/stop-impersonating` restores it. `/auth/me` reports
@@ -178,7 +194,7 @@ commit. Tests live in `backend/tests/` (pytest) and alongside the code as
     against `http://localhost:5173`, and screenshot the results.
 - The local dev DB may already contain seed users created during earlier
   sessions (e.g. `admin@example.com` / `admin12345` — dev-only, this machine
-  only). Create your own via the `create-admin` CLI if missing.
+  only). Create your own via the `init` CLI if missing.
 
 ## Gotchas
 

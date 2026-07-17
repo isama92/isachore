@@ -1,4 +1,4 @@
-import type { Chore, Household, Me, Tag, User } from '../lib/types'
+import type { Chore, Household, Me, ServerSettings, Tag, User } from '../lib/types'
 
 // Synthetic data only (example.com is reserved for documentation, RFC 2606).
 export function makeUser(overrides: Partial<User> = {}): User {
@@ -8,12 +8,21 @@ export function makeUser(overrides: Partial<User> = {}): User {
     first_name: 'Test',
     last_name: 'Member',
     is_admin: false,
-    is_active: true,
+    status: 'active',
+    confirmed_at: '2026-01-01T00:00:00Z',
     created_at: '2026-01-01T00:00:00Z',
     avatar_url: null,
     theme: null,
     accent_color: null,
     language: null,
+    ...overrides,
+  }
+}
+
+export function makeServerSettings(overrides: Partial<ServerSettings> = {}): ServerSettings {
+  return {
+    require_confirmation: false,
+    smtp_configured: true,
     ...overrides,
   }
 }

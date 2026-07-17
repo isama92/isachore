@@ -1,22 +1,28 @@
+import logging
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from sqlalchemy import delete, select
 
 from app.api.deps import AdminUser, Impersonator, SessionDep, get_request_token
+from app.core.app_settings import get_app_settings
 from app.core.audit import record_event
+from app.core.email import NO_SMTP_DETAIL, send_confirmation_email, smtp_configured
 from app.core.households import add_to_default_household
 from app.core.rate_limit import client_ip
 from app.core.security import (
     ADMIN_COOKIE_NAME,
+    CONFIRMATION_TOKEN_TTL,
     TOKEN_TTL,
     generate_token,
     hash_password,
     hash_token,
     set_auth_cookie,
 )
-from app.models import AuditAction, AuthToken, User
+from app.models import AuditAction, AuthToken, ConfirmationToken, User, UserStatus
 from app.schemas import UserCreate, UserRead, UserUpdate
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -44,6 +50,27 @@ async def _revoke_tokens(session: SessionDep, user_id: int) -> None:
     await session.execute(delete(AuthToken).where(AuthToken.user_id == user_id))
 
 
+async def _revoke_confirmation_tokens(session: SessionDep, user_id: int) -> None:
+    """Delete a user's confirmation tokens. Called when they are disabled so a
+    still-valid emailed link can't flip a suspended account back to active."""
+    await session.execute(delete(ConfirmationToken).where(ConfirmationToken.user_id == user_id))
+
+
+async def _issue_confirmation_token(session: SessionDep, user_id: int) -> str:
+    """Replace any existing confirmation tokens for the user with a fresh one so
+    only the latest emailed link works, and return the raw token to email."""
+    await session.execute(delete(ConfirmationToken).where(ConfirmationToken.user_id == user_id))
+    raw = generate_token()
+    session.add(
+        ConfirmationToken(
+            token_hash=hash_token(raw),
+            user_id=user_id,
+            expires_at=datetime.now(UTC) + CONFIRMATION_TOKEN_TTL,
+        )
+    )
+    return raw
+
+
 def _protected_self_ids(admin: User, impersonator: User | None) -> set[int]:
     """Ids that may never demote/deactivate themselves. During impersonation
     that means the impersonated session AND the real operator behind the parked
@@ -66,16 +93,46 @@ async def create_user(
     request: Request,
 ) -> User:
     await _ensure_email_free(session, payload.email)
-    user = User(
-        email=payload.email,
-        first_name=payload.first_name,
-        last_name=payload.last_name,
-        password_hash=hash_password(payload.password),
-        is_admin=payload.is_admin,
-    )
+    app_settings = await get_app_settings(session)
+
+    confirm_token: str | None = None
+    if app_settings.require_confirmation:
+        # Defensive: enabling the setting already requires SMTP, but re-check so
+        # a later env change can't leave users stranded with no way to confirm.
+        if not smtp_configured():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=NO_SMTP_DETAIL)
+        # The user sets their own password via the emailed link, so any password
+        # in the payload is ignored; store an unusable random placeholder to
+        # satisfy the NOT NULL column and keep login impossible until confirmed.
+        user = User(
+            email=payload.email,
+            first_name=payload.first_name,
+            last_name=payload.last_name,
+            password_hash=hash_password(generate_token()),
+            is_admin=payload.is_admin,
+            status=UserStatus.waiting_confirmation,
+        )
+    else:
+        if not payload.password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A password is required when confirmation is disabled",
+            )
+        user = User(
+            email=payload.email,
+            first_name=payload.first_name,
+            last_name=payload.last_name,
+            password_hash=hash_password(payload.password),
+            is_admin=payload.is_admin,
+            status=UserStatus.active,
+            confirmed_at=datetime.now(UTC),
+        )
+
     session.add(user)
     await session.flush()
     await add_to_default_household(session, user.id)
+    if app_settings.require_confirmation:
+        confirm_token = await _issue_confirmation_token(session, user.id)
     await record_event(
         session,
         action=AuditAction.user_created,
@@ -86,6 +143,14 @@ async def create_user(
     )
     await session.commit()
     await session.refresh(user)
+
+    # Best-effort: the account exists either way, and the admin can resend if the
+    # email fails, so a transient SMTP error shouldn't fail the whole request.
+    if confirm_token is not None:
+        try:
+            await send_confirmation_email(user, confirm_token)
+        except Exception:
+            logger.exception("Failed to send confirmation email to user %s", user.id)
     return user
 
 
@@ -101,16 +166,29 @@ async def update_user(
     user = await _get_user_or_404(session, user_id)
 
     demoting = payload.is_admin is False
-    deactivating = payload.is_active is False
+    # Any move away from active (disabled or waiting_confirmation) counts as
+    # deactivating for the self-guard and for token revocation.
+    deactivating = payload.status is not None and payload.status != UserStatus.active
     if user.id in _protected_self_ids(admin, impersonator) and (demoting or deactivating):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="You cannot demote or deactivate yourself",
         )
 
+    # Moving someone to waiting_confirmation is pointless without a way to email
+    # them the link, so refuse it when SMTP isn't configured (like create/resend).
+    if (
+        payload.status == UserStatus.waiting_confirmation
+        and user.status != UserStatus.waiting_confirmation
+        and not smtp_configured()
+    ):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=NO_SMTP_DETAIL)
+
     # Record the fields that actually changed (never the values, so a password
     # reset is audited without leaking the password).
     changed: list[str] = []
+    to_waiting = False
+    to_disabled = False
     if payload.email is not None and payload.email != user.email:
         await _ensure_email_free(session, payload.email, exclude_id=user.id)
         user.email = payload.email
@@ -124,16 +202,28 @@ async def update_user(
     if payload.is_admin is not None and payload.is_admin != user.is_admin:
         user.is_admin = payload.is_admin
         changed.append("is_admin")
-    if payload.is_active is not None and payload.is_active != user.is_active:
-        user.is_active = payload.is_active
-        changed.append("is_active")
+    if payload.status is not None and payload.status != user.status:
+        # Applied as-is (no coercion): an admin may force a never-confirmed user
+        # active, which the UI surfaces as a warning. Moving a user to
+        # waiting_confirmation triggers a fresh confirmation email below.
+        to_waiting = payload.status == UserStatus.waiting_confirmation
+        to_disabled = payload.status == UserStatus.disabled
+        user.status = payload.status
+        changed.append("status")
     if payload.password is not None:
         user.password_hash = hash_password(payload.password)
         changed.append("password")
 
+    confirm_token: str | None = None
+    if to_waiting and smtp_configured():
+        confirm_token = await _issue_confirmation_token(session, user.id)
+
     # Force re-login when credentials or access change
     if payload.password is not None or deactivating:
         await _revoke_tokens(session, user.id)
+    # A disabled account must not be re-openable via a still-live emailed link.
+    if to_disabled:
+        await _revoke_confirmation_tokens(session, user.id)
 
     await record_event(
         session,
@@ -146,6 +236,12 @@ async def update_user(
     )
     await session.commit()
     await session.refresh(user)
+
+    if confirm_token is not None:
+        try:
+            await send_confirmation_email(user, confirm_token)
+        except Exception:
+            logger.exception("Failed to send confirmation email to user %s", user.id)
     return user
 
 
@@ -163,7 +259,7 @@ async def impersonate_user(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="You are already this user"
         )
-    if not user.is_active:
+    if user.status != UserStatus.active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot log in as an inactive user"
         )
@@ -217,8 +313,11 @@ async def deactivate_user(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot deactivate yourself"
         )
-    user.is_active = False
+    user.status = UserStatus.disabled
     await _revoke_tokens(session, user.id)
+    # Kill any outstanding confirmation link so a disabled account can't be
+    # re-activated by whoever holds it.
+    await _revoke_confirmation_tokens(session, user.id)
     await record_event(
         session,
         action=AuditAction.user_deactivated,
@@ -228,3 +327,31 @@ async def deactivate_user(
         ip=client_ip(request),
     )
     await session.commit()
+
+
+@router.post("/{user_id}/resend-confirmation", status_code=status.HTTP_204_NO_CONTENT)
+async def resend_confirmation(
+    user_id: int,
+    _: AdminUser,
+    session: SessionDep,
+) -> None:
+    user = await _get_user_or_404(session, user_id)
+    if user.status != UserStatus.waiting_confirmation:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This user is not awaiting confirmation",
+        )
+    if not smtp_configured():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=NO_SMTP_DETAIL)
+    # Commit the new token before sending so the emailed link is always valid;
+    # a send failure then surfaces as 502 and the admin can retry.
+    confirm_token = await _issue_confirmation_token(session, user.id)
+    await session.commit()
+    try:
+        await send_confirmation_email(user, confirm_token)
+    except Exception as exc:
+        logger.exception("Failed to resend confirmation email to user %s", user.id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not send the confirmation email",
+        ) from exc

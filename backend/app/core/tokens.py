@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AuthToken
+from app.models import AuthToken, ConfirmationToken
 
 
 async def purge_expired_tokens(session: AsyncSession) -> None:
@@ -15,3 +15,11 @@ async def purge_expired_tokens(session: AsyncSession) -> None:
     rides on normal traffic without needing a cron job (L1).
     """
     await session.execute(delete(AuthToken).where(AuthToken.expires_at < datetime.now(UTC)))
+
+
+async def purge_expired_confirmation_tokens(session: AsyncSession) -> None:
+    """Delete confirmation tokens whose TTL has elapsed. Same opportunistic
+    sweep as purge_expired_tokens; called when a confirmation link is used."""
+    await session.execute(
+        delete(ConfirmationToken).where(ConfirmationToken.expires_at < datetime.now(UTC))
+    )
