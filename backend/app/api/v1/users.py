@@ -1,8 +1,9 @@
 import logging
 from datetime import UTC, datetime
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException, Request, Response, status
-from sqlalchemy import delete, select
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from sqlalchemy import delete, func, or_, select
 
 from app.api.deps import AdminUser, Impersonator, SessionDep, get_request_token
 from app.core.app_settings import get_app_settings
@@ -20,7 +21,7 @@ from app.core.security import (
     set_auth_cookie,
 )
 from app.models import AuditAction, AuthToken, ConfirmationToken, User, UserStatus
-from app.schemas import UserCreate, UserRead, UserUpdate
+from app.schemas import Page, UserCreate, UserRead, UserUpdate
 
 logger = logging.getLogger(__name__)
 
@@ -78,10 +79,79 @@ def _protected_self_ids(admin: User, impersonator: User | None) -> set[int]:
     return {admin.id} if impersonator is None else {admin.id, impersonator.id}
 
 
-@router.get("", response_model=list[UserRead])
-async def list_users(_: AdminUser, session: SessionDep) -> list[User]:
-    result = await session.execute(select(User).order_by(User.id))
-    return list(result.scalars())
+# Whitelisted sort keys (deliberately never role/status) and directions for the
+# users list, plus the role filter values. Literals both document the closed set
+# and make an unknown value a 422 at the query-param layer.
+UserSortBy = Literal["id", "name", "email", "created_at"]
+SortDir = Literal["asc", "desc"]
+RoleFilter = Literal["admins", "members"]
+
+# The column(s) each sort key maps to; "name" spans both name fields.
+_SORT_COLUMNS = {
+    "id": (User.id,),
+    "name": (User.first_name, User.last_name),
+    "email": (User.email,),
+    "created_at": (User.created_at,),
+}
+
+
+def _escape_like(term: str) -> str:
+    """Escape LIKE wildcards so a search term is matched literally."""
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+@router.get("", response_model=Page[UserRead])
+async def list_users(
+    _: AdminUser,
+    session: SessionDep,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    sort_by: UserSortBy = "created_at",
+    sort_dir: SortDir = "desc",
+    name: Annotated[str | None, Query(max_length=255)] = None,
+    email: Annotated[str | None, Query(max_length=255)] = None,
+    # Named status_filter (not status) so it doesn't shadow the imported fastapi
+    # `status` module; the query-string key stays `status` via the alias.
+    status_filter: Annotated[UserStatus | None, Query(alias="status")] = None,
+    role: RoleFilter | None = None,
+) -> Page[UserRead]:
+    # Filters combine with AND; name searches first OR last name. Absent/empty
+    # filters are simply not applied (the frontend sends nothing for "All").
+    filters = []
+    if name and name.strip():
+        pattern = f"%{_escape_like(name.strip())}%"
+        filters.append(or_(User.first_name.ilike(pattern), User.last_name.ilike(pattern)))
+    if email and email.strip():
+        filters.append(User.email.ilike(f"%{_escape_like(email.strip())}%"))
+    if status_filter is not None:
+        filters.append(User.status == status_filter)
+    if role == "admins":
+        filters.append(User.is_admin.is_(True))
+    elif role == "members":
+        filters.append(User.is_admin.is_(False))
+
+    count_query = select(func.count()).select_from(User)
+    list_query = select(User)
+    if filters:
+        count_query = count_query.where(*filters)
+        list_query = list_query.where(*filters)
+
+    total = await session.scalar(count_query) or 0
+
+    descending = sort_dir == "desc"
+    order_by = [col.desc() if descending else col.asc() for col in _SORT_COLUMNS[sort_by]]
+    # Deterministic tiebreaker so paging is stable when the sort key ties.
+    order_by.append(User.id.desc() if descending else User.id.asc())
+
+    result = await session.execute(
+        list_query.order_by(*order_by).limit(page_size).offset((page - 1) * page_size)
+    )
+    return Page[UserRead](
+        items=[UserRead.model_validate(user) for user in result.scalars()],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.post("", response_model=UserRead, status_code=status.HTTP_201_CREATED)

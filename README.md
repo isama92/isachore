@@ -151,8 +151,7 @@ The app is organised into four areas (context for future work):
 
 - [ ] Tags management (create/edit/delete tags)
 - [ ] Household crud
-- [x] user email confirmation (waiting_confirmation → active via emailed link)
-- [x] Admin: server settings (require-confirmation toggle + test email button)
+- [ ] if a user have multiple households, then it can clone chores from one household to the other one
 - [ ] Due views: what is **overdue**, what has to be done **today**, what is due **in a few days**
 - [ ] chores changes log (see who changed the chores)
 - [ ] Mark chore as done / completion history

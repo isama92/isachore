@@ -1,11 +1,16 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
+import type { ColumnDef } from '@tanstack/react-table'
+import { LogInIcon, SendIcon, SquarePenIcon, UserCheckIcon, UserXIcon } from 'lucide-react'
 import { useAuth } from '../../auth/useAuth'
 import { api, ApiError } from '../../lib/api'
+import { formatDateTime, formatDateTimeFull } from '../../lib/format'
 import { fullName } from '../../lib/user'
 import type { ServerSettings, User, UserStatus } from '../../lib/types'
+import { DataTable } from '@/components/data-table/DataTable'
+import { useServerTable } from '@/components/data-table/useServerTable'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -37,14 +42,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 
 type FormState = {
   email: string
@@ -64,41 +62,73 @@ const emptyForm: FormState = {
   status: 'active',
 }
 
+type UserFilters = {
+  name: string
+  email: string
+  status: string
+  role: string
+}
+
+// Radix Select forbids an empty-string value, so the "all" option uses this
+// sentinel and maps to '' (unset) when written to the table filter.
+const ALL = 'all'
+
 export default function Users() {
   const { user: me, refresh } = useAuth()
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const [users, setUsers] = useState<User[]>([])
+
+  const table = useServerTable<User, UserFilters>({
+    endpoint: '/api/v1/users',
+    initial: {
+      sortBy: 'created_at',
+      sortDir: 'desc',
+      pageSize: 20,
+      filters: { name: '', email: '', status: 'active', role: '' },
+    },
+  })
+
   const [settings, setSettings] = useState<ServerSettings | null>(null)
-  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<User | null>(null)
   const [form, setForm] = useState<FormState>(emptyForm)
   const [saving, setSaving] = useState(false)
 
+  // Local text-filter state for instant typing feedback; pushed to the table
+  // (which refetches) after a short debounce.
+  const [nameInput, setNameInput] = useState(table.filters.name)
+  const [emailInput, setEmailInput] = useState(table.filters.email)
+
   // When confirmation is required, new users set their own password via an
   // emailed link, so the create form hides the password field.
   const requireConfirmation = settings?.require_confirmation ?? false
   const smtpConfigured = settings?.smtp_configured ?? false
 
-  const load = useCallback(
-    () =>
-      Promise.all([api.get<User[]>('/api/v1/users'), api.get<ServerSettings>('/api/v1/settings')])
-        .then(([usersData, settingsData]) => {
-          setUsers(usersData)
-          setSettings(settingsData)
-        })
-        .catch((err: unknown) => {
-          setError(err instanceof ApiError ? err.message : t('users.loadError'))
-        })
-        .finally(() => setLoading(false)),
-    [t],
-  )
+  useEffect(() => {
+    void api
+      .get<ServerSettings>('/api/v1/settings')
+      .then((data) => setSettings(data))
+      .catch(() => setSettings(null))
+  }, [])
+
+  // Keep a latest-value ref to the (per-render) setFilter so the debounce
+  // effects don't need it as a dependency (which would reset the timer every
+  // render). Updated after commit, never synchronously during render.
+  const setFilterRef = useRef(table.setFilter)
+  useEffect(() => {
+    setFilterRef.current = table.setFilter
+  })
 
   useEffect(() => {
-    void load()
-  }, [load])
+    const id = setTimeout(() => setFilterRef.current('name', nameInput.trim()), 300)
+    return () => clearTimeout(id)
+  }, [nameInput])
+
+  useEffect(() => {
+    const id = setTimeout(() => setFilterRef.current('email', emailInput.trim()), 300)
+    return () => clearTimeout(id)
+  }, [emailInput])
 
   function openCreate() {
     setEditing(null)
@@ -144,7 +174,7 @@ export default function Users() {
       }
       toast.success(editing ? t('users.toastUpdated') : t('users.toastCreated'))
       setShowForm(false)
-      await load()
+      table.reload()
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t('users.saveError'))
     } finally {
@@ -177,7 +207,7 @@ export default function Users() {
         await api.del(`/api/v1/users/${u.id}`)
       }
       toast.success(active ? t('users.reactivated') : t('users.deactivated'))
-      await load()
+      table.reload()
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t('users.updateError'))
     }
@@ -214,283 +244,342 @@ export default function Users() {
     return <Badge variant="destructive">{t('users.statusDisabled')}</Badge>
   }
 
+  function iconAction(label: string, icon: ReactNode, onClick: () => void, danger = false) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label={label}
+            className={danger ? 'text-destructive hover:text-destructive' : undefined}
+            onClick={onClick}
+          >
+            {icon}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{label}</TooltipContent>
+      </Tooltip>
+    )
+  }
+
+  function deactivateReactivate(u: User) {
+    const disabling = u.status !== 'disabled'
+    const label = disabling ? t('users.deactivate') : t('users.reactivate')
+    return (
+      <AlertDialog>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <AlertDialogTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={label}
+                className={disabling ? 'text-destructive hover:text-destructive' : undefined}
+              >
+                {disabling ? <UserXIcon /> : <UserCheckIcon />}
+              </Button>
+            </AlertDialogTrigger>
+          </TooltipTrigger>
+          <TooltipContent>{label}</TooltipContent>
+        </Tooltip>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {disabling
+                ? t('users.deactivateConfirm', { name: fullName(u) })
+                : t('users.reactivateConfirm', { name: fullName(u) })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {disabling ? t('users.deactivateBody') : t('users.reactivateBody')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              variant={disabling ? 'destructive' : 'default'}
+              onClick={() => void setActive(u, !disabling)}
+            >
+              {disabling ? t('users.deactivateAction') : t('users.reactivateAction')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    )
+  }
+
+  function rowActions(u: User) {
+    const isSelf = u.id === me?.id
+    return (
+      <div className="flex items-center justify-end gap-0.5">
+        {!isSelf &&
+          u.status === 'active' &&
+          iconAction(t('users.loginAs'), <LogInIcon />, () => void loginAs(u))}
+        {!isSelf &&
+          u.status === 'waiting_confirmation' &&
+          smtpConfigured &&
+          iconAction(t('users.resend'), <SendIcon />, () => void resendConfirmation(u))}
+        {iconAction(t('users.edit'), <SquarePenIcon />, () => openEdit(u))}
+        {!isSelf && deactivateReactivate(u)}
+      </div>
+    )
+  }
+
+  const columns: ColumnDef<User>[] = [
+    {
+      accessorKey: 'id',
+      header: t('users.headers.id'),
+      meta: {
+        headClassName: 'w-16',
+        cellClassName: 'font-medium text-muted-foreground tabular-nums',
+      },
+    },
+    {
+      id: 'name',
+      // accessorFn (unused for display, the cell renders below) makes this a
+      // sortable column; the actual ordering is done server-side by sort_by=name.
+      accessorFn: (u) => fullName(u),
+      header: t('users.headers.name'),
+      cell: ({ row }) => (
+        <span className="font-semibold">
+          {fullName(row.original)}
+          {row.original.id === me?.id && (
+            <span className="ml-2 text-[11px] font-bold text-placeholder">{t('users.you')}</span>
+          )}
+        </span>
+      ),
+    },
+    {
+      accessorKey: 'email',
+      header: t('users.headers.email'),
+      meta: { cellClassName: 'font-medium text-muted-foreground' },
+    },
+    {
+      id: 'role',
+      header: t('users.headers.role'),
+      enableSorting: false,
+      cell: ({ row }) =>
+        row.original.is_admin ? (
+          <Badge variant="secondary" className="text-primary">
+            {t('users.roleAdmin')}
+          </Badge>
+        ) : (
+          <Badge variant="secondary" className="text-muted-foreground">
+            {t('users.roleMember')}
+          </Badge>
+        ),
+    },
+    {
+      id: 'status',
+      header: t('users.headers.status'),
+      enableSorting: false,
+      cell: ({ row }) => statusBadge(row.original),
+    },
+    {
+      accessorKey: 'created_at',
+      header: t('users.headers.createdAt'),
+      cell: ({ row }) => (
+        <span title={formatDateTimeFull(row.original.created_at)}>
+          {formatDateTime(row.original.created_at)}
+        </span>
+      ),
+      meta: { cellClassName: 'text-muted-foreground' },
+    },
+    {
+      id: 'actions',
+      header: t('users.headers.actions'),
+      enableSorting: false,
+      cell: ({ row }) => rowActions(row.original),
+      meta: { headClassName: 'text-right', cellClassName: 'text-right' },
+    },
+  ]
+
   const showPasswordField = editing !== null || !requireConfirmation
 
   return (
-    <main className="mx-auto max-w-5xl px-5 py-8">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="font-display text-2xl font-bold tracking-tight">{t('users.title')}</h1>
-        <Button type="button" size="lg" onClick={openCreate}>
-          {t('users.addUser')}
-        </Button>
-      </div>
+    <TooltipProvider>
+      <main className="mx-auto max-w-6xl px-5 py-8">
+        <div className="mb-6 flex items-center justify-between">
+          <h1 className="font-display text-2xl font-bold tracking-tight">{t('users.title')}</h1>
+          <Button type="button" size="lg" onClick={openCreate}>
+            {t('users.addUser')}
+          </Button>
+        </div>
 
-      {error && !showForm && <p className="mb-4 text-[13px] font-bold text-danger">{error}</p>}
+        {!showForm && (error || table.error) && (
+          <p className="mb-4 text-[13px] font-bold text-danger">{error ?? t('users.loadError')}</p>
+        )}
 
-      <Dialog
-        open={showForm}
-        onOpenChange={(open) => {
-          setShowForm(open)
-          if (!open) setError(null)
-        }}
-      >
-        <DialogContent className="sm:max-w-lg">
-          <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
-            <DialogHeader>
-              <DialogTitle>
-                {editing ? t('users.editTitle', { name: fullName(editing) }) : t('users.newUser')}
-              </DialogTitle>
-              <DialogDescription className="sr-only">
-                {editing ? t('users.editDescription') : t('users.newDescription')}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="user-first-name">{t('common.firstName')}</Label>
-                <Input
-                  id="user-first-name"
-                  required
-                  value={form.first_name}
-                  onChange={(e) => setForm({ ...form, first_name: e.target.value })}
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="user-last-name">{t('common.lastName')}</Label>
-                <Input
-                  id="user-last-name"
-                  required
-                  value={form.last_name}
-                  onChange={(e) => setForm({ ...form, last_name: e.target.value })}
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="user-email">{t('common.email')}</Label>
-                <Input
-                  id="user-email"
-                  type="email"
-                  required
-                  value={form.email}
-                  onChange={(e) => setForm({ ...form, email: e.target.value })}
-                />
-              </div>
-              {showPasswordField ? (
+        <Dialog
+          open={showForm}
+          onOpenChange={(open) => {
+            setShowForm(open)
+            if (!open) setError(null)
+          }}
+        >
+          <DialogContent className="sm:max-w-lg">
+            <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
+              <DialogHeader>
+                <DialogTitle>
+                  {editing ? t('users.editTitle', { name: fullName(editing) }) : t('users.newUser')}
+                </DialogTitle>
+                <DialogDescription className="sr-only">
+                  {editing ? t('users.editDescription') : t('users.newDescription')}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="user-password">{t('common.password')}</Label>
+                  <Label htmlFor="user-first-name">{t('common.firstName')}</Label>
                   <Input
-                    id="user-password"
-                    type="password"
-                    required={!editing}
-                    minLength={8}
-                    placeholder={editing ? t('users.passwordKeep') : t('common.passwordMin')}
-                    value={form.password}
-                    onChange={(e) => setForm({ ...form, password: e.target.value })}
+                    id="user-first-name"
+                    required
+                    value={form.first_name}
+                    onChange={(e) => setForm({ ...form, first_name: e.target.value })}
                   />
                 </div>
-              ) : (
-                <p className="self-end pb-2.5 text-[13px] font-medium text-muted-foreground">
-                  {t('users.passwordViaEmail')}
-                </p>
-              )}
-              <div className="flex items-center gap-2.5 self-end pb-3">
-                <Checkbox
-                  id="is-admin"
-                  checked={form.is_admin}
-                  disabled={editing?.id === me?.id}
-                  onCheckedChange={(v) => setForm({ ...form, is_admin: v === true })}
-                />
-                <Label
-                  htmlFor="is-admin"
-                  className="text-sm font-bold tracking-normal text-foreground normal-case"
-                >
-                  {t('users.adminLabel')}
-                </Label>
-              </div>
-            </div>
-            {editing && (
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="user-status">{t('users.statusLabel')}</Label>
-                <Select
-                  value={form.status}
-                  disabled={editing.id === me?.id}
-                  onValueChange={(v) => setForm({ ...form, status: v as UserStatus })}
-                >
-                  <SelectTrigger id="user-status" className="w-full sm:w-72">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {/* Waiting needs an email to be useful; only offer it when
-                        SMTP is configured, or when the user is already in it. */}
-                    {(smtpConfigured || editing.status === 'waiting_confirmation') && (
-                      <SelectItem value="waiting_confirmation">
-                        {t('users.statusWaiting')}
-                      </SelectItem>
-                    )}
-                    <SelectItem value="active">{t('users.statusActive')}</SelectItem>
-                    <SelectItem value="disabled">{t('users.statusDisabled')}</SelectItem>
-                  </SelectContent>
-                </Select>
-                {requireConfirmation && form.status === 'active' && !editing.confirmed_at && (
-                  <p className="text-[13px] font-bold text-warning">{t('users.confirmWarning')}</p>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="user-last-name">{t('common.lastName')}</Label>
+                  <Input
+                    id="user-last-name"
+                    required
+                    value={form.last_name}
+                    onChange={(e) => setForm({ ...form, last_name: e.target.value })}
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="user-email">{t('common.email')}</Label>
+                  <Input
+                    id="user-email"
+                    type="email"
+                    required
+                    value={form.email}
+                    onChange={(e) => setForm({ ...form, email: e.target.value })}
+                  />
+                </div>
+                {showPasswordField ? (
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="user-password">{t('common.password')}</Label>
+                    <Input
+                      id="user-password"
+                      type="password"
+                      required={!editing}
+                      minLength={8}
+                      placeholder={editing ? t('users.passwordKeep') : t('common.passwordMin')}
+                      value={form.password}
+                      onChange={(e) => setForm({ ...form, password: e.target.value })}
+                    />
+                  </div>
+                ) : (
+                  <p className="self-end pb-2.5 text-[13px] font-medium text-muted-foreground">
+                    {t('users.passwordViaEmail')}
+                  </p>
                 )}
+                <div className="flex items-center gap-2.5 self-end pb-3">
+                  <Checkbox
+                    id="is-admin"
+                    checked={form.is_admin}
+                    disabled={editing?.id === me?.id}
+                    onCheckedChange={(v) => setForm({ ...form, is_admin: v === true })}
+                  />
+                  <Label
+                    htmlFor="is-admin"
+                    className="text-sm font-bold tracking-normal text-foreground normal-case"
+                  >
+                    {t('users.adminLabel')}
+                  </Label>
+                </div>
               </div>
-            )}
-            {error && <p className="text-[13px] font-bold text-danger">{error}</p>}
-            <DialogFooter>
-              <Button type="button" variant="ghost" size="lg" onClick={() => setShowForm(false)}>
-                {t('common.cancel')}
-              </Button>
-              <Button type="submit" size="lg" disabled={saving}>
-                {saving ? t('common.saving') : t('common.save')}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+              {editing && (
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="user-status">{t('users.statusLabel')}</Label>
+                  <Select
+                    value={form.status}
+                    disabled={editing.id === me?.id}
+                    onValueChange={(v) => setForm({ ...form, status: v as UserStatus })}
+                  >
+                    <SelectTrigger id="user-status" className="w-full sm:w-72">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {/* Waiting needs an email to be useful; only offer it when
+                          SMTP is configured, or when the user is already in it. */}
+                      {(smtpConfigured || editing.status === 'waiting_confirmation') && (
+                        <SelectItem value="waiting_confirmation">
+                          {t('users.statusWaiting')}
+                        </SelectItem>
+                      )}
+                      <SelectItem value="active">{t('users.statusActive')}</SelectItem>
+                      <SelectItem value="disabled">{t('users.statusDisabled')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {requireConfirmation && form.status === 'active' && !editing.confirmed_at && (
+                    <p className="text-[13px] font-bold text-warning">
+                      {t('users.confirmWarning')}
+                    </p>
+                  )}
+                </div>
+              )}
+              {error && <p className="text-[13px] font-bold text-danger">{error}</p>}
+              <DialogFooter>
+                <Button type="button" variant="ghost" size="lg" onClick={() => setShowForm(false)}>
+                  {t('common.cancel')}
+                </Button>
+                <Button type="submit" size="lg" disabled={saving}>
+                  {saving ? t('common.saving') : t('common.save')}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
 
-      {loading ? (
-        <p className="font-medium text-muted-foreground">{t('common.loading')}</p>
-      ) : (
-        <div className="overflow-hidden rounded-2xl border border-line bg-card">
-          <Table className="min-w-[640px]">
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="w-16">{t('users.headers.id')}</TableHead>
-                <TableHead>{t('users.headers.name')}</TableHead>
-                <TableHead>{t('users.headers.email')}</TableHead>
-                <TableHead>{t('users.headers.role')}</TableHead>
-                <TableHead>{t('users.headers.status')}</TableHead>
-                <TableHead className="text-right">{t('users.headers.actions')}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {users.map((u) => (
-                <TableRow key={u.id}>
-                  <TableCell className="font-medium text-muted-foreground tabular-nums">
-                    {u.id}
-                  </TableCell>
-                  <TableCell className="font-semibold">
-                    {fullName(u)}
-                    {u.id === me?.id && (
-                      <span className="ml-2 text-[11px] font-bold text-placeholder">
-                        {t('users.you')}
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell className="font-medium text-muted-foreground">{u.email}</TableCell>
-                  <TableCell>
-                    {u.is_admin ? (
-                      <Badge variant="secondary" className="text-primary">
-                        {t('users.roleAdmin')}
-                      </Badge>
-                    ) : (
-                      <Badge variant="secondary" className="text-muted-foreground">
-                        {t('users.roleMember')}
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>{statusBadge(u)}</TableCell>
-                  <TableCell className="text-right">
-                    {u.id !== me?.id && u.status === 'active' && (
-                      <Button
-                        type="button"
-                        variant="link"
-                        size="sm"
-                        className="mr-3 h-auto p-0 font-bold text-muted-foreground hover:text-foreground hover:no-underline"
-                        onClick={() => void loginAs(u)}
-                      >
-                        {t('users.loginAs')}
-                      </Button>
-                    )}
-                    {u.id !== me?.id && u.status === 'waiting_confirmation' && smtpConfigured && (
-                      <Button
-                        type="button"
-                        variant="link"
-                        size="sm"
-                        className="mr-3 h-auto p-0 font-bold text-muted-foreground hover:text-foreground hover:no-underline"
-                        onClick={() => void resendConfirmation(u)}
-                      >
-                        {t('users.resend')}
-                      </Button>
-                    )}
-                    <Button
-                      type="button"
-                      variant="link"
-                      size="sm"
-                      className="h-auto p-0 font-bold hover:text-primary-dark hover:no-underline"
-                      onClick={() => openEdit(u)}
-                    >
-                      {t('users.edit')}
-                    </Button>
-                    {u.id !== me?.id &&
-                      (u.status !== 'disabled' ? (
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button
-                              type="button"
-                              variant="link"
-                              size="sm"
-                              className="ml-3 h-auto p-0 font-bold text-destructive hover:no-underline hover:opacity-80"
-                            >
-                              {t('users.deactivate')}
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>
-                                {t('users.deactivateConfirm', { name: fullName(u) })}
-                              </AlertDialogTitle>
-                              <AlertDialogDescription>
-                                {t('users.deactivateBody')}
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-                              <AlertDialogAction
-                                variant="destructive"
-                                onClick={() => void setActive(u, false)}
-                              >
-                                {t('users.deactivateAction')}
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      ) : (
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button
-                              type="button"
-                              variant="link"
-                              size="sm"
-                              className="ml-3 h-auto p-0 font-bold hover:text-primary-dark hover:no-underline"
-                            >
-                              {t('users.reactivate')}
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>
-                                {t('users.reactivateConfirm', { name: fullName(u) })}
-                              </AlertDialogTitle>
-                              <AlertDialogDescription>
-                                {t('users.reactivateBody')}
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => void setActive(u, true)}>
-                                {t('users.reactivateAction')}
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      ))}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+          <Input
+            className="sm:w-56"
+            placeholder={t('users.filters.namePlaceholder')}
+            aria-label={t('users.filters.namePlaceholder')}
+            value={nameInput}
+            onChange={(e) => setNameInput(e.target.value)}
+          />
+          <Input
+            className="sm:w-56"
+            placeholder={t('users.filters.emailPlaceholder')}
+            aria-label={t('users.filters.emailPlaceholder')}
+            value={emailInput}
+            onChange={(e) => setEmailInput(e.target.value)}
+          />
+          <Select
+            value={table.filters.status || ALL}
+            onValueChange={(v) => table.setFilter('status', v === ALL ? '' : v)}
+          >
+            <SelectTrigger className="sm:w-44" aria-label={t('users.headers.status')}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>{t('users.filters.statusAll')}</SelectItem>
+              <SelectItem value="active">{t('users.statusActive')}</SelectItem>
+              <SelectItem value="waiting_confirmation">{t('users.statusWaiting')}</SelectItem>
+              <SelectItem value="disabled">{t('users.statusDisabled')}</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={table.filters.role || ALL}
+            onValueChange={(v) => table.setFilter('role', v === ALL ? '' : v)}
+          >
+            <SelectTrigger className="sm:w-40" aria-label={t('users.headers.role')}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>{t('users.filters.roleAll')}</SelectItem>
+              <SelectItem value="admins">{t('users.roleAdmin')}</SelectItem>
+              <SelectItem value="members">{t('users.roleMember')}</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
-      )}
-    </main>
+
+        <DataTable columns={columns} table={table} minWidthClassName="min-w-[860px]" />
+      </main>
+    </TooltipProvider>
   )
 }

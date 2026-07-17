@@ -171,7 +171,14 @@
       "email": "Email",
       "role": "Role",
       "status": "Status",
+      "createdAt": "Created",
       "actions": "Actions"
+    },
+    "filters": {
+      "namePlaceholder": "Filter by name",
+      "emailPlaceholder": "Filter by email",
+      "statusAll": "All statuses",
+      "roleAll": "All roles"
     }
   },
   "serverSettings": {

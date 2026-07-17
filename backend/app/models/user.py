@@ -59,7 +59,10 @@ class User(Base):
     # NULL means they never confirmed, so an admin forcing them active leaves a
     # visible "active but unconfirmed" warning in the UI.
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Indexed because it is the default sort key for the admin users table.
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

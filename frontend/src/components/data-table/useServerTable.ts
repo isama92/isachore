@@ -167,28 +167,31 @@ export function useServerTable<Row, Filters extends FilterSet = FilterSet>({
   }, [endpoint, apiQuery, reloadToken])
 
   // Setters flip `loading` here (an event handler, not the effect) and write the
-  // next state to the URL; the derived state + effect then refetch.
-  const write = (next: ServerTableState<Filters>) => {
+  // next state to the URL; the derived state + effect then refetch. The next
+  // state is computed from `prev` *inside* the updater (react-router chains
+  // functional updaters), so two setters firing in the same tick each merge onto
+  // the freshest params rather than a stale render snapshot.
+  const mutate = (next: (s: ServerTableState<Filters>) => ServerTableState<Filters>) => {
     setLoading(true)
     setError(null)
-    setSearchParams((prev) => applyOwnedParams(prev, next), { replace: true })
+    setSearchParams((prev) => applyOwnedParams(prev, next(deriveState(prev))), { replace: true })
   }
 
   const setPage = (page: number) => {
     if (page === state.page) return
-    write({ ...state, page })
+    mutate((s) => ({ ...s, page }))
   }
   const setPageSize = (pageSize: number) => {
     if (pageSize === state.pageSize) return
-    write({ ...state, pageSize, page: 1 })
+    mutate((s) => ({ ...s, pageSize, page: 1 }))
   }
   const setSort = (sortBy: string, sortDir: SortDir) => {
     if (sortBy === state.sortBy && sortDir === state.sortDir) return
-    write({ ...state, sortBy, sortDir, page: 1 })
+    mutate((s) => ({ ...s, sortBy, sortDir, page: 1 }))
   }
   const setFilter = (key: keyof Filters & string, value: string) => {
     if (state.filters[key] === value) return
-    write({ ...state, filters: { ...state.filters, [key]: value }, page: 1 })
+    mutate((s) => ({ ...s, filters: { ...s.filters, [key]: value }, page: 1 }))
   }
   const reload = () => {
     setLoading(true)

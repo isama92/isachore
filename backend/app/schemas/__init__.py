@@ -1,5 +1,6 @@
 from app.schemas.chore import ChoreCreate, ChoreRead
 from app.schemas.household import HouseholdMemberRead, HouseholdRead
+from app.schemas.pagination import Page
 from app.schemas.server_settings import ServerSettingsRead, ServerSettingsUpdate
 from app.schemas.tag import TagRead
 from app.schemas.user import (
@@ -22,6 +23,7 @@ __all__ = [
     "HouseholdRead",
     "LoginRequest",
     "MeRead",
+    "Page",
     "ProfileUpdate",
     "ServerSettingsRead",
     "ServerSettingsUpdate",

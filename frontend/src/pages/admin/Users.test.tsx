@@ -34,19 +34,31 @@ function jsonBody(data: unknown, status = 200): Response {
   } as Response
 }
 
-// The page fetches both /users and /settings on load, then mutates. This stub
-// answers those GETs and lets each test supply the mutation response.
+// The page fetches a paginated /users envelope plus /settings on load, then
+// mutates. This stub answers those GETs (ignoring query params -- the caller
+// controls which rows come back) and lets each test supply the mutation
+// response. Assertions about which query params were sent inspect the recorded
+// request URLs directly.
 function stubFetch(opts: {
   users: User[]
+  total?: number
   settings?: ServerSettings
   mutate?: (method: string, url: string) => Response
 }): FetchMock {
   const settings = opts.settings ?? makeServerSettings()
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
+    const path = url.split('?')[0]
     const method = (init?.method ?? 'GET').toUpperCase()
-    if (method === 'GET' && url.endsWith('/api/v1/settings')) return jsonBody(settings)
-    if (method === 'GET' && url.endsWith('/api/v1/users')) return jsonBody(opts.users)
+    if (method === 'GET' && path.endsWith('/api/v1/settings')) return jsonBody(settings)
+    if (method === 'GET' && path.endsWith('/api/v1/users')) {
+      return jsonBody({
+        items: opts.users,
+        total: opts.total ?? opts.users.length,
+        page: 1,
+        page_size: 20,
+      })
+    }
     if (method !== 'GET' && opts.mutate) return opts.mutate(method, url)
     return jsonBody(undefined, 204)
   })
@@ -56,9 +68,19 @@ function stubFetch(opts: {
 
 function bodyOf(fetchMock: FetchMock, method: string, urlEnd: string): Record<string, unknown> {
   const call = fetchMock.mock.calls.find(
-    ([url, init]) => String(url).endsWith(urlEnd) && init?.method === method,
+    ([url, init]) => String(url).split('?')[0].endsWith(urlEnd) && init?.method === method,
   )
   return JSON.parse((call?.[1] as RequestInit).body as string)
+}
+
+// The URL of the most recent GET /api/v1/users request (with its query string).
+function lastUsersGet(fetchMock: FetchMock): string {
+  const calls = fetchMock.mock.calls.filter(
+    ([url, init]) =>
+      (init?.method ?? 'GET').toUpperCase() === 'GET' &&
+      String(url).split('?')[0].endsWith('/api/v1/users'),
+  )
+  return String(calls.at(-1)?.[0] ?? '')
 }
 
 describe('Users', () => {
@@ -83,21 +105,116 @@ describe('Users', () => {
 
     expect(await screen.findByText('Admin User')).toBeInTheDocument()
     expect(screen.getByText('you')).toBeInTheDocument()
-    // me + member are both active.
-    expect(screen.getAllByText('Active')).toHaveLength(2)
-    expect(screen.getByText('Waiting confirmation')).toBeInTheDocument()
-    expect(screen.getByText('Disabled')).toBeInTheDocument()
+    // Status badges, scoped to each row (the toolbar filter also shows "Active").
+    const rowOf = (name: string) => screen.getByText(name).closest('tr')!
+    expect(within(rowOf('Admin User')).getByText('Active')).toBeInTheDocument()
+    expect(within(rowOf('Bob Member')).getByText('Active')).toBeInTheDocument()
+    expect(within(rowOf('Wanda Waiting')).getByText('Waiting confirmation')).toBeInTheDocument()
+    expect(within(rowOf('Dan Disabled')).getByText('Disabled')).toBeInTheDocument()
+    // Role badge
+    expect(within(rowOf('Admin User')).getByText('Admin')).toBeInTheDocument()
+    expect(within(rowOf('Bob Member')).getByText('Member')).toBeInTheDocument()
   })
 
-  it('shows the user id in a leading column', async () => {
-    stubFetch({ users: [me, member] })
+  it('shows the user id and a formatted created date column', async () => {
+    const dated = makeUser({
+      id: 2,
+      first_name: 'Bob',
+      last_name: 'Member',
+      email: 'bob@example.com',
+      created_at: '2026-06-15T12:00:00Z',
+    })
+    stubFetch({ users: [me, dated] })
     renderWithProviders(<Users />, { authValue: { user: me } })
 
     expect(await screen.findByRole('columnheader', { name: 'ID' })).toBeInTheDocument()
-    const adminRow = screen.getByText('Admin User').closest('tr')!
-    expect(within(adminRow).getByText('1')).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Created' })).toBeInTheDocument()
     const memberRow = screen.getByText('Bob Member').closest('tr')!
     expect(within(memberRow).getByText('2')).toBeInTheDocument()
+    expect(within(memberRow).getByText(/2026/)).toBeInTheDocument()
+  })
+
+  it('loads only active users by default, newest first', async () => {
+    const fetchMock = stubFetch({ users: [me] })
+    renderWithProviders(<Users />, { authValue: { user: me } })
+    await screen.findByText('Admin User')
+
+    const url = lastUsersGet(fetchMock)
+    expect(url).toContain('status=active')
+    expect(url).toContain('sort_by=created_at')
+    expect(url).toContain('sort_dir=desc')
+  })
+
+  it('filters by status, and "All statuses" clears the status param', async () => {
+    const fetchMock = stubFetch({ users: [me] })
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderWithProviders(<Users />, { authValue: { user: me } })
+    await screen.findByText('Admin User')
+
+    await user.click(screen.getByRole('combobox', { name: 'Status' }))
+    await user.click(await screen.findByRole('option', { name: 'Disabled' }))
+    await waitFor(() => expect(lastUsersGet(fetchMock)).toContain('status=disabled'))
+
+    await user.click(screen.getByRole('combobox', { name: 'Status' }))
+    await user.click(await screen.findByRole('option', { name: 'All statuses' }))
+    await waitFor(() => expect(lastUsersGet(fetchMock)).not.toContain('status='))
+  })
+
+  it('filters by role', async () => {
+    const fetchMock = stubFetch({ users: [me] })
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderWithProviders(<Users />, { authValue: { user: me } })
+    await screen.findByText('Admin User')
+
+    await user.click(screen.getByRole('combobox', { name: 'Role' }))
+    await user.click(await screen.findByRole('option', { name: 'Admin' }))
+    await waitFor(() => expect(lastUsersGet(fetchMock)).toContain('role=admins'))
+  })
+
+  it('filters by name and email (debounced)', async () => {
+    const fetchMock = stubFetch({ users: [me] })
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderWithProviders(<Users />, { authValue: { user: me } })
+    await screen.findByText('Admin User')
+
+    await user.type(screen.getByLabelText('Filter by name'), 'ali')
+    await waitFor(() => expect(lastUsersGet(fetchMock)).toContain('name=ali'), { timeout: 2000 })
+
+    await user.type(screen.getByLabelText('Filter by email'), 'bob')
+    await waitFor(() => expect(lastUsersGet(fetchMock)).toContain('email=bob'), { timeout: 2000 })
+  })
+
+  it('sorts by the created column', async () => {
+    const fetchMock = stubFetch({ users: [me, member] })
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderWithProviders(<Users />, { authValue: { user: me } })
+    await screen.findByText('Bob Member')
+
+    // Default is created_at desc; clicking toggles to asc.
+    await user.click(screen.getByRole('button', { name: 'Created' }))
+    await waitFor(() => {
+      const url = lastUsersGet(fetchMock)
+      expect(url).toContain('sort_by=created_at')
+      expect(url).toContain('sort_dir=asc')
+    })
+
+    // Name is sortable too (a different, unsorted column -> ascending).
+    await user.click(screen.getByRole('button', { name: 'Name' }))
+    await waitFor(() => {
+      const url = lastUsersGet(fetchMock)
+      expect(url).toContain('sort_by=name')
+      expect(url).toContain('sort_dir=asc')
+    })
+  })
+
+  it('pages forward when there is more than one page', async () => {
+    const fetchMock = stubFetch({ users: [me, member], total: 50 })
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderWithProviders(<Users />, { authValue: { user: me } })
+    await screen.findByText('Bob Member')
+
+    await user.click(screen.getByRole('button', { name: 'Next page' }))
+    await waitFor(() => expect(lastUsersGet(fetchMock)).toContain('page=2'))
   })
 
   it('creates a user with a password when confirmation is off', async () => {
@@ -173,8 +290,9 @@ describe('Users', () => {
     await screen.findByText('Bob Member')
 
     await user.click(screen.getAllByRole('button', { name: 'Edit' })[1])
-    await screen.findByRole('dialog', { name: /Edit Bob Member/ })
-    await user.click(screen.getByRole('combobox', { name: 'Status' }))
+    const dialog = await screen.findByRole('dialog', { name: /Edit Bob Member/ })
+    // Scope to the dialog: the toolbar also has a "Status" combobox.
+    await user.click(within(dialog).getByRole('combobox', { name: 'Status' }))
     await user.click(await screen.findByRole('option', { name: 'Disabled' }))
     await user.click(screen.getByRole('button', { name: 'Save' }))
 

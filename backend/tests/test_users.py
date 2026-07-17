@@ -43,9 +43,11 @@ async def test_list_users_as_admin(make_user: Login, auth_client: AuthClient) ->
 
     assert resp.status_code == 200
     body = resp.json()
-    # Ordered by id, i.e. creation order (admin first, then member)
-    assert [u["email"] for u in body] == ["admin@example.com", "member@example.com"]
-    assert [u["id"] for u in body] == sorted(u["id"] for u in body)
+    # Enveloped page: no status filter by default, so both users come back.
+    assert body["total"] == 2
+    assert body["page"] == 1
+    assert body["page_size"] == 20
+    assert {u["email"] for u in body["items"]} == {"admin@example.com", "member@example.com"}
 
 
 async def test_list_users_as_member_forbidden(make_user: Login, auth_client: AuthClient) -> None:
@@ -59,6 +61,166 @@ async def test_list_users_as_member_forbidden(make_user: Login, auth_client: Aut
 async def test_list_users_unauthenticated(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/users")
     assert resp.status_code == 401
+
+
+async def test_list_users_pagination(make_user: Login, auth_client: AuthClient) -> None:
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    for i in range(4):
+        await make_user(email=f"user{i}@example.com")
+    client = await auth_client(admin)
+
+    resp = await client.get("/api/v1/users?page=1&page_size=2&sort_by=id&sort_dir=asc")
+    body = resp.json()
+    assert body["total"] == 5
+    assert body["page"] == 1
+    assert body["page_size"] == 2
+    assert len(body["items"]) == 2
+    first_ids = [u["id"] for u in body["items"]]
+
+    resp = await client.get("/api/v1/users?page=2&page_size=2&sort_by=id&sort_dir=asc")
+    body = resp.json()
+    assert len(body["items"]) == 2
+    second_ids = [u["id"] for u in body["items"]]
+    # Distinct rows, ascending across pages
+    assert set(first_ids).isdisjoint(second_ids)
+    assert max(first_ids) < min(second_ids)
+
+    resp = await client.get("/api/v1/users?page=3&page_size=2&sort_by=id&sort_dir=asc")
+    assert len(resp.json()["items"]) == 1  # remainder
+
+
+async def test_list_users_sort_by_name_and_email(make_user: Login, auth_client: AuthClient) -> None:
+    admin = await make_user(email="m@example.com", is_admin=True, first_name="Mid", last_name="Mid")
+    await make_user(email="a@example.com", first_name="Anna", last_name="Aaa")
+    await make_user(email="z@example.com", first_name="Zoe", last_name="Zzz")
+    client = await auth_client(admin)
+
+    resp = await client.get("/api/v1/users?sort_by=name&sort_dir=asc")
+    assert [u["first_name"] for u in resp.json()["items"]] == ["Anna", "Mid", "Zoe"]
+
+    resp = await client.get("/api/v1/users?sort_by=email&sort_dir=desc")
+    assert [u["email"] for u in resp.json()["items"]] == [
+        "z@example.com",
+        "m@example.com",
+        "a@example.com",
+    ]
+
+
+async def test_list_users_sort_by_created_at(
+    make_user: Login, auth_client: AuthClient, db_session: AsyncSession
+) -> None:
+    # func.now() is the transaction timestamp, so users made in one test share a
+    # created_at; assign distinct values to exercise the ordering.
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    old = await make_user(email="old@example.com")
+    new = await make_user(email="new@example.com")
+    old.created_at = datetime(2020, 1, 1, tzinfo=UTC)
+    admin.created_at = datetime(2022, 1, 1, tzinfo=UTC)
+    new.created_at = datetime(2024, 1, 1, tzinfo=UTC)
+    await db_session.commit()
+    client = await auth_client(admin)
+
+    resp = await client.get("/api/v1/users?sort_by=created_at&sort_dir=desc")
+    assert [u["email"] for u in resp.json()["items"]] == [
+        "new@example.com",
+        "admin@example.com",
+        "old@example.com",
+    ]
+
+    resp = await client.get("/api/v1/users?sort_by=created_at&sort_dir=asc")
+    assert [u["email"] for u in resp.json()["items"]] == [
+        "old@example.com",
+        "admin@example.com",
+        "new@example.com",
+    ]
+
+
+async def test_list_users_filter_by_name_searches_both_fields(
+    make_user: Login, auth_client: AuthClient
+) -> None:
+    admin = await make_user(
+        email="admin@example.com", is_admin=True, first_name="Zed", last_name="Zulu"
+    )
+    await make_user(email="alice@example.com", first_name="Alice", last_name="Smith")
+    await make_user(email="bob@example.com", first_name="Bob", last_name="Alicorn")
+    client = await auth_client(admin)
+
+    # "ali" matches Alice (first name) and Alicorn (last name), case-insensitively
+    resp = await client.get("/api/v1/users?name=ALI")
+    assert {u["email"] for u in resp.json()["items"]} == {
+        "alice@example.com",
+        "bob@example.com",
+    }
+
+
+async def test_list_users_filter_by_email(make_user: Login, auth_client: AuthClient) -> None:
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    await make_user(email="alice@example.com")
+    client = await auth_client(admin)
+
+    resp = await client.get("/api/v1/users?email=ALICE")  # case-insensitive substring
+    assert {u["email"] for u in resp.json()["items"]} == {"alice@example.com"}
+
+
+async def test_list_users_name_filter_escapes_wildcards(
+    make_user: Login, auth_client: AuthClient
+) -> None:
+    admin = await make_user(
+        email="admin@example.com", is_admin=True, first_name="Real", last_name="Name"
+    )
+    await make_user(email="pct@example.com", first_name="50%", last_name="Off")
+    client = await auth_client(admin)
+
+    # A literal '%' must not act as a wildcard (which would match everyone).
+    resp = await client.get("/api/v1/users", params={"name": "%"})
+    assert {u["email"] for u in resp.json()["items"]} == {"pct@example.com"}
+
+
+async def test_list_users_filter_by_status(make_user: Login, auth_client: AuthClient) -> None:
+    admin = await make_user(email="admin@example.com", is_admin=True)  # active
+    await make_user(email="waiting@example.com", status=UserStatus.waiting_confirmation)
+    await make_user(email="disabled@example.com", status=UserStatus.disabled)
+    client = await auth_client(admin)
+
+    assert (await client.get("/api/v1/users")).json()["total"] == 3  # no filter
+
+    resp = await client.get("/api/v1/users?status=active")
+    assert {u["email"] for u in resp.json()["items"]} == {"admin@example.com"}
+
+    resp = await client.get("/api/v1/users?status=waiting_confirmation")
+    assert {u["email"] for u in resp.json()["items"]} == {"waiting@example.com"}
+
+    resp = await client.get("/api/v1/users?status=disabled")
+    assert {u["email"] for u in resp.json()["items"]} == {"disabled@example.com"}
+
+
+async def test_list_users_filter_by_role(make_user: Login, auth_client: AuthClient) -> None:
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    await make_user(email="member@example.com")
+    client = await auth_client(admin)
+
+    resp = await client.get("/api/v1/users?role=admins")
+    assert {u["email"] for u in resp.json()["items"]} == {"admin@example.com"}
+
+    resp = await client.get("/api/v1/users?role=members")
+    assert {u["email"] for u in resp.json()["items"]} == {"member@example.com"}
+
+
+async def test_list_users_invalid_params_rejected(
+    make_user: Login, auth_client: AuthClient
+) -> None:
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    client = await auth_client(admin)
+    for query in (
+        "sort_by=bogus",
+        "sort_dir=sideways",
+        "page_size=101",
+        "page=0",
+        "status=bogus",
+        "role=superuser",
+    ):
+        resp = await client.get(f"/api/v1/users?{query}")
+        assert resp.status_code == 422, query
 
 
 # --- create -------------------------------------------------------------
