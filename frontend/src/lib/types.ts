@@ -32,6 +32,7 @@ export type ServerSettings = {
   smtp_configured: boolean
   smtp_host: string | null
   smtp_port: number
+  smtp_from: string | null
 }
 
 export type RepeatPeriod = 'manual' | 'hourly' | 'daily' | 'weekly' | 'monthly' | 'yearly'

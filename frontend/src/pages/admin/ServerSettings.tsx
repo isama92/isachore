@@ -16,6 +16,7 @@ export default function ServerSettings() {
   const [smtpConfigured, setSmtpConfigured] = useState(false)
   const [smtpHost, setSmtpHost] = useState<string | null>(null)
   const [smtpPort, setSmtpPort] = useState<number | null>(null)
+  const [smtpFrom, setSmtpFrom] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -32,6 +33,7 @@ export default function ServerSettings() {
           setSmtpConfigured(s.smtp_configured)
           setSmtpHost(s.smtp_host)
           setSmtpPort(s.smtp_port)
+          setSmtpFrom(s.smtp_from)
         })
         .catch((err: unknown) => {
           setLoadError(err instanceof ApiError ? err.message : t('serverSettings.loadError'))
@@ -60,6 +62,7 @@ export default function ServerSettings() {
       setSmtpConfigured(s.smtp_configured)
       setSmtpHost(s.smtp_host)
       setSmtpPort(s.smtp_port)
+      setSmtpFrom(s.smtp_from)
       toast.success(t('serverSettings.saved'))
     } catch (err) {
       setRequireConfirmation(prev)
@@ -142,6 +145,12 @@ export default function ServerSettings() {
               </span>
               <span className="font-semibold">
                 {smtpPort ?? t('serverSettings.notConfiguredValue')}
+              </span>
+              <span className="font-medium text-muted-foreground">
+                {t('serverSettings.fromAddress')}
+              </span>
+              <span className="font-semibold">
+                {smtpFrom ?? t('serverSettings.notConfiguredValue')}
               </span>
               <span className="font-medium text-muted-foreground">
                 {t('serverSettings.sendTestEmailLabel')}

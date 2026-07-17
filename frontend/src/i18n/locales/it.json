@@ -176,6 +176,7 @@
     "testEmailHeading": "Server di posta",
     "serverAddress": "Indirizzo server",
     "serverPort": "Porta server",
+    "fromAddress": "Indirizzo mittente",
     "sendTestEmailLabel": "Invia email di prova",
     "notConfiguredValue": "Non impostato",
     "testEmail": "Invia",

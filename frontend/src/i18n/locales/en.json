@@ -176,6 +176,7 @@
     "testEmailHeading": "Mail Server",
     "serverAddress": "Server address",
     "serverPort": "Server port",
+    "fromAddress": "From address",
     "sendTestEmailLabel": "Send test email",
     "notConfiguredValue": "Not set",
     "testEmail": "Send",

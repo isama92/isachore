@@ -25,6 +25,7 @@ export function makeServerSettings(overrides: Partial<ServerSettings> = {}): Ser
     smtp_configured: true,
     smtp_host: 'smtp.example.com',
     smtp_port: 587,
+    smtp_from: 'isachore <no-reply@example.com>',
     ...overrides,
   }
 }

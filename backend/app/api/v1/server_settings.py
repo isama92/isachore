@@ -20,6 +20,7 @@ def _read(app_settings: AppSettings) -> ServerSettingsRead:
         smtp_configured=smtp_configured(),
         smtp_host=settings.smtp_host,
         smtp_port=settings.smtp_port,
+        smtp_from=settings.smtp_from,
     )
 
 

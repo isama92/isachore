@@ -24,6 +24,7 @@ async def test_read_settings_defaults(make_user: Login, auth_client: AuthClient)
         "smtp_configured": False,
         "smtp_host": None,
         "smtp_port": 587,
+        "smtp_from": None,
     }
 
 
@@ -38,6 +39,7 @@ async def test_read_settings_reports_smtp_configured(
     assert body["smtp_configured"] is True
     assert body["smtp_host"] == "mailpit"
     assert body["smtp_port"] == 587
+    assert body["smtp_from"] == "isachore <no-reply@example.com>"
 
 
 async def test_read_settings_member_forbidden(make_user: Login, auth_client: AuthClient) -> None:

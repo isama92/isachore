@@ -119,14 +119,19 @@ describe('ServerSettings', () => {
     expect(await screen.findByText('Could not send the test email')).toBeInTheDocument()
   })
 
-  it('shows the mail server address and port', async () => {
+  it('shows the mail server address, port and from address', async () => {
     stubFetch({
-      settings: makeServerSettings({ smtp_host: 'mail.example.com', smtp_port: 2525 }),
+      settings: makeServerSettings({
+        smtp_host: 'mail.example.com',
+        smtp_port: 2525,
+        smtp_from: 'noreply@example.com',
+      }),
     })
     renderWithProviders(<ServerSettings />, { authValue: { user: admin } })
 
     expect(await screen.findByText('mail.example.com')).toBeInTheDocument()
     expect(screen.getByText('2525')).toBeInTheDocument()
+    expect(screen.getByText('noreply@example.com')).toBeInTheDocument()
   })
 
   it('shows "Not set" for the address when SMTP is unconfigured', async () => {
