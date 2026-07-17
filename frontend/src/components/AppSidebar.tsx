@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation } from 'react-router'
-import { CircleUser, ClipboardList, Home, LogOut, Shield } from 'lucide-react'
+import { ChevronRight, CircleUser, ClipboardList, Home, LogOut, Shield, Users } from 'lucide-react'
 import { useAuth } from '../auth/useAuth'
 import { fullName, initials } from '../lib/user'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -13,8 +13,12 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   useSidebar,
 } from '@/components/ui/sidebar'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 
 export default function AppSidebar() {
   const { user, logout } = useAuth()
@@ -30,8 +34,12 @@ export default function AppSidebar() {
     { to: '/', icon: Home, label: t('sidebar.home') },
     { to: '/chores', icon: ClipboardList, label: t('sidebar.chores') },
     { to: '/profile', icon: CircleUser, label: t('sidebar.profile') },
-    ...(user.is_admin ? [{ to: '/admin/users', icon: Shield, label: t('sidebar.admin') }] : []),
   ]
+
+  // Admin section: a foldable parent (links nowhere) with one sub-item per
+  // admin page. Add future admin pages here.
+  const adminItems = [{ to: '/admin/users', icon: Users, label: t('sidebar.users') }]
+  const adminActive = pathname.startsWith('/admin')
 
   // Home is exact; other sections also match their nested routes (e.g.
   // /chores/new keeps "Chores Management" active).
@@ -96,6 +104,33 @@ export default function AppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
+              {user.is_admin && (
+                <Collapsible asChild defaultOpen={adminActive} className="group/collapsible">
+                  <SidebarMenuItem>
+                    <CollapsibleTrigger asChild>
+                      <SidebarMenuButton tooltip={t('sidebar.admin')} isActive={adminActive}>
+                        <Shield />
+                        <span>{t('sidebar.admin')}</span>
+                        <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+                      </SidebarMenuButton>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <SidebarMenuSub>
+                        {adminItems.map((sub) => (
+                          <SidebarMenuSubItem key={sub.to}>
+                            <SidebarMenuSubButton asChild isActive={isActive(sub.to)}>
+                              <Link to={sub.to} onClick={closeMobile}>
+                                <sub.icon />
+                                <span>{sub.label}</span>
+                              </Link>
+                            </SidebarMenuSubButton>
+                          </SidebarMenuSubItem>
+                        ))}
+                      </SidebarMenuSub>
+                    </CollapsibleContent>
+                  </SidebarMenuItem>
+                </Collapsible>
+              )}
             </SidebarMenu>
           </SidebarGroup>
         </nav>

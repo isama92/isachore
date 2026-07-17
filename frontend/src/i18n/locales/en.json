@@ -21,6 +21,7 @@
     "chores": "Chores Management",
     "profile": "Profile",
     "admin": "Admin",
+    "users": "Users",
     "logout": "Log out",
     "toggle": "Toggle sidebar"
   },

@@ -46,14 +46,32 @@ describe('AppSidebar', () => {
     expect(screen.getByRole('link', { name: 'Profile' })).toHaveAttribute('href', '/profile')
   })
 
-  it('shows the Admin item only for an admin', () => {
+  it('shows the Admin group trigger only for an admin', () => {
     renderSidebar({ user: makeUser({ is_admin: true }) })
-    expect(screen.getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin/users')
+    expect(screen.getByRole('button', { name: 'Admin' })).toBeInTheDocument()
   })
 
-  it('hides the Admin item for a member', () => {
+  it('hides the Admin group for a member', () => {
     renderSidebar({ user: makeUser({ is_admin: false }) })
-    expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Admin' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Users' })).not.toBeInTheDocument()
+  })
+
+  it('expands the Admin group to reveal the Users sub-link', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    // At route '/' the group is collapsed, so its children are not rendered.
+    renderSidebar({ user: makeUser({ is_admin: true }) })
+    expect(screen.queryByRole('link', { name: 'Users' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Admin' }))
+    expect(await screen.findByRole('link', { name: 'Users' })).toHaveAttribute(
+      'href',
+      '/admin/users',
+    )
+  })
+
+  it('opens the Admin group and marks Users active on an admin route', () => {
+    renderSidebar({ user: makeUser({ is_admin: true }) }, '/admin/users')
+    expect(screen.getByRole('link', { name: 'Users' })).toHaveAttribute('data-active', 'true')
   })
 
   it('marks the active section from the current route', () => {
