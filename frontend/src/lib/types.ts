@@ -26,6 +26,15 @@ export type User = {
 
 export type Me = User & { impersonating: boolean }
 
+// Envelope returned by the server-side-paginated list endpoints (see
+// backend/app/schemas/pagination.py). Drives the reusable DataTable.
+export type Page<T> = {
+  items: T[]
+  total: number
+  page: number
+  page_size: number
+}
+
 // Server-wide settings from GET /api/v1/settings (admin-only).
 export type ServerSettings = {
   require_confirmation: boolean

@@ -11,6 +11,14 @@
     "lastName": "Last name",
     "passwordMin": "At least 8 characters"
   },
+  "table": {
+    "rowsPerPage": "Rows per page",
+    "pageOf": "Page {{page}} of {{pages}}",
+    "previous": "Previous page",
+    "next": "Next page",
+    "noResults": "No results.",
+    "total": "{{count}} total"
+  },
   "topbar": {
     "backToAccount": "Back to your account",
     "returnToAdmin": "Return to admin"
