@@ -66,12 +66,38 @@ export type Chore = {
   tags: Tag[]
 }
 
-// The households endpoint only returns what the assignee picker needs.
+// The member list / assignee picker only needs a name (data minimisation).
 export type HouseholdMember = Pick<User, 'id' | 'first_name' | 'last_name'>
 
+// A household invite link as the owner sees it. `url` is the shareable link;
+// `status` is the stored lifecycle and `expired` (server-computed) marks a
+// pending invite past its expiry — together they drive the row's display + action.
+export type HouseholdInvitation = {
+  id: number
+  url: string
+  status: 'pending' | 'accepted' | 'revoked'
+  created_at: string
+  expires_at: string
+  expired: boolean
+}
+
+// Public info shown on the accept page.
+export type InvitationInfo = {
+  household_name: string
+  invited_by: HouseholdMember
+}
+
+// A household row from the management tables. `admin_id` is the owner (the only
+// member who may edit the household and manage members). `deleted_at` is null
+// for active households; `member_count` counts active members only, `chore_count`
+// all chores. The full member list is fetched separately from
+// /households/{id}/members.
 export type Household = {
   id: number
   name: string
+  admin_id: number
   created_at: string
-  members: HouseholdMember[]
+  deleted_at: string | null
+  member_count: number
+  chore_count: number
 }

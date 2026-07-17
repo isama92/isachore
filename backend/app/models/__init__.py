@@ -6,6 +6,7 @@ from app.models.auth_token import AuthToken
 from app.models.chore import AssignmentType, Chore, RepeatPeriod
 from app.models.confirmation_token import ConfirmationToken
 from app.models.household import Household, household_members
+from app.models.household_invitation import HouseholdInvitation, HouseholdInvitationStatus
 from app.models.tag import Tag
 from app.models.user import User, UserStatus
 
@@ -18,6 +19,8 @@ __all__ = [
     "Chore",
     "ConfirmationToken",
     "Household",
+    "HouseholdInvitation",
+    "HouseholdInvitationStatus",
     "RepeatPeriod",
     "Tag",
     "User",

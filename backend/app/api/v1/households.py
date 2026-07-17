@@ -1,22 +1,492 @@
-from fastapi import APIRouter
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from typing import Annotated, Literal
+
+from fastapi import APIRouter, HTTPException, Query, status
+from sqlalchemy import ColumnElement, delete, func, or_, select
 
 from app.api.deps import CurrentUser, SessionDep
-from app.models import Household, User, UserStatus, household_members
-from app.schemas import HouseholdRead
+from app.core.config import settings
+from app.core.households import (
+    HOUSEHOLD_SORT_COLUMNS,
+    MEMBER_SORT_COLUMNS,
+    add_member,
+    chore_count_column,
+    escape_like,
+    is_active_member,
+    member_count_column,
+    member_of,
+)
+from app.core.security import INVITATION_TOKEN_TTL, generate_token
+from app.models import (
+    Household,
+    HouseholdInvitation,
+    HouseholdInvitationStatus,
+    User,
+    UserStatus,
+    household_members,
+)
+from app.schemas import (
+    HouseholdCreate,
+    HouseholdInvitationRead,
+    HouseholdListRead,
+    HouseholdMemberRead,
+    HouseholdUpdate,
+    Page,
+)
 
 router = APIRouter()
 
+HouseholdSortBy = Literal["id", "name", "created_at"]
+MemberSortBy = Literal["id", "name"]
+SortDir = Literal["asc", "desc"]
 
-@router.get("", response_model=list[HouseholdRead])
-async def list_households(user: CurrentUser, session: SessionDep) -> list[Household]:
-    result = await session.execute(
-        select(Household)
-        .join(household_members, household_members.c.household_id == Household.id)
-        .where(household_members.c.user_id == user.id)
-        # Only active members are assignable, so only surface them to the picker.
-        .options(selectinload(Household.members.and_(User.status == UserStatus.active)))
-        .order_by(Household.id)
+# The most outstanding (live, non-expired, un-accepted) invitations a household
+# may have at once; the owner must revoke one (or have someone accept) to add more.
+MAX_PENDING_INVITATIONS = 5
+
+
+# --- shared page builders (reused by the admin router) ------------------
+
+
+async def build_household_page(
+    session: SessionDep,
+    *,
+    extra_filters: Sequence[ColumnElement[bool]],
+    page: int,
+    page_size: int,
+    sort_by: str,
+    sort_dir: str,
+    name: str | None,
+) -> Page[HouseholdListRead]:
+    """List households (with member/chore counts) as a paginated envelope.
+
+    `extra_filters` scopes the result (e.g. only my households, only active) and
+    is applied to both the count and the page query, exactly like list_users.
+    """
+    filters = list(extra_filters)
+    if name and name.strip():
+        filters.append(Household.name.ilike(f"%{escape_like(name.strip())}%"))
+
+    count_query = select(func.count()).select_from(Household)
+    list_query = select(
+        Household,
+        member_count_column().label("member_count"),
+        chore_count_column().label("chore_count"),
     )
-    return list(result.scalars())
+    if filters:
+        count_query = count_query.where(*filters)
+        list_query = list_query.where(*filters)
+
+    total = await session.scalar(count_query) or 0
+
+    descending = sort_dir == "desc"
+    order_by = [col.desc() if descending else col.asc() for col in HOUSEHOLD_SORT_COLUMNS[sort_by]]
+    # Deterministic tiebreaker so paging is stable when the sort key ties.
+    order_by.append(Household.id.desc() if descending else Household.id.asc())
+
+    result = await session.execute(
+        list_query.order_by(*order_by).limit(page_size).offset((page - 1) * page_size)
+    )
+    items = [
+        HouseholdListRead(
+            id=household.id,
+            name=household.name,
+            admin_id=household.admin_id,
+            created_at=household.created_at,
+            deleted_at=household.deleted_at,
+            member_count=member_count,
+            chore_count=chore_count,
+        )
+        for household, member_count, chore_count in result.all()
+    ]
+    return Page[HouseholdListRead](items=items, total=total, page=page, page_size=page_size)
+
+
+async def build_members_page(
+    session: SessionDep,
+    *,
+    household_id: int,
+    page: int,
+    page_size: int,
+    sort_by: str,
+    sort_dir: str,
+    name: str | None,
+) -> Page[HouseholdMemberRead]:
+    """Active members of a household as a paginated envelope."""
+    filters: list[ColumnElement[bool]] = [
+        household_members.c.household_id == household_id,
+        User.status == UserStatus.active,
+    ]
+    if name and name.strip():
+        pattern = f"%{escape_like(name.strip())}%"
+        filters.append(or_(User.first_name.ilike(pattern), User.last_name.ilike(pattern)))
+
+    list_query = (
+        select(User).join(household_members, household_members.c.user_id == User.id).where(*filters)
+    )
+    count_query = (
+        select(func.count())
+        .select_from(User)
+        .join(household_members, household_members.c.user_id == User.id)
+        .where(*filters)
+    )
+    total = await session.scalar(count_query) or 0
+
+    descending = sort_dir == "desc"
+    order_by = [col.desc() if descending else col.asc() for col in MEMBER_SORT_COLUMNS[sort_by]]
+    order_by.append(User.id.desc() if descending else User.id.asc())
+
+    result = await session.execute(
+        list_query.order_by(*order_by).limit(page_size).offset((page - 1) * page_size)
+    )
+    return Page[HouseholdMemberRead](
+        items=[HouseholdMemberRead.model_validate(user) for user in result.scalars()],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+async def load_household_read(
+    session: SessionDep,
+    household_id: int,
+    *,
+    extra_filters: Sequence[ColumnElement[bool]] = (),
+) -> HouseholdListRead:
+    """Fetch a single household (with counts) as a read model, or 404.
+
+    `extra_filters` enforces scope/visibility (e.g. mine + not deleted).
+    """
+    row = (
+        await session.execute(
+            select(
+                Household,
+                member_count_column().label("member_count"),
+                chore_count_column().label("chore_count"),
+            ).where(Household.id == household_id, *extra_filters)
+        )
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Household not found")
+    household, member_count, chore_count = row
+    return HouseholdListRead(
+        id=household.id,
+        name=household.name,
+        admin_id=household.admin_id,
+        created_at=household.created_at,
+        deleted_at=household.deleted_at,
+        member_count=member_count,
+        chore_count=chore_count,
+    )
+
+
+async def set_household_admin(session: SessionDep, household: Household, new_admin_id: int) -> None:
+    """Transfer ownership: the new owner must be an active member of the household."""
+    if not await is_active_member(session, household.id, new_admin_id):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="The new household admin must be a member of the household",
+        )
+    household.admin_id = new_admin_id
+
+
+async def remove_member(session: SessionDep, household_id: int, user_id: int) -> None:
+    """Delete a membership row, 404 if the user is not a member.
+
+    Refuses to remove the current owner (409): ownership must be transferred
+    first, so admin_id always points at a present member. This is the single
+    chokepoint both surfaces call, so the rule is enforced once. Commits here
+    (unlike the other mutations, which commit in the route body): both callers
+    only read the household first for the 404 guard, so there is nothing
+    unintended in the session to flush.
+    """
+    admin_id = await session.scalar(select(Household.admin_id).where(Household.id == household_id))
+    if admin_id == user_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Transfer ownership before removing the household admin",
+        )
+    result = await session.execute(
+        delete(household_members).where(
+            household_members.c.household_id == household_id,
+            household_members.c.user_id == user_id,
+        )
+    )
+    if result.rowcount == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Household member not found"
+        )
+    await session.commit()
+
+
+# --- user endpoints (scoped to my active households) --------------------
+
+
+async def _get_my_household_or_404(
+    session: SessionDep, user_id: int, household_id: int
+) -> Household:
+    household = (
+        await session.execute(
+            select(Household).where(
+                Household.id == household_id,
+                member_of(user_id),
+                Household.deleted_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if household is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Household not found")
+    return household
+
+
+async def _get_owned_household(session: SessionDep, user_id: int, household_id: int) -> Household:
+    """A household the caller both belongs to (404 otherwise) and owns (403
+    otherwise). Gates the edit / delete / member-management endpoints."""
+    household = await _get_my_household_or_404(session, user_id, household_id)
+    if household.admin_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the household admin can do this",
+        )
+    return household
+
+
+@router.get("", response_model=Page[HouseholdListRead])
+async def list_households(
+    user: CurrentUser,
+    session: SessionDep,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    sort_by: HouseholdSortBy = "created_at",
+    sort_dir: SortDir = "desc",
+    name: Annotated[str | None, Query(max_length=255)] = None,
+) -> Page[HouseholdListRead]:
+    return await build_household_page(
+        session,
+        extra_filters=[member_of(user.id), Household.deleted_at.is_(None)],
+        page=page,
+        page_size=page_size,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+        name=name,
+    )
+
+
+@router.post("", response_model=HouseholdListRead, status_code=status.HTTP_201_CREATED)
+async def create_household(
+    payload: HouseholdCreate, user: CurrentUser, session: SessionDep
+) -> HouseholdListRead:
+    # The creator becomes the household owner and its first member.
+    household = Household(name=payload.name, admin_id=user.id)
+    session.add(household)
+    await session.flush()
+    await add_member(session, household.id, user.id)
+    await session.commit()
+    return await load_household_read(session, household.id)
+
+
+@router.get("/{household_id}", response_model=HouseholdListRead)
+async def get_household(
+    household_id: int, user: CurrentUser, session: SessionDep
+) -> HouseholdListRead:
+    return await load_household_read(
+        session,
+        household_id,
+        extra_filters=[member_of(user.id), Household.deleted_at.is_(None)],
+    )
+
+
+@router.patch("/{household_id}", response_model=HouseholdListRead)
+async def update_household(
+    household_id: int, payload: HouseholdUpdate, user: CurrentUser, session: SessionDep
+) -> HouseholdListRead:
+    household = await _get_owned_household(session, user.id, household_id)
+    if payload.name is not None:
+        household.name = payload.name
+    if payload.admin_id is not None:
+        await set_household_admin(session, household, payload.admin_id)
+    await session.commit()
+    return await load_household_read(session, household.id)
+
+
+@router.delete("/{household_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_household(household_id: int, user: CurrentUser, session: SessionDep) -> None:
+    household = await _get_owned_household(session, user.id, household_id)
+    # Soft delete: hide the household but leave its chores untouched.
+    household.deleted_at = datetime.now(UTC)
+    await session.commit()
+
+
+@router.get("/{household_id}/members", response_model=Page[HouseholdMemberRead])
+async def list_household_members(
+    household_id: int,
+    user: CurrentUser,
+    session: SessionDep,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    sort_by: MemberSortBy = "name",
+    sort_dir: SortDir = "asc",
+    name: Annotated[str | None, Query(max_length=255)] = None,
+) -> Page[HouseholdMemberRead]:
+    await _get_my_household_or_404(session, user.id, household_id)
+    return await build_members_page(
+        session,
+        household_id=household_id,
+        page=page,
+        page_size=page_size,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+        name=name,
+    )
+
+
+@router.delete("/{household_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_household_member(
+    household_id: int, user_id: int, user: CurrentUser, session: SessionDep
+) -> None:
+    await _get_owned_household(session, user.id, household_id)
+    await remove_member(session, household_id, user_id)
+
+
+@router.post("/{household_id}/leave", status_code=status.HTTP_204_NO_CONTENT)
+async def leave_household(household_id: int, user: CurrentUser, session: SessionDep) -> None:
+    # Any member may leave a household they belong to, except the owner: they
+    # must transfer ownership first (enforced by remove_member's 409).
+    await _get_my_household_or_404(session, user.id, household_id)
+    await remove_member(session, household_id, user.id)
+
+
+# --- invitations (owner-managed) ----------------------------------------
+
+
+def _invitation_url(token: str) -> str:
+    """The shareable invite link (points at the SPA, like the confirm link)."""
+    return f"{settings.app_base_url.rstrip('/')}/invite?token={token}"
+
+
+def _is_live_pending(invitation: HouseholdInvitation) -> bool:
+    """A pending invite whose link still works (not yet expired). The only state
+    that is revocable (and the only one that counts toward the limit); every
+    other state (accepted / revoked / expired) is deletable instead."""
+    return (
+        invitation.status == HouseholdInvitationStatus.pending
+        and invitation.expires_at > datetime.now(UTC)
+    )
+
+
+def _invitation_read(invitation: HouseholdInvitation) -> HouseholdInvitationRead:
+    return HouseholdInvitationRead(
+        id=invitation.id,
+        url=_invitation_url(invitation.token),
+        status=HouseholdInvitationStatus(invitation.status),
+        created_at=invitation.created_at,
+        expires_at=invitation.expires_at,
+        expired=invitation.expires_at <= datetime.now(UTC),
+    )
+
+
+async def _get_invitation_or_404(
+    session: SessionDep, household_id: int, invitation_id: int
+) -> HouseholdInvitation:
+    invitation = (
+        await session.execute(
+            select(HouseholdInvitation).where(
+                HouseholdInvitation.id == invitation_id,
+                HouseholdInvitation.household_id == household_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if invitation is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitation not found")
+    return invitation
+
+
+@router.post(
+    "/{household_id}/invitations",
+    response_model=HouseholdInvitationRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_invitation(
+    household_id: int, user: CurrentUser, session: SessionDep
+) -> HouseholdInvitationRead:
+    await _get_owned_household(session, user.id, household_id)
+    # Cap outstanding invites: only live (non-expired) pending ones count.
+    live_pending = await session.scalar(
+        select(func.count())
+        .select_from(HouseholdInvitation)
+        .where(
+            HouseholdInvitation.household_id == household_id,
+            HouseholdInvitation.status == HouseholdInvitationStatus.pending,
+            HouseholdInvitation.expires_at > datetime.now(UTC),
+        )
+    )
+    if (live_pending or 0) >= MAX_PENDING_INVITATIONS:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"You already have {MAX_PENDING_INVITATIONS} pending invitations; revoke one first."
+            ),
+        )
+    invitation = HouseholdInvitation(
+        token=generate_token(),
+        household_id=household_id,
+        invited_by=user.id,
+        expires_at=datetime.now(UTC) + INVITATION_TOKEN_TTL,
+    )
+    session.add(invitation)
+    await session.commit()
+    await session.refresh(invitation)
+    return _invitation_read(invitation)
+
+
+@router.get("/{household_id}/invitations", response_model=list[HouseholdInvitationRead])
+async def list_invitations(
+    household_id: int, user: CurrentUser, session: SessionDep
+) -> list[HouseholdInvitationRead]:
+    await _get_owned_household(session, user.id, household_id)
+    # Newest first; accepted/revoked/expired invitations are kept until deleted.
+    result = await session.execute(
+        select(HouseholdInvitation)
+        .where(HouseholdInvitation.household_id == household_id)
+        .order_by(HouseholdInvitation.created_at.desc(), HouseholdInvitation.id.desc())
+    )
+    return [_invitation_read(invitation) for invitation in result.scalars()]
+
+
+@router.post(
+    "/{household_id}/invitations/{invitation_id}/revoke", response_model=HouseholdInvitationRead
+)
+async def revoke_invitation(
+    household_id: int, invitation_id: int, user: CurrentUser, session: SessionDep
+) -> HouseholdInvitationRead:
+    await _get_owned_household(session, user.id, household_id)
+    invitation = await _get_invitation_or_404(session, household_id, invitation_id)
+    if not _is_live_pending(invitation):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only a pending invitation can be revoked",
+        )
+    invitation.status = HouseholdInvitationStatus.revoked
+    await session.commit()
+    await session.refresh(invitation)
+    return _invitation_read(invitation)
+
+
+@router.delete(
+    "/{household_id}/invitations/{invitation_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def delete_invitation(
+    household_id: int, invitation_id: int, user: CurrentUser, session: SessionDep
+) -> None:
+    await _get_owned_household(session, user.id, household_id)
+    invitation = await _get_invitation_or_404(session, household_id, invitation_id)
+    # A live pending invite must be revoked, not deleted; accepted / revoked /
+    # expired ones are deletable.
+    if _is_live_pending(invitation):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Revoke a pending invitation before deleting it",
+        )
+    await session.delete(invitation)
+    await session.commit()

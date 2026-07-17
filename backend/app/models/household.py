@@ -26,6 +26,13 @@ class Household(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
+    # The household owner: the only member allowed to edit the household and
+    # manage its members. Always references a current member (see the household
+    # endpoints); users are soft-deleted, never hard-deleted, so no cascade.
+    admin_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    # Soft delete: NULL means active, a timestamp means the household is deleted
+    # and hidden from the user surface (admins can still view and restore it).
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

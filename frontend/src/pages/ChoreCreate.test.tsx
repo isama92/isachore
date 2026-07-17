@@ -4,9 +4,17 @@ import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router'
 import ChoreCreate from './ChoreCreate'
 import { mockFetch, renderWithProviders } from '../test/utils'
-import { makeChore, makeHousehold, makeTag, makeUser } from '../test/fixtures'
+import { makeChore, makeHousehold, makeHouseholdMember, makeTag, makeUser } from '../test/fixtures'
+import type { Page } from '../lib/types'
 
 const me = makeUser({ id: 1, first_name: 'Alex', last_name: 'Kim' })
+
+// The members endpoint carries a query string, so match it by pattern.
+const MEMBERS = /\/api\/v1\/households\/\d+\/members/
+
+function page<T>(items: T[]): Page<T> {
+  return { items, total: items.length, page: 1, page_size: 100 }
+}
 
 function postBody(mock: ReturnType<typeof mockFetch>): Record<string, unknown> {
   const call = mock.mock.calls.find(([, init]) => init?.method === 'POST')
@@ -18,11 +26,14 @@ describe('ChoreCreate', () => {
   it('renders member and tag options after loading', async () => {
     mockFetch([
       {
-        path: '/api/v1/households',
+        path: /\/api\/v1\/households(\?|$)/,
         method: 'GET',
-        body: [
-          makeHousehold({ members: [makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' })] }),
-        ],
+        body: page([makeHousehold({ id: 1 })]),
+      },
+      {
+        path: MEMBERS,
+        method: 'GET',
+        body: page([makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })]),
       },
       { path: '/api/v1/tags', method: 'GET', body: [makeTag({ id: 3, name: 'deep-clean' })] },
     ])
@@ -36,11 +47,14 @@ describe('ChoreCreate', () => {
   it('creates a chore with the selected assignees and tags, then navigates', async () => {
     const fetchMock = mockFetch([
       {
-        path: '/api/v1/households',
+        path: /\/api\/v1\/households(\?|$)/,
         method: 'GET',
-        body: [
-          makeHousehold({ members: [makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' })] }),
-        ],
+        body: page([makeHousehold({ id: 1 })]),
+      },
+      {
+        path: MEMBERS,
+        method: 'GET',
+        body: page([makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })]),
       },
       { path: '/api/v1/tags', method: 'GET', body: [makeTag({ id: 3, name: 'deep-clean' })] },
       { path: '/api/v1/chores', method: 'POST', status: 201, body: makeChore() },
@@ -75,7 +89,12 @@ describe('ChoreCreate', () => {
 
   it('picks a start date from the calendar and submits it', async () => {
     const fetchMock = mockFetch([
-      { path: '/api/v1/households', method: 'GET', body: [makeHousehold()] },
+      {
+        path: /\/api\/v1\/households(\?|$)/,
+        method: 'GET',
+        body: page([makeHousehold({ id: 1 })]),
+      },
+      { path: MEMBERS, method: 'GET', body: page([]) },
       { path: '/api/v1/tags', method: 'GET', body: [] },
       { path: '/api/v1/chores', method: 'POST', status: 201, body: makeChore() },
     ])
@@ -99,7 +118,12 @@ describe('ChoreCreate', () => {
 
   it('surfaces a create error and stays on the form', async () => {
     mockFetch([
-      { path: '/api/v1/households', method: 'GET', body: [makeHousehold()] },
+      {
+        path: /\/api\/v1\/households(\?|$)/,
+        method: 'GET',
+        body: page([makeHousehold({ id: 1 })]),
+      },
+      { path: MEMBERS, method: 'GET', body: page([]) },
       { path: '/api/v1/tags', method: 'GET', body: [] },
       {
         path: '/api/v1/chores',

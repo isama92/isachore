@@ -1,5 +1,12 @@
 from app.schemas.chore import ChoreCreate, ChoreRead
-from app.schemas.household import HouseholdMemberRead, HouseholdRead
+from app.schemas.household import (
+    HouseholdCreate,
+    HouseholdInvitationInfo,
+    HouseholdInvitationRead,
+    HouseholdListRead,
+    HouseholdMemberRead,
+    HouseholdUpdate,
+)
 from app.schemas.pagination import Page
 from app.schemas.server_settings import ServerSettingsRead, ServerSettingsUpdate
 from app.schemas.tag import TagRead
@@ -19,8 +26,12 @@ __all__ = [
     "ChoreRead",
     "ConfirmRequest",
     "ConfirmTokenInfo",
+    "HouseholdCreate",
+    "HouseholdInvitationInfo",
+    "HouseholdInvitationRead",
+    "HouseholdListRead",
     "HouseholdMemberRead",
-    "HouseholdRead",
+    "HouseholdUpdate",
     "LoginRequest",
     "MeRead",
     "Page",

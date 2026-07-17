@@ -1,0 +1,146 @@
+import { describe, expect, it, vi } from 'vitest'
+import { screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { Route, Routes } from 'react-router'
+import { toast } from 'sonner'
+import Households from './Households'
+import { renderWithProviders } from '../test/utils'
+import { makeHousehold, makeUser } from '../test/fixtures'
+import type { Household } from '../lib/types'
+
+const me = makeUser({ id: 1, first_name: 'Alex', last_name: 'Kim' })
+
+type FetchMock = ReturnType<typeof vi.fn>
+
+function jsonBody(data: unknown, status = 200): Response {
+  return {
+    ok: status < 400,
+    status,
+    statusText: `HTTP ${status}`,
+    json: async () => data,
+  } as Response
+}
+
+function stubFetch(opts: {
+  households: Household[]
+  total?: number
+  mutate?: (method: string, url: string) => Response
+}): FetchMock {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    const path = url.split('?')[0]
+    const method = (init?.method ?? 'GET').toUpperCase()
+    if (method === 'GET' && path.endsWith('/api/v1/households')) {
+      return jsonBody({
+        items: opts.households,
+        total: opts.total ?? opts.households.length,
+        page: 1,
+        page_size: 20,
+      })
+    }
+    if (method !== 'GET' && opts.mutate) return opts.mutate(method, url)
+    return jsonBody(undefined, 204)
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
+function lastHouseholdsGet(fetchMock: FetchMock): string {
+  const calls = fetchMock.mock.calls.filter(
+    ([url, init]) =>
+      (init?.method ?? 'GET').toUpperCase() === 'GET' &&
+      String(url).split('?')[0].endsWith('/api/v1/households'),
+  )
+  return String(calls.at(-1)?.[0] ?? '')
+}
+
+describe('Households', () => {
+  it('renders a row per household with member and chore counts', async () => {
+    stubFetch({
+      households: [makeHousehold({ id: 1, name: 'Flat 3B', member_count: 2, chore_count: 5 })],
+    })
+    renderWithProviders(<Households />, { authValue: { user: me } })
+
+    const row = (await screen.findByText('Flat 3B')).closest('tr')!
+    expect(within(row).getByText('2')).toBeInTheDocument()
+    expect(within(row).getByText('5')).toBeInTheDocument()
+  })
+
+  it('links to the create and edit pages when the user owns the household', async () => {
+    // makeHousehold defaults admin_id to 1, the signed-in user's id.
+    stubFetch({ households: [makeHousehold({ id: 7, name: 'Flat 3B' })] })
+    renderWithProviders(<Households />, { authValue: { user: me } })
+
+    await screen.findByText('Flat 3B')
+    expect(screen.getByRole('link', { name: 'Add household' })).toHaveAttribute(
+      'href',
+      '/households/new',
+    )
+    expect(screen.getByRole('link', { name: 'Edit' })).toHaveAttribute('href', '/households/7/edit')
+  })
+
+  it('shows View (not Edit/Delete) for a household the user does not own', async () => {
+    stubFetch({ households: [makeHousehold({ id: 8, name: 'Not Mine', admin_id: 99 })] })
+    renderWithProviders(<Households />, { authValue: { user: me } })
+
+    await screen.findByText('Not Mine')
+    expect(screen.getByRole('link', { name: 'View' })).toHaveAttribute('href', '/households/8/edit')
+    expect(screen.queryByRole('link', { name: 'Edit' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
+  })
+
+  it('debounces the name filter into the request query', async () => {
+    const fetchMock = stubFetch({ households: [makeHousehold({ name: 'Flat 3B' })] })
+    renderWithProviders(<Households />, { authValue: { user: me } })
+    const user = userEvent.setup()
+
+    await screen.findByText('Flat 3B')
+    await user.type(screen.getByPlaceholderText('Filter by name'), 'beach')
+    await waitFor(() => expect(lastHouseholdsGet(fetchMock)).toContain('name=beach'))
+  })
+
+  it('soft-deletes a household after confirmation', async () => {
+    let deleted = ''
+    const fetchMock = stubFetch({
+      households: [makeHousehold({ id: 3, name: 'Flat 3B' })],
+      mutate: (method, url) => {
+        if (method === 'DELETE') deleted = url
+        return jsonBody(undefined, 204)
+      },
+    })
+    const toastSpy = vi.spyOn(toast, 'success')
+    renderWithProviders(<Households />, { authValue: { user: me } })
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    const row = (await screen.findByText('Flat 3B')).closest('tr')!
+    await user.click(within(row).getByRole('button', { name: 'Delete' }))
+    const dialog = within(await screen.findByRole('alertdialog'))
+    await user.click(dialog.getByRole('button', { name: 'Delete household' }))
+
+    await waitFor(() => expect(deleted).toContain('/api/v1/households/3'))
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(true)
+    expect(toastSpy).toHaveBeenCalled()
+  })
+
+  it('surfaces a load error', async () => {
+    const fetchMock = vi.fn(async () => jsonBody({ detail: 'nope' }, 500))
+    vi.stubGlobal('fetch', fetchMock)
+    renderWithProviders(<Households />, { authValue: { user: me } })
+
+    // A failed list load shows the generic message (the page's own `error` is
+    // for mutations), matching the admin Users page pattern.
+    expect(await screen.findByText('Failed to load households')).toBeInTheDocument()
+  })
+
+  it('shows the empty state when there are no households', async () => {
+    stubFetch({ households: [] })
+    renderWithProviders(
+      <Routes>
+        <Route path="/" element={<Households />} />
+      </Routes>,
+      { authValue: { user: me }, route: '/' },
+    )
+
+    expect(await screen.findByText('No results.')).toBeInTheDocument()
+  })
+})

@@ -10,7 +10,10 @@ from app.core.config import settings
 TOKEN_TTL = timedelta(days=30)
 # Account-confirmation links are longer-lived than a login session but still
 # expire so a stale invite can't be redeemed indefinitely; the admin can resend.
-CONFIRMATION_TOKEN_TTL = timedelta(days=7)
+CONFIRMATION_TOKEN_TTL = timedelta(days=1)
+# Household invite links: short-lived so a leaked/stale link can't be redeemed
+# indefinitely; the owner can mint another.
+INVITATION_TOKEN_TTL = timedelta(hours=24)
 COOKIE_NAME = "isachore_token"
 # Holds the original admin session while impersonating another user
 ADMIN_COOKIE_NAME = "isachore_admin_token"

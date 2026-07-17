@@ -5,6 +5,7 @@ import {
   CircleUser,
   ClipboardList,
   Home,
+  House,
   LogOut,
   Settings,
   Shield,
@@ -41,6 +42,7 @@ export default function AppSidebar() {
 
   const items = [
     { to: '/', icon: Home, label: t('sidebar.home') },
+    { to: '/households', icon: House, label: t('sidebar.households') },
     { to: '/chores', icon: ClipboardList, label: t('sidebar.chores') },
     { to: '/profile', icon: CircleUser, label: t('sidebar.profile') },
   ]
@@ -49,6 +51,7 @@ export default function AppSidebar() {
   // admin page. Add future admin pages here.
   const adminItems = [
     { to: '/admin/users', icon: Users, label: t('sidebar.users') },
+    { to: '/admin/households', icon: House, label: t('sidebar.adminHouseholds') },
     { to: '/admin/server-settings', icon: Settings, label: t('sidebar.serverSettings') },
   ]
   const adminActive = pathname.startsWith('/admin')

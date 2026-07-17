@@ -196,12 +196,36 @@ def smtp(monkeypatch: pytest.MonkeyPatch) -> list:
 
 @pytest.fixture
 def make_household(db_session: AsyncSession) -> Callable[..., Awaitable[Household]]:
+    counter = {"n": 0}
+
     async def _make(
         *,
         name: str = "Test Household",
         members: list[User] | None = None,
+        admin: User | None = None,
+        deleted_at: datetime | None = None,
     ) -> Household:
-        household = Household(name=name)
+        # admin_id is NOT NULL. Default the owner to the given admin, else the
+        # first member; with neither, mint a throwaway owner (not added as a
+        # member) so member-less fixtures keep their member_count of 0.
+        if admin is not None:
+            admin_id = admin.id
+        elif members:
+            admin_id = members[0].id
+        else:
+            counter["n"] += 1
+            owner = User(
+                email=f"owner{counter['n']}@example.com",
+                first_name="Owner",
+                last_name="User",
+                password_hash=security.hash_password("password12345"),
+                status=UserStatus.active,
+                confirmed_at=datetime.now(UTC),
+            )
+            db_session.add(owner)
+            await db_session.flush()
+            admin_id = owner.id
+        household = Household(name=name, admin_id=admin_id, deleted_at=deleted_at)
         if members:
             household.members.extend(members)
         db_session.add(household)

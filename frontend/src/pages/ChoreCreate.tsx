@@ -26,6 +26,7 @@ import type {
   Chore,
   Household,
   HouseholdMember,
+  Page,
   RepeatPeriod,
   Tag,
 } from '../lib/types'
@@ -66,10 +67,32 @@ export default function ChoreCreate() {
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([api.get<Household[]>('/api/v1/households'), api.get<Tag[]>('/api/v1/tags')])
-      .then(([households, tagList]) => {
+    // The households list no longer embeds members, so load the list and tags in
+    // parallel, then fetch the members of the user's household for the assignee
+    // picker (page_size=100 comfortably covers a household's members). Sort by id
+    // asc so items[0] is the lowest-id household, matching the backend's
+    // CurrentHousehold that POST /chores assigns the chore to.
+    Promise.all([
+      api.get<Page<Household>>('/api/v1/households?sort_by=id&sort_dir=asc'),
+      api.get<Tag[]>('/api/v1/tags'),
+    ])
+      .then(([householdsPage, tagList]) => {
+        const first = householdsPage.items[0]
+        // Skip the follow-up fetch when there's no household or we've unmounted.
+        const membersPromise =
+          cancelled || !first
+            ? Promise.resolve<Page<HouseholdMember>>({
+                items: [],
+                total: 0,
+                page: 1,
+                page_size: 100,
+              })
+            : api.get<Page<HouseholdMember>>(`/api/v1/households/${first.id}/members?page_size=100`)
+        return membersPromise.then((membersPage) => ({ members: membersPage.items, tagList }))
+      })
+      .then(({ members, tagList }) => {
         if (cancelled) return
-        setMembers(households[0]?.members ?? [])
+        setMembers(members)
         setTags(tagList)
       })
       .catch((err: unknown) => {

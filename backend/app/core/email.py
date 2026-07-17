@@ -60,7 +60,7 @@ async def send_confirmation_email(user: User, raw_token: str) -> None:
         "An isachore account has been created for you. To activate it, set your "
         "password using the link below:\n\n"
         f"{link}\n\n"
-        "This link expires in 7 days. If you weren't expecting this, you can "
+        "This link expires in 1 day. If you weren't expecting this, you can "
         "ignore this email.\n"
     )
     await send_email(user.email, "Confirm your isachore account", body)
