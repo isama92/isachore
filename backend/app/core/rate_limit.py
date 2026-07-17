@@ -48,12 +48,15 @@ def client_ip(request: Request) -> str | None:
     return request.client.host if request.client else None
 
 
+_KEY_PREFIX = "login:fail:"
+
+
 def _email_key(email: str) -> str:
-    return f"login:fail:email:{email}"
+    return f"{_KEY_PREFIX}email:{email}"
 
 
 def _ip_key(ip: str) -> str:
-    return f"login:fail:ip:{ip}"
+    return f"{_KEY_PREFIX}ip:{ip}"
 
 
 async def _retry_after(redis: Redis, key: str) -> int:
@@ -111,3 +114,18 @@ async def clear_login_failures(redis: Redis, *, email: str) -> None:
         await redis.delete(_email_key(email))
     except RedisError:
         logger.warning("Login failure counter not cleared: Redis unavailable", exc_info=True)
+
+
+async def clear_login_throttle(redis: Redis, *, email: str | None = None) -> int:
+    """Maintenance helper for the management CLI. With `email`, delete only that
+    address's counter; without it, delete every login throttle key (per-email
+    and per-IP). Returns the number of keys removed.
+
+    Unlike `clear_login_failures` (the login hot path, which fails open) this
+    does NOT swallow `RedisError`: a management command should fail loudly rather
+    than report success it can't guarantee.
+    """
+    if email is not None:
+        return await redis.delete(_email_key(email))
+    keys = [key async for key in redis.scan_iter(f"{_KEY_PREFIX}*")]
+    return await redis.delete(*keys) if keys else 0

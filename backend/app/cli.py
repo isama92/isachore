@@ -10,10 +10,14 @@ import getpass
 import sys
 from datetime import UTC, datetime
 
+from redis.asyncio import Redis
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.households import add_to_default_household
+from app.core.rate_limit import clear_login_throttle
 from app.core.security import hash_password
+from app.db.redis import redis_client
 from app.db.session import async_session_factory
 from app.models import User, UserStatus
 
@@ -49,6 +53,32 @@ async def init_admin(email: str, first_name: str, last_name: str, password: str)
     print(f"admin user {email!r} created")
 
 
+async def clear_throttle(session: AsyncSession, redis: Redis, user_id: int | None) -> None:
+    """Clear login rate-limit counters. With a user id, clear only that user's
+    per-email counter (a user maps to an email but never to an IP, so this can't
+    clear an IP lockout); without one, clear every login throttle key."""
+    if user_id is None:
+        cleared = await clear_login_throttle(redis)
+        print(f"cleared {cleared} login throttle entr{'y' if cleared == 1 else 'ies'}")
+        return
+    email = (
+        await session.execute(select(User.email).where(User.id == user_id))
+    ).scalar_one_or_none()
+    if email is None:
+        sys.exit(f"error: no user with id {user_id}")
+    cleared = await clear_login_throttle(redis, email=email)
+    print(
+        f"cleared throttle for user {user_id} ({email!r}): "
+        f"{cleared} entr{'y' if cleared == 1 else 'ies'}"
+    )
+
+
+async def _clear_throttle_main(user_id: int | None) -> None:
+    async with async_session_factory() as session:
+        await clear_throttle(session, redis_client, user_id)
+    await redis_client.aclose()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m app.cli")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -61,12 +91,22 @@ def main() -> None:
     init.add_argument("--last-name", required=True)
     init.add_argument("--password", help="prompted securely when omitted")
 
+    clear = subparsers.add_parser(
+        "clear-login-throttle",
+        help="clear login rate-limit counters (one user by id, or all when omitted)",
+    )
+    clear.add_argument(
+        "user_id", nargs="?", type=int, default=None, help="user id; omit to clear all throttles"
+    )
+
     args = parser.parse_args()
     if args.command == "init":
         password = args.password or getpass.getpass("Password: ")
         if len(password) < 8:
             sys.exit("error: password must be at least 8 characters")
         asyncio.run(init_admin(args.email, args.first_name, args.last_name, password))
+    elif args.command == "clear-login-throttle":
+        asyncio.run(_clear_throttle_main(args.user_id))
 
 
 if __name__ == "__main__":
