@@ -89,6 +89,17 @@ describe('Users', () => {
     expect(screen.getByText('Disabled')).toBeInTheDocument()
   })
 
+  it('shows the user id in a leading column', async () => {
+    stubFetch({ users: [me, member] })
+    renderWithProviders(<Users />, { authValue: { user: me } })
+
+    expect(await screen.findByRole('columnheader', { name: 'ID' })).toBeInTheDocument()
+    const adminRow = screen.getByText('Admin User').closest('tr')!
+    expect(within(adminRow).getByText('1')).toBeInTheDocument()
+    const memberRow = screen.getByText('Bob Member').closest('tr')!
+    expect(within(memberRow).getByText('2')).toBeInTheDocument()
+  })
+
   it('creates a user with a password when confirmation is off', async () => {
     const fetchMock = stubFetch({
       users: [me],

@@ -354,6 +354,7 @@ export default function Users() {
           <Table className="min-w-[640px]">
             <TableHeader>
               <TableRow className="hover:bg-transparent">
+                <TableHead className="w-16">{t('users.headers.id')}</TableHead>
                 <TableHead>{t('users.headers.name')}</TableHead>
                 <TableHead>{t('users.headers.email')}</TableHead>
                 <TableHead>{t('users.headers.role')}</TableHead>
@@ -364,6 +365,9 @@ export default function Users() {
             <TableBody>
               {users.map((u) => (
                 <TableRow key={u.id}>
+                  <TableCell className="font-medium text-muted-foreground tabular-nums">
+                    {u.id}
+                  </TableCell>
                   <TableCell className="font-semibold">
                     {fullName(u)}
                     {u.id === me?.id && (

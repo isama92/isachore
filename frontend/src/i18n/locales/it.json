@@ -158,6 +158,7 @@
     "saveError": "Salvataggio non riuscito",
     "updateError": "Aggiornamento non riuscito",
     "headers": {
+      "id": "ID",
       "name": "Nome",
       "email": "Email",
       "role": "Ruolo",
