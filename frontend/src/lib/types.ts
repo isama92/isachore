@@ -30,6 +30,8 @@ export type Me = User & { impersonating: boolean }
 export type ServerSettings = {
   require_confirmation: boolean
   smtp_configured: boolean
+  smtp_host: string | null
+  smtp_port: number
 }
 
 export type RepeatPeriod = 'manual' | 'hourly' | 'daily' | 'weekly' | 'monthly' | 'yearly'

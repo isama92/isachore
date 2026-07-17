@@ -23,6 +23,8 @@ export function makeServerSettings(overrides: Partial<ServerSettings> = {}): Ser
   return {
     require_confirmation: false,
     smtp_configured: true,
+    smtp_host: 'smtp.example.com',
+    smtp_port: 587,
     ...overrides,
   }
 }

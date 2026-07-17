@@ -169,6 +169,9 @@ def _reset_smtp(monkeypatch: pytest.MonkeyPatch) -> None:
     autouse one and re-sets the values."""
     monkeypatch.setattr(settings, "smtp_host", None)
     monkeypatch.setattr(settings, "smtp_from", None)
+    # Pin the port too: the dev compose env sets SMTP_PORT=1025, which would
+    # otherwise leak into the container's test run and make assertions flaky.
+    monkeypatch.setattr(settings, "smtp_port", 587)
 
 
 @pytest.fixture

@@ -1,50 +1,13 @@
 services:
-  db:
-    image: postgres:18-alpine
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-    volumes:
-      # postgres:18+ wants the mount at /var/lib/postgresql (not .../data)
-      - pgdata:/var/lib/postgresql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 15s
-    restart: unless-stopped
-
-  redis:
-    image: redis:8-alpine
-    # Backs login rate limiting. Reachable only as "redis:6379" on the compose
-    # network; not published to the host.
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
-    restart: unless-stopped
-
   backend:
     build:
       context: ./backend
       target: prod
     env_file: .env
     environment:
-      # In-network Redis host; overrides any REDIS_URL from .env.
-      REDIS_URL: redis://redis:6379/0
-      # The nginx frontend proxies /api, so the real client IP arrives in
-      # X-Real-IP / X-Forwarded-For, not the socket peer. Trust it here so the
-      # per-IP login throttle keys on the real client (never nginx's own IP).
       TRUST_FORWARDED_FOR: "true"
     volumes:
-      # Persist uploaded avatars across restarts/redeploys. The image creates
-      # /app/storage/avatars owned by the "app" user so the volume inherits
-      # writable ownership on first mount.
-      - avatars:/app/storage
+      - ./volumes/storage:/app/storage
     depends_on:
       db:
         condition: service_healthy
@@ -62,6 +25,28 @@ services:
       - backend
     restart: unless-stopped
 
-volumes:
-  pgdata:
-  avatars:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ./volumes/db:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+
+  redis:
+    image: redis:8-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped

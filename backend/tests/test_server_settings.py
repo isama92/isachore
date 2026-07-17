@@ -19,7 +19,12 @@ async def test_read_settings_defaults(make_user: Login, auth_client: AuthClient)
     resp = await client.get("/api/v1/settings")
 
     assert resp.status_code == 200
-    assert resp.json() == {"require_confirmation": False, "smtp_configured": False}
+    assert resp.json() == {
+        "require_confirmation": False,
+        "smtp_configured": False,
+        "smtp_host": None,
+        "smtp_port": 587,
+    }
 
 
 async def test_read_settings_reports_smtp_configured(
@@ -29,7 +34,10 @@ async def test_read_settings_reports_smtp_configured(
     client = await auth_client(admin)
 
     resp = await client.get("/api/v1/settings")
-    assert resp.json()["smtp_configured"] is True
+    body = resp.json()
+    assert body["smtp_configured"] is True
+    assert body["smtp_host"] == "mailpit"
+    assert body["smtp_port"] == 587
 
 
 async def test_read_settings_member_forbidden(make_user: Login, auth_client: AuthClient) -> None:

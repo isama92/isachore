@@ -1,64 +1,13 @@
 services:
-  db:
-    image: postgres:18-alpine
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-    ports:
-      - "5432:5432"
-    volumes:
-      # postgres:18+ wants the mount at /var/lib/postgresql (not .../data)
-      - pgdata:/var/lib/postgresql
-    healthcheck:
-      # $$ so compose does not interpolate; the container shell does
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
-
-  redis:
-    image: redis:8-alpine
-    # Backs login rate limiting. Not published to the host (reachable only as
-    # "redis:6379" on the compose network) so it can't collide with another stack.
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 5s
-
-  mailpit:
-    image: axllent/mailpit:latest
-    # Dev SMTP sink. SMTP (1025) is in-network only (reachable as "mailpit:1025",
-    # like redis); the web UI is published so you can read captured emails at
-    # http://localhost:8025.
-    ports:
-      - "8025:8025"
-
   backend:
     build:
       context: ./backend
       target: dev
     env_file: .env
-    environment:
-      # In-network Redis host; overrides any REDIS_URL from .env.
-      REDIS_URL: redis://redis:6379/0
-      # Dev email goes to the in-network mailpit (plain SMTP, no TLS/auth), so
-      # confirmation works out of the box. Prod supplies real SMTP_* via .env.
-      SMTP_HOST: mailpit
-      SMTP_PORT: "1025"
-      SMTP_STARTTLS: "false"
-      SMTP_USE_TLS: "false"
-      SMTP_FROM: "isachore <no-reply@isachore.local>"
-      APP_BASE_URL: http://localhost:5173
     ports:
       - "8000:8000"
     volumes:
       - ./backend:/app
-      # Uploaded avatars land here; the host bind mount keeps them across
-      # container restarts and lets you inspect them directly in dev.
       - ./backend/storage:/app/storage
     depends_on:
       db:
@@ -81,6 +30,37 @@ services:
       - frontend_node_modules:/app/node_modules
     depends_on:
       - backend
+
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:8-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "8025:8025"
 
 volumes:
   pgdata:

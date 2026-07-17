@@ -14,6 +14,8 @@ export default function ServerSettings() {
 
   const [requireConfirmation, setRequireConfirmation] = useState(false)
   const [smtpConfigured, setSmtpConfigured] = useState(false)
+  const [smtpHost, setSmtpHost] = useState<string | null>(null)
+  const [smtpPort, setSmtpPort] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -28,6 +30,8 @@ export default function ServerSettings() {
         .then((s) => {
           setRequireConfirmation(s.require_confirmation)
           setSmtpConfigured(s.smtp_configured)
+          setSmtpHost(s.smtp_host)
+          setSmtpPort(s.smtp_port)
         })
         .catch((err: unknown) => {
           setLoadError(err instanceof ApiError ? err.message : t('serverSettings.loadError'))
@@ -54,6 +58,8 @@ export default function ServerSettings() {
       })
       setRequireConfirmation(s.require_confirmation)
       setSmtpConfigured(s.smtp_configured)
+      setSmtpHost(s.smtp_host)
+      setSmtpPort(s.smtp_port)
       toast.success(t('serverSettings.saved'))
     } catch (err) {
       setRequireConfirmation(prev)
@@ -88,11 +94,9 @@ export default function ServerSettings() {
         <p className="text-[13px] font-bold text-danger">{loadError}</p>
       ) : (
         <div className="flex flex-col gap-6">
-          {/* User confirmation */}
+          {/* Confirmation toggle (the checkbox label is self-describing, so no
+              section heading above it). */}
           <section className="rounded-2xl border border-line bg-card p-6">
-            <h2 className="mb-4 font-display text-lg font-bold tracking-tight">
-              {t('serverSettings.confirmationHeading')}
-            </h2>
             <div className="flex items-start gap-3">
               <Checkbox
                 id="require-confirmation"
@@ -121,22 +125,40 @@ export default function ServerSettings() {
             {saveError && <p className="mt-4 text-[13px] font-bold text-danger">{saveError}</p>}
           </section>
 
-          {/* Test email */}
+          {/* Mail server: read-only address/port from the env + a test-send row. */}
           <section className="rounded-2xl border border-line bg-card p-6">
-            <h2 className="mb-2 font-display text-lg font-bold tracking-tight">
+            <h2 className="mb-4 font-display text-lg font-bold tracking-tight">
               {t('serverSettings.testEmailHeading')}
             </h2>
-            <p className="mb-4 text-[13px] font-medium text-muted-foreground">
-              {t('serverSettings.testEmailHint', { email: user?.email ?? '' })}
-            </p>
-            <Button
-              type="button"
-              size="lg"
-              disabled={!smtpConfigured || sendingTest}
-              onClick={() => void sendTestEmail()}
-            >
-              {sendingTest ? t('serverSettings.testEmailSending') : t('serverSettings.testEmail')}
-            </Button>
+            <div className="grid grid-cols-[auto_1fr] items-center gap-x-8 gap-y-3 text-sm">
+              <span className="font-medium text-muted-foreground">
+                {t('serverSettings.serverAddress')}
+              </span>
+              <span className="font-semibold">
+                {smtpHost ?? t('serverSettings.notConfiguredValue')}
+              </span>
+              <span className="font-medium text-muted-foreground">
+                {t('serverSettings.serverPort')}
+              </span>
+              <span className="font-semibold">
+                {smtpPort ?? t('serverSettings.notConfiguredValue')}
+              </span>
+              <span className="font-medium text-muted-foreground">
+                {t('serverSettings.sendTestEmailLabel')}
+              </span>
+              <span>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={!smtpConfigured || sendingTest}
+                  onClick={() => void sendTestEmail()}
+                >
+                  {sendingTest
+                    ? t('serverSettings.testEmailSending')
+                    : t('serverSettings.testEmail')}
+                </Button>
+              </span>
+            </div>
             {testError && <p className="mt-4 text-[13px] font-bold text-danger">{testError}</p>}
           </section>
         </div>

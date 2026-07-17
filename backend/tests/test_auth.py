@@ -74,6 +74,22 @@ async def test_login_inactive_user(client: AsyncClient, make_user: Login) -> Non
     assert resp.json()["detail"] == "Invalid email or password"
 
 
+async def test_login_waiting_confirmation_user(client: AsyncClient, make_user: Login) -> None:
+    # Only active users may authenticate: a user still awaiting confirmation
+    # can't log in even with a correct password.
+    await make_user(
+        email="pending@example.com",
+        password="password12345",
+        status=UserStatus.waiting_confirmation,
+    )
+    resp = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "pending@example.com", "password": "password12345"},
+    )
+    assert resp.status_code == 401
+    assert resp.json()["detail"] == "Invalid email or password"
+
+
 async def test_login_case_insensitive_email(client: AsyncClient, make_user: Login) -> None:
     # Stored lower-case; a differently-cased login still resolves the account (L3)
     await make_user(email="alice@example.com", password="password12345")

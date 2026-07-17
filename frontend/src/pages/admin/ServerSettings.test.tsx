@@ -47,7 +47,7 @@ describe('ServerSettings', () => {
     const toastSpy = vi.spyOn(toast, 'success')
     renderWithProviders(<ServerSettings />, { authValue: { user: admin } })
 
-    const checkbox = await screen.findByRole('checkbox', { name: 'Require user confirmation' })
+    const checkbox = await screen.findByRole('checkbox', { name: 'Require email confirmation' })
     expect(checkbox).not.toBeChecked()
     await user.click(checkbox)
 
@@ -69,7 +69,7 @@ describe('ServerSettings', () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderWithProviders(<ServerSettings />, { authValue: { user: admin } })
 
-    const checkbox = await screen.findByRole('checkbox', { name: 'Require user confirmation' })
+    const checkbox = await screen.findByRole('checkbox', { name: 'Require email confirmation' })
     await user.click(checkbox)
 
     expect(
@@ -83,7 +83,7 @@ describe('ServerSettings', () => {
     renderWithProviders(<ServerSettings />, { authValue: { user: admin } })
 
     expect(await screen.findByText(/No SMTP server is configured/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Send test email' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
   })
 
   it('sends a test email', async () => {
@@ -95,7 +95,7 @@ describe('ServerSettings', () => {
     const toastSpy = vi.spyOn(toast, 'success')
     renderWithProviders(<ServerSettings />, { authValue: { user: admin } })
 
-    await user.click(await screen.findByRole('button', { name: 'Send test email' }))
+    await user.click(await screen.findByRole('button', { name: 'Send' }))
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -114,8 +114,25 @@ describe('ServerSettings', () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderWithProviders(<ServerSettings />, { authValue: { user: admin } })
 
-    await user.click(await screen.findByRole('button', { name: 'Send test email' }))
+    await user.click(await screen.findByRole('button', { name: 'Send' }))
 
     expect(await screen.findByText('Could not send the test email')).toBeInTheDocument()
+  })
+
+  it('shows the mail server address and port', async () => {
+    stubFetch({
+      settings: makeServerSettings({ smtp_host: 'mail.example.com', smtp_port: 2525 }),
+    })
+    renderWithProviders(<ServerSettings />, { authValue: { user: admin } })
+
+    expect(await screen.findByText('mail.example.com')).toBeInTheDocument()
+    expect(screen.getByText('2525')).toBeInTheDocument()
+  })
+
+  it('shows "Not set" for the address when SMTP is unconfigured', async () => {
+    stubFetch({ settings: makeServerSettings({ smtp_configured: false, smtp_host: null }) })
+    renderWithProviders(<ServerSettings />, { authValue: { user: admin } })
+
+    expect(await screen.findByText('Not set')).toBeInTheDocument()
   })
 })
