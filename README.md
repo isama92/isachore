@@ -35,6 +35,18 @@ admin sets the password in the create form and the user is active immediately.
 Confirmation needs SMTP configured (see `.env.example`); in dev, emails are
 captured by mailpit at http://localhost:8025.
 
+Login is rate limited: repeated failures lock out both the email and the client
+IP for a window. To lift a lockout without waiting it out, clear the throttle:
+
+```bash
+docker compose exec backend python -m app.cli clear-login-throttle       # clear every lockout
+docker compose exec backend python -m app.cli clear-login-throttle 42    # clear one user (by id)
+```
+
+With a user id it clears only that user's per-email counter (a user maps to an
+email but never to an IP); with no argument it clears every counter, per-email
+and per-IP.
+
 | Service       | URL                                     |
 | ------------- | --------------------------------------- |
 | Frontend      | http://localhost:5173                   |
