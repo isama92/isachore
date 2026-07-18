@@ -3,6 +3,7 @@ import { PanelLeft } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '../auth/useAuth'
 import { api } from '../lib/api'
+import { endpoints } from '../lib/endpoints'
 import { Button } from '@/components/ui/button'
 import { useSidebar } from '@/components/ui/sidebar'
 
@@ -14,7 +15,7 @@ export default function TopBar() {
 
   async function returnToAdmin() {
     try {
-      await api.post('/api/v1/auth/stop-impersonating')
+      await api.post(endpoints.auth.stopImpersonating)
       toast.success(t('topbar.backToAccount'))
     } catch {
       // If the parked admin session has expired the server ends both sessions

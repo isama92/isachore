@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router'
 import { toast } from 'sonner'
 import { useAuth } from '../../auth/useAuth'
 import { api, ApiError } from '../../lib/api'
+import { endpoints } from '../../lib/endpoints'
 import { fullName } from '../../lib/user'
 import type { ServerSettings, User } from '../../lib/types'
 import { UserForm } from '@/components/users/UserForm'
@@ -12,7 +13,7 @@ export default function UserEdit() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { user: me } = useAuth()
-  const { id } = useParams()
+  const { id = '' } = useParams()
 
   const [user, setUser] = useState<User | null>(null)
   const [settings, setSettings] = useState<ServerSettings | null>(null)
@@ -24,8 +25,8 @@ export default function UserEdit() {
     // Only the user fetch drives the not-found state; a settings failure just
     // falls back to defaults so a loadable user can still be edited.
     Promise.all([
-      api.get<ServerSettings>('/api/v1/settings').catch(() => null),
-      api.get<User>(`/api/v1/users/${id}`),
+      api.get<ServerSettings>(endpoints.settings.root).catch(() => null),
+      api.get<User>(endpoints.users.byId(id)),
     ])
       .then(([serverSettings, loaded]) => {
         if (cancelled) return
@@ -44,7 +45,7 @@ export default function UserEdit() {
   }, [id, t])
 
   async function save(payload: Record<string, unknown>) {
-    await api.patch<User>(`/api/v1/users/${id}`, payload)
+    await api.patch<User>(endpoints.users.byId(id), payload)
     toast.success(t('users.toastUpdated'))
     await navigate('/admin/users')
   }

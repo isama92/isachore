@@ -4,6 +4,7 @@ import type { TFunction } from 'i18next'
 import { CheckIcon } from 'lucide-react'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
+import { endpoints } from '../lib/endpoints'
 import { formatDateTime } from '../lib/format'
 import { dueDotClass, relativeDueLabel, sortByDue } from '../lib/home'
 import type { DueChore, HomeData } from '../lib/types'
@@ -93,7 +94,7 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false
     api
-      .get<HomeData>('/api/v1/home')
+      .get<HomeData>(endpoints.home)
       .then((home) => {
         if (!cancelled) setData(home)
       })
@@ -145,7 +146,7 @@ export default function Home() {
       prefersReducedMotion() ? 0 : EXIT_MS,
     )
 
-    api.post(`/api/v1/chores/${chore.id}/complete`).catch((err: unknown) => {
+    api.post(endpoints.chores.complete(chore.id)).catch((err: unknown) => {
       window.clearTimeout(timer) // cancel the pending removal if it hasn't fired
       // Roll back: re-add the row if it was already removed and undo its progress
       // bump; render re-sorts, so its position is restored. If it hasn't been

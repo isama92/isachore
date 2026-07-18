@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import type { ColumnDef } from '@tanstack/react-table'
 import { CopyPlusIcon, SquarePenIcon, Trash2Icon } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { endpoints } from '../lib/endpoints'
 import { formatDate } from '../lib/chores'
 import type { Chore, ChoreCloneState, Household, Page } from '../lib/types'
 import { DataTable } from '@/components/data-table/DataTable'
@@ -41,7 +42,7 @@ export default function Chores() {
   const { t } = useTranslation()
 
   const table = useServerTable<Chore, ChoreFilters>({
-    endpoint: '/api/v1/chores',
+    endpoint: endpoints.chores.root,
     initial: { sortBy: 'start_date', sortDir: 'asc', pageSize: 10, filters: { household_id: '' } },
   })
 
@@ -52,7 +53,7 @@ export default function Chores() {
   useEffect(() => {
     let cancelled = false
     api
-      .get<Page<Household>>('/api/v1/households?sort_by=id&sort_dir=asc&page_size=100')
+      .get<Page<Household>>(`${endpoints.households.root}?sort_by=id&sort_dir=asc&page_size=100`)
       .then((page) => {
         if (!cancelled) setHouseholds(page.items)
       })
@@ -67,7 +68,7 @@ export default function Chores() {
   async function remove(chore: Chore) {
     setError(null)
     try {
-      await api.del(`/api/v1/chores/${chore.id}`)
+      await api.del(endpoints.chores.byId(chore.id))
       toast.success(t('chores.deleted'))
       table.reload()
     } catch (err) {

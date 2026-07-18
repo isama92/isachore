@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { api, ApiError } from '../lib/api'
+import { endpoints } from '../lib/endpoints'
 import { TagForm } from '@/components/tags/TagForm'
 import { Label } from '@/components/ui/label'
 import {
@@ -26,7 +27,7 @@ export default function TagCreate() {
   useEffect(() => {
     let cancelled = false
     api
-      .get<Page<Household>>('/api/v1/households?sort_by=id&sort_dir=asc&page_size=100')
+      .get<Page<Household>>(`${endpoints.households.root}?sort_by=id&sort_dir=asc&page_size=100`)
       .then((page) => {
         if (cancelled) return
         setHouseholds(page.items)
@@ -44,7 +45,7 @@ export default function TagCreate() {
   }, [t])
 
   async function handleSubmit(name: string, color: string) {
-    await api.post<Tag>('/api/v1/tags', { household_id: householdId, name, color })
+    await api.post<Tag>(endpoints.tags.root, { household_id: householdId, name, color })
     toast.success(t('tagCreate.created'))
     await navigate('/tags')
   }

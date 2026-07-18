@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import type { ColumnDef } from '@tanstack/react-table'
 import { Trash2Icon } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
+import { householdResource } from '@/lib/endpoints'
 import { fullName } from '@/lib/user'
 import type { HouseholdMember } from '@/lib/types'
 import { DataTable } from '@/components/data-table/DataTable'
@@ -40,7 +41,7 @@ export function HouseholdMembersTable({ basePath, adminId, canManage }: Props) {
   const { t } = useTranslation()
   // No filter UI here (households have few members); the table just paginates.
   const table = useServerTable<HouseholdMember>({
-    endpoint: `${basePath}/members`,
+    endpoint: householdResource(basePath).members,
     initial: { sortBy: 'name', sortDir: 'asc', pageSize: 10, filters: {} },
   })
   const [error, setError] = useState<string | null>(null)
@@ -48,7 +49,7 @@ export function HouseholdMembersTable({ basePath, adminId, canManage }: Props) {
   async function remove(member: HouseholdMember) {
     setError(null)
     try {
-      await api.del(`${basePath}/members/${member.id}`)
+      await api.del(householdResource(basePath).member(member.id))
       toast.success(t('households.memberRemoved'))
       table.reload()
     } catch (err) {

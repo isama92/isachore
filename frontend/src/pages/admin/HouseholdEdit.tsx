@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router'
 import { toast } from 'sonner'
 import { ArchiveRestoreIcon } from 'lucide-react'
 import { api, ApiError } from '../../lib/api'
+import { endpoints } from '../../lib/endpoints'
 import type { Household } from '../../lib/types'
 import { HouseholdForm } from '@/components/households/HouseholdForm'
 import { HouseholdMembersTable } from '@/components/households/HouseholdMembersTable'
@@ -25,7 +26,7 @@ import { Button } from '@/components/ui/button'
 export default function AdminHouseholdEdit() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { id } = useParams()
+  const { id = '' } = useParams()
 
   const [household, setHousehold] = useState<Household | null>(null)
   const [loading, setLoading] = useState(true)
@@ -34,7 +35,7 @@ export default function AdminHouseholdEdit() {
   useEffect(() => {
     let cancelled = false
     api
-      .get<Household>(`/api/v1/admin/households/${id}`)
+      .get<Household>(endpoints.adminHouseholds.byId(id))
       .then((data) => {
         if (!cancelled) setHousehold(data)
       })
@@ -50,7 +51,7 @@ export default function AdminHouseholdEdit() {
   }, [id, t])
 
   async function save(name: string) {
-    await api.patch<Household>(`/api/v1/admin/households/${id}`, { name })
+    await api.patch<Household>(endpoints.adminHouseholds.byId(id), { name })
     toast.success(t('households.toastUpdated'))
     await navigate('/admin/households')
   }
@@ -58,7 +59,7 @@ export default function AdminHouseholdEdit() {
   async function restore() {
     setError(null)
     try {
-      const updated = await api.post<Household>(`/api/v1/admin/households/${id}/restore`)
+      const updated = await api.post<Household>(endpoints.adminHouseholds.restore(id))
       toast.success(t('households.restored'))
       setHousehold(updated)
     } catch (err) {
@@ -116,7 +117,7 @@ export default function AdminHouseholdEdit() {
           />
           <div className="mt-6">
             <HouseholdOwnerSelect
-              basePath={`/api/v1/admin/households/${household.id}`}
+              basePath={endpoints.adminHouseholds.byId(household.id)}
               adminId={household.admin_id}
               onTransferred={setHousehold}
             />
@@ -126,7 +127,7 @@ export default function AdminHouseholdEdit() {
               {t('households.membersTitle')}
             </h2>
             <HouseholdMembersTable
-              basePath={`/api/v1/admin/households/${household.id}`}
+              basePath={endpoints.adminHouseholds.byId(household.id)}
               adminId={household.admin_id}
               canManage
             />

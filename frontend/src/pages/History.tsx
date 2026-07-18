@@ -5,6 +5,7 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { Undo2Icon } from 'lucide-react'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
+import { endpoints } from '../lib/endpoints'
 import { formatDateTime } from '../lib/chores'
 import { fullName } from '../lib/user'
 import type { HistoryEntry, HistoryFilterOptions } from '../lib/types'
@@ -44,7 +45,7 @@ export default function History() {
   const { user } = useAuth()
 
   const table = useServerTable<HistoryEntry, HistoryFilters>({
-    endpoint: '/api/v1/completions',
+    endpoint: endpoints.completions.root,
     initial: {
       sortBy: 'created_at',
       sortDir: 'desc',
@@ -60,7 +61,7 @@ export default function History() {
   useEffect(() => {
     let cancelled = false
     api
-      .get<HistoryFilterOptions>('/api/v1/completions/filters')
+      .get<HistoryFilterOptions>(endpoints.completions.filters)
       .then((data) => {
         if (!cancelled) setOptions(data)
       })
@@ -77,7 +78,7 @@ export default function History() {
   async function undo(entry: HistoryEntry) {
     setError(null)
     try {
-      await api.del(`/api/v1/completions/${entry.id}`)
+      await api.del(endpoints.completions.byId(entry.id))
       toast.success(t('history.undone'))
       table.reload()
     } catch (err) {

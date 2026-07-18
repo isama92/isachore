@@ -3,13 +3,14 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate, useParams } from 'react-router'
 import { toast } from 'sonner'
 import { api, ApiError } from '../lib/api'
+import { endpoints } from '../lib/endpoints'
 import { TagForm } from '@/components/tags/TagForm'
 import type { Tag } from '../lib/types'
 
 export default function TagEdit() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { id } = useParams()
+  const { id = '' } = useParams()
   const [tag, setTag] = useState<Tag | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -17,7 +18,7 @@ export default function TagEdit() {
   useEffect(() => {
     let cancelled = false
     api
-      .get<Tag>(`/api/v1/tags/${id}`)
+      .get<Tag>(endpoints.tags.byId(id))
       .then((data) => {
         if (!cancelled) setTag(data)
       })
@@ -33,7 +34,7 @@ export default function TagEdit() {
   }, [id, t])
 
   async function handleSubmit(name: string, color: string) {
-    await api.patch<Tag>(`/api/v1/tags/${id}`, { name, color })
+    await api.patch<Tag>(endpoints.tags.byId(id), { name, color })
     toast.success(t('tagEdit.updated'))
     await navigate('/tags')
   }

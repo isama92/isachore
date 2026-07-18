@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { api } from '../../lib/api'
+import { endpoints } from '../../lib/endpoints'
 import type { Household } from '../../lib/types'
 import { HouseholdForm } from '@/components/households/HouseholdForm'
 
@@ -10,7 +11,7 @@ export default function AdminHouseholdCreate() {
   const navigate = useNavigate()
 
   async function create(name: string) {
-    await api.post<Household>('/api/v1/admin/households', { name })
+    await api.post<Household>(endpoints.adminHouseholds.root, { name })
     toast.success(t('households.toastCreated'))
     await navigate('/admin/households')
   }

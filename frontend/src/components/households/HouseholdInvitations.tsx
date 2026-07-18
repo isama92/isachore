@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { CopyIcon, Trash2Icon, UserPlusIcon } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
+import { householdResource } from '@/lib/endpoints'
 import { formatDateTimeFull } from '@/lib/format'
 import type { HouseholdInvitation } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
@@ -42,7 +43,7 @@ export function HouseholdInvitations({ basePath }: { basePath: string }) {
   useEffect(() => {
     let cancelled = false
     api
-      .get<HouseholdInvitation[]>(`${basePath}/invitations`)
+      .get<HouseholdInvitation[]>(householdResource(basePath).invitations)
       .then((data) => {
         if (!cancelled) setInvitations(data)
       })
@@ -60,7 +61,9 @@ export function HouseholdInvitations({ basePath }: { basePath: string }) {
     setError(null)
     setCreating(true)
     try {
-      const invitation = await api.post<HouseholdInvitation>(`${basePath}/invitations`)
+      const invitation = await api.post<HouseholdInvitation>(
+        householdResource(basePath).invitations,
+      )
       setInvitations((prev) => [invitation, ...prev])
       toast.success(t('households.inviteCreated'))
     } catch (err) {
@@ -87,7 +90,7 @@ export function HouseholdInvitations({ basePath }: { basePath: string }) {
     setError(null)
     try {
       const updated = await api.post<HouseholdInvitation>(
-        `${basePath}/invitations/${invitation.id}/revoke`,
+        householdResource(basePath).revokeInvitation(invitation.id),
       )
       // Keep the row, now shown as revoked (and thus deletable).
       setInvitations((prev) => prev.map((i) => (i.id === updated.id ? updated : i)))
@@ -100,7 +103,7 @@ export function HouseholdInvitations({ basePath }: { basePath: string }) {
   async function remove(invitation: HouseholdInvitation) {
     setError(null)
     try {
-      await api.del(`${basePath}/invitations/${invitation.id}`)
+      await api.del(householdResource(basePath).invitation(invitation.id))
       setInvitations((prev) => prev.filter((i) => i.id !== invitation.id))
       toast.success(t('households.inviteRemoved'))
     } catch (err) {

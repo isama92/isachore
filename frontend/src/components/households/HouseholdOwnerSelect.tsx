@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
+import { householdResource } from '@/lib/endpoints'
 import { fullName } from '@/lib/user'
 import type { Household, HouseholdMember, Page } from '@/lib/types'
 import {
@@ -46,7 +47,7 @@ export function HouseholdOwnerSelect({ basePath, adminId, onTransferred }: Props
   useEffect(() => {
     let cancelled = false
     api
-      .get<Page<HouseholdMember>>(`${basePath}/members?page_size=100`)
+      .get<Page<HouseholdMember>>(`${householdResource(basePath).members}?page_size=100`)
       .then((data) => {
         if (!cancelled) setMembers(data.items)
       })

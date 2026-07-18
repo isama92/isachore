@@ -4,6 +4,7 @@ import { Link, Navigate, useNavigate, useSearchParams } from 'react-router'
 import { toast } from 'sonner'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
+import { endpoints } from '../lib/endpoints'
 import { fullName } from '../lib/user'
 import type { InvitationInfo } from '../lib/types'
 import { Button } from '@/components/ui/button'
@@ -28,7 +29,7 @@ export default function AcceptInvite() {
     if (!user) return
     let cancelled = false
     api
-      .get<InvitationInfo>(`/api/v1/invitations/${token}`)
+      .get<InvitationInfo>(endpoints.invitations.byToken(token))
       .then((data) => {
         if (!cancelled) setInfo(data)
       })
@@ -47,7 +48,7 @@ export default function AcceptInvite() {
     setError(null)
     setJoining(true)
     try {
-      await api.post(`/api/v1/invitations/${token}/accept`)
+      await api.post(endpoints.invitations.accept(token))
       toast.success(t('invite.joined', { household: info?.household_name ?? '' }))
       await navigate('/households')
     } catch (err) {

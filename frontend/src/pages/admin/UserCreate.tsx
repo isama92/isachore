@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { api } from '../../lib/api'
+import { endpoints } from '../../lib/endpoints'
 import type { ServerSettings, User } from '../../lib/types'
 import { UserForm } from '@/components/users/UserForm'
 
@@ -17,7 +18,7 @@ export default function UserCreate() {
   useEffect(() => {
     let cancelled = false
     api
-      .get<ServerSettings>('/api/v1/settings')
+      .get<ServerSettings>(endpoints.settings.root)
       .then((data) => {
         if (!cancelled) setSettings(data)
       })
@@ -33,7 +34,7 @@ export default function UserCreate() {
   }, [])
 
   async function create(payload: Record<string, unknown>) {
-    await api.post<User>('/api/v1/users', payload)
+    await api.post<User>(endpoints.users.root, payload)
     toast.success(t('users.toastCreated'))
     await navigate('/admin/users')
   }

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate, useParams } from 'react-router'
 import { toast } from 'sonner'
 import { api, ApiError } from '../lib/api'
+import { endpoints } from '../lib/endpoints'
 import { ChoreForm, type ChoreSubmit } from '@/components/chores/ChoreForm'
 import { Label } from '@/components/ui/label'
 import type { Chore, HouseholdMember, Page, Tag } from '../lib/types'
@@ -10,7 +11,7 @@ import type { Chore, HouseholdMember, Page, Tag } from '../lib/types'
 export default function ChoreEdit() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { id } = useParams()
+  const { id = '' } = useParams()
   const [chore, setChore] = useState<Chore | null>(null)
   const [members, setMembers] = useState<HouseholdMember[]>([])
   const [tags, setTags] = useState<Tag[]>([])
@@ -21,15 +22,15 @@ export default function ChoreEdit() {
   useEffect(() => {
     let cancelled = false
     api
-      .get<Chore>(`/api/v1/chores/${id}`)
+      .get<Chore>(endpoints.chores.byId(id))
       .then((data) =>
         Promise.all([
           api.get<Page<HouseholdMember>>(
-            `/api/v1/households/${data.household.id}/members?page_size=100`,
+            `${endpoints.households.members(data.household.id)}?page_size=100`,
           ),
           // page_size=100 loads the whole household's tags for the picker.
           api.get<Page<Tag>>(
-            `/api/v1/tags?household_id=${data.household.id}&page_size=100&sort_by=name&sort_dir=asc`,
+            `${endpoints.tags.root}?household_id=${data.household.id}&page_size=100&sort_by=name&sort_dir=asc`,
           ),
         ]).then(([membersPage, tagsPage]) => {
           if (cancelled) return
@@ -50,7 +51,7 @@ export default function ChoreEdit() {
   }, [id, t])
 
   async function handleSubmit(values: ChoreSubmit) {
-    await api.patch<Chore>(`/api/v1/chores/${id}`, values)
+    await api.patch<Chore>(endpoints.chores.byId(id), values)
     toast.success(t('choreEdit.updated'))
     await navigate('/chores')
   }

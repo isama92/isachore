@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import type { ColumnDef } from '@tanstack/react-table'
 import { ArchiveRestoreIcon, SquarePenIcon, Trash2Icon } from 'lucide-react'
 import { api, ApiError } from '../../lib/api'
+import { endpoints } from '../../lib/endpoints'
 import { formatDateTime, formatDateTimeFull } from '../../lib/format'
 import type { Household } from '../../lib/types'
 import { DataTable } from '@/components/data-table/DataTable'
@@ -38,7 +39,7 @@ export default function AdminHouseholds() {
   const { t } = useTranslation()
 
   const table = useServerTable<Household, HouseholdFilters>({
-    endpoint: '/api/v1/admin/households',
+    endpoint: endpoints.adminHouseholds.root,
     initial: {
       sortBy: 'created_at',
       sortDir: 'desc',
@@ -62,7 +63,7 @@ export default function AdminHouseholds() {
   async function remove(household: Household) {
     setError(null)
     try {
-      await api.del(`/api/v1/admin/households/${household.id}`)
+      await api.del(endpoints.adminHouseholds.byId(household.id))
       toast.success(t('households.deleted'))
       table.reload()
     } catch (err) {
@@ -73,7 +74,7 @@ export default function AdminHouseholds() {
   async function restore(household: Household) {
     setError(null)
     try {
-      await api.post(`/api/v1/admin/households/${household.id}/restore`)
+      await api.post(endpoints.adminHouseholds.restore(household.id))
       toast.success(t('households.restored'))
       table.reload()
     } catch (err) {

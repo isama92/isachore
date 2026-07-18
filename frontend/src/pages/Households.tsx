@@ -6,6 +6,7 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { EyeIcon, SquarePenIcon, Trash2Icon } from 'lucide-react'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
+import { endpoints } from '../lib/endpoints'
 import { formatDateTime, formatDateTimeFull } from '../lib/format'
 import type { Household } from '../lib/types'
 import { DataTable } from '@/components/data-table/DataTable'
@@ -32,7 +33,7 @@ export default function Households() {
   const { user: me } = useAuth()
 
   const table = useServerTable<Household, HouseholdFilters>({
-    endpoint: '/api/v1/households',
+    endpoint: endpoints.households.root,
     initial: { sortBy: 'created_at', sortDir: 'desc', pageSize: 10, filters: { name: '' } },
   })
 
@@ -53,7 +54,7 @@ export default function Households() {
   async function remove(household: Household) {
     setError(null)
     try {
-      await api.del(`/api/v1/households/${household.id}`)
+      await api.del(endpoints.households.byId(household.id))
       toast.success(t('households.deleted'))
       table.reload()
     } catch (err) {

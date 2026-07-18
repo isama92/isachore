@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { api } from '../lib/api'
+import { endpoints } from '../lib/endpoints'
 import type { Me, User } from '../lib/types'
 import { useTheme } from '../theme/useTheme'
 import { changeLanguage } from '../i18n/i18n'
@@ -29,7 +30,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false
     api
-      .get<Me>('/api/v1/auth/me')
+      .get<Me>(endpoints.auth.me)
       .then((me) => {
         if (cancelled) return
         setUser(me)
@@ -51,7 +52,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
-      const me = await api.get<Me>('/api/v1/auth/me')
+      const me = await api.get<Me>(endpoints.auth.me)
       setUser(me)
       setImpersonating(me.impersonating)
       syncAppearance(me)
@@ -63,7 +64,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (email: string, password: string, remember: boolean) => {
-      const me = await api.post<User>('/api/v1/auth/login', { email, password, remember })
+      const me = await api.post<User>(endpoints.auth.login, { email, password, remember })
       setUser(me)
       setImpersonating(false)
       syncAppearance(me)
@@ -72,7 +73,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   )
 
   const logout = useCallback(async () => {
-    await api.post('/api/v1/auth/logout')
+    await api.post(endpoints.auth.logout)
     setUser(null)
     setImpersonating(false)
   }, [])

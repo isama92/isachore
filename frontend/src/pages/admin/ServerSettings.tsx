@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useAuth } from '../../auth/useAuth'
 import { api, ApiError } from '../../lib/api'
+import { endpoints } from '../../lib/endpoints'
 import type { ServerSettings as ServerSettingsData } from '../../lib/types'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -27,7 +28,7 @@ export default function ServerSettings() {
   const load = useCallback(
     () =>
       api
-        .get<ServerSettingsData>('/api/v1/settings')
+        .get<ServerSettingsData>(endpoints.settings.root)
         .then((s) => {
           setRequireConfirmation(s.require_confirmation)
           setSmtpConfigured(s.smtp_configured)
@@ -55,7 +56,7 @@ export default function ServerSettings() {
     setSaving(true)
     setRequireConfirmation(next)
     try {
-      const s = await api.patch<ServerSettingsData>('/api/v1/settings', {
+      const s = await api.patch<ServerSettingsData>(endpoints.settings.root, {
         require_confirmation: next,
       })
       setRequireConfirmation(s.require_confirmation)
@@ -76,7 +77,7 @@ export default function ServerSettings() {
     setTestError(null)
     setSendingTest(true)
     try {
-      await api.post('/api/v1/settings/test-email')
+      await api.post(endpoints.settings.testEmail)
       toast.success(t('serverSettings.testEmailSent', { email: user?.email ?? '' }))
     } catch (err) {
       setTestError(err instanceof ApiError ? err.message : t('serverSettings.testEmailError'))

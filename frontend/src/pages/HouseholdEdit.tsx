@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { LogOutIcon } from 'lucide-react'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
+import { endpoints } from '../lib/endpoints'
 import type { Household } from '../lib/types'
 import { HouseholdForm } from '@/components/households/HouseholdForm'
 import { HouseholdInvitations } from '@/components/households/HouseholdInvitations'
@@ -28,7 +29,7 @@ export default function HouseholdEdit() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { user: me } = useAuth()
-  const { id } = useParams()
+  const { id = '' } = useParams()
 
   const [household, setHousehold] = useState<Household | null>(null)
   const [loading, setLoading] = useState(true)
@@ -37,7 +38,7 @@ export default function HouseholdEdit() {
   useEffect(() => {
     let cancelled = false
     api
-      .get<Household>(`/api/v1/households/${id}`)
+      .get<Household>(endpoints.households.byId(id))
       .then((data) => {
         if (!cancelled) setHousehold(data)
       })
@@ -53,7 +54,7 @@ export default function HouseholdEdit() {
   }, [id, t])
 
   async function save(name: string) {
-    await api.patch<Household>(`/api/v1/households/${id}`, { name })
+    await api.patch<Household>(endpoints.households.byId(id), { name })
     toast.success(t('households.toastUpdated'))
     await navigate('/households')
   }
@@ -61,7 +62,7 @@ export default function HouseholdEdit() {
   async function leave() {
     setError(null)
     try {
-      await api.post(`/api/v1/households/${id}/leave`)
+      await api.post(endpoints.households.leave(id))
       toast.success(t('households.left'))
       await navigate('/households')
     } catch (err) {
@@ -71,7 +72,7 @@ export default function HouseholdEdit() {
 
   // Only the owner may edit; other members see a read-only view.
   const canManage = !!household && me?.id === household.admin_id
-  const basePath = `/api/v1/households/${id}`
+  const basePath = endpoints.households.byId(id)
 
   return (
     <main className="mx-auto w-full max-w-3xl px-5 py-8">

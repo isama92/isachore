@@ -4,6 +4,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router'
 import { toast } from 'sonner'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
+import { endpoints } from '../lib/endpoints'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -31,7 +32,7 @@ export default function ConfirmAccount() {
   const load = useCallback(
     () =>
       api
-        .get<TokenInfo>(`/api/v1/confirm/${token}`)
+        .get<TokenInfo>(endpoints.confirm.byToken(token))
         .then((data) => setInfo(data))
         .catch(() => setInfo(null))
         .finally(() => setLoading(false)),
@@ -55,7 +56,7 @@ export default function ConfirmAccount() {
     }
     setSubmitting(true)
     try {
-      await api.post(`/api/v1/confirm/${token}`, { password })
+      await api.post(endpoints.confirm.byToken(token), { password })
       toast.success(t('confirmAccount.success'))
       await refresh()
       await navigate('/')

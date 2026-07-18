@@ -9,6 +9,7 @@ import i18n from '../i18n/i18n'
 import { useLanguage } from '../i18n/useLanguage'
 import { LANGUAGES, type Language } from '../i18n/languages'
 import { api, ApiError } from '../lib/api'
+import { endpoints } from '../lib/endpoints'
 import { fullName, initials } from '../lib/user'
 import type { User } from '../lib/types'
 import { cn } from '@/lib/utils'
@@ -61,7 +62,7 @@ export default function Profile() {
     setNameError(null)
     setSavingName(true)
     try {
-      await api.patch<User>('/api/v1/profile', { first_name: firstName, last_name: lastName })
+      await api.patch<User>(endpoints.profile.root, { first_name: firstName, last_name: lastName })
       toast.success(t('profile.nameUpdated'))
       await refresh()
     } catch (err) {
@@ -82,7 +83,7 @@ export default function Profile() {
     setTheme(nextTheme)
     setAccent(nextAccent)
     try {
-      await api.patch<User>('/api/v1/profile', { theme: nextTheme, accent_color: nextAccent })
+      await api.patch<User>(endpoints.profile.root, { theme: nextTheme, accent_color: nextAccent })
       toast.success(t('profile.appearanceUpdated'))
       await refresh()
     } catch (err) {
@@ -103,7 +104,7 @@ export default function Profile() {
     setSavingLanguage(true)
     setLanguage(next)
     try {
-      await api.patch<User>('/api/v1/profile', { language: next })
+      await api.patch<User>(endpoints.profile.root, { language: next })
       // Read via the i18n singleton (not the closure's t, which is still the
       // pre-switch language) so the toast confirms in the language just chosen.
       toast.success(i18n.t('profile.languageUpdated'))
@@ -126,7 +127,7 @@ export default function Profile() {
     try {
       const data = new FormData()
       data.append('file', file)
-      await api.upload<User>('/api/v1/profile/avatar', 'PUT', data)
+      await api.upload<User>(endpoints.profile.avatar, 'PUT', data)
       toast.success(t('profile.photoUpdated'))
       await refresh()
     } catch (err) {
@@ -140,7 +141,7 @@ export default function Profile() {
     setAvatarError(null)
     setAvatarBusy(true)
     try {
-      await api.del<User>('/api/v1/profile/avatar')
+      await api.del<User>(endpoints.profile.avatar)
       toast.success(t('profile.photoRemoved'))
       await refresh()
     } catch (err) {
@@ -163,7 +164,7 @@ export default function Profile() {
     }
     setSavingPassword(true)
     try {
-      await api.patch<User>('/api/v1/profile', {
+      await api.patch<User>(endpoints.profile.root, {
         current_password: currentPassword,
         new_password: newPassword,
       })

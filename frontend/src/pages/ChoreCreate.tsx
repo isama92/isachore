@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { api, ApiError } from '../lib/api'
+import { endpoints } from '../lib/endpoints'
 import { todayISO } from '../lib/chores'
 import { ChoreForm, type ChoreFormValues, type ChoreSubmit } from '@/components/chores/ChoreForm'
 import { Label } from '@/components/ui/label'
@@ -37,7 +38,7 @@ export default function ChoreCreate() {
   useEffect(() => {
     let cancelled = false
     api
-      .get<Page<Household>>('/api/v1/households?sort_by=id&sort_dir=asc&page_size=100')
+      .get<Page<Household>>(`${endpoints.households.root}?sort_by=id&sort_dir=asc&page_size=100`)
       .then((page) => {
         if (cancelled) return
         setHouseholds(page.items)
@@ -59,11 +60,11 @@ export default function ChoreCreate() {
     if (householdId === null) return
     let cancelled = false
     Promise.all([
-      api.get<Page<HouseholdMember>>(`/api/v1/households/${householdId}/members?page_size=100`),
+      api.get<Page<HouseholdMember>>(`${endpoints.households.members(householdId)}?page_size=100`),
       // page_size=100 loads the whole household's tags for the picker (same cap
       // the members/households pickers use).
       api.get<Page<Tag>>(
-        `/api/v1/tags?household_id=${householdId}&page_size=100&sort_by=name&sort_dir=asc`,
+        `${endpoints.tags.root}?household_id=${householdId}&page_size=100&sort_by=name&sort_dir=asc`,
       ),
     ])
       .then(([membersPage, tagsPage]) => {
@@ -81,7 +82,7 @@ export default function ChoreCreate() {
   }, [householdId, t])
 
   async function handleSubmit(values: ChoreSubmit) {
-    await api.post<Chore>('/api/v1/chores', { household_id: householdId, ...values })
+    await api.post<Chore>(endpoints.chores.root, { household_id: householdId, ...values })
     toast.success(t('choreCreate.created'))
     await navigate('/chores')
   }

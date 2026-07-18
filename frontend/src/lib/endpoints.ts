@@ -1,0 +1,102 @@
+// Single source of truth for the backend API surface the frontend talks to.
+// Every path is assembled here so the `/api/v1` prefix (and the shape of each
+// route) lives in exactly one place instead of being spelled out at ~60 call
+// sites. The `api` wrapper in `./api` is the HTTP layer that consumes these.
+//
+// Boundary: this module owns PATHS, not query state. Pagination, sort and
+// filter params (`?page_size=100&sort_by=...`) stay at the call site, appended
+// to the path a builder returns — they are per-request state, not endpoint
+// identity.
+
+// Resource ids arrive as numbers from the API (chore.id, member.id, ...) and as
+// strings from route params (useParams), so path builders accept either.
+type Id = string | number
+
+const V1 = '/api/v1'
+
+export const endpoints = {
+  auth: {
+    me: `${V1}/auth/me`,
+    login: `${V1}/auth/login`,
+    logout: `${V1}/auth/logout`,
+    stopImpersonating: `${V1}/auth/stop-impersonating`,
+  },
+
+  home: `${V1}/home`,
+
+  profile: {
+    root: `${V1}/profile`,
+    avatar: `${V1}/profile/avatar`,
+  },
+
+  chores: {
+    root: `${V1}/chores`,
+    byId: (id: Id) => `${V1}/chores/${id}`,
+    complete: (id: Id) => `${V1}/chores/${id}/complete`,
+  },
+
+  completions: {
+    root: `${V1}/completions`,
+    filters: `${V1}/completions/filters`,
+    byId: (id: Id) => `${V1}/completions/${id}`,
+  },
+
+  tags: {
+    root: `${V1}/tags`,
+    byId: (id: Id) => `${V1}/tags/${id}`,
+  },
+
+  households: {
+    root: `${V1}/households`,
+    byId: (id: Id) => `${V1}/households/${id}`,
+    // The member roster reached directly by household id (the chore pickers use
+    // this). The shared household components reach the same roster through
+    // `householdResource(base).members` instead, because their base may be the
+    // admin route.
+    members: (id: Id) => `${V1}/households/${id}/members`,
+    leave: (id: Id) => `${V1}/households/${id}/leave`,
+  },
+
+  invitations: {
+    byToken: (token: string) => `${V1}/invitations/${token}`,
+    accept: (token: string) => `${V1}/invitations/${token}/accept`,
+  },
+
+  confirm: {
+    byToken: (token: string) => `${V1}/confirm/${token}`,
+  },
+
+  users: {
+    root: `${V1}/users`,
+    byId: (id: Id) => `${V1}/users/${id}`,
+    impersonate: (id: Id) => `${V1}/users/${id}/impersonate`,
+    resendConfirmation: (id: Id) => `${V1}/users/${id}/resend-confirmation`,
+  },
+
+  settings: {
+    root: `${V1}/settings`,
+    testEmail: `${V1}/settings/test-email`,
+  },
+
+  adminHouseholds: {
+    root: `${V1}/admin/households`,
+    byId: (id: Id) => `${V1}/admin/households/${id}`,
+    restore: (id: Id) => `${V1}/admin/households/${id}/restore`,
+  },
+} as const
+
+// A household exposes the same sub-resources whether it is reached through the
+// member route (`households.byId`) or the admin route (`adminHouseholds.byId`).
+// The shared members/invitations/owner components are handed whichever base
+// applies and build their sub-paths relative to it, so the segments live here
+// once rather than being hardcoded in three components.
+export function householdResource(base: string) {
+  return {
+    self: base,
+    members: `${base}/members`,
+    member: (memberId: Id) => `${base}/members/${memberId}`,
+    invitations: `${base}/invitations`,
+    invitation: (invitationId: Id) => `${base}/invitations/${invitationId}`,
+    revokeInvitation: (invitationId: Id) => `${base}/invitations/${invitationId}/revoke`,
+  }
+}

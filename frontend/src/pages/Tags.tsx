@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import type { ColumnDef } from '@tanstack/react-table'
 import { SquarePenIcon, Trash2Icon } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { endpoints } from '../lib/endpoints'
 import type { Household, Page, Tag } from '../lib/types'
 import { DataTable } from '@/components/data-table/DataTable'
 import { useServerTable } from '@/components/data-table/useServerTable'
@@ -39,7 +40,7 @@ export default function Tags() {
   // backend fall back to the caller's current (lowest-id) household; the
   // selector below narrows to a specific one when the user has more than one.
   const table = useServerTable<Tag, TagFilters>({
-    endpoint: '/api/v1/tags',
+    endpoint: endpoints.tags.root,
     initial: { sortBy: 'name', sortDir: 'asc', pageSize: 10, filters: { household_id: '' } },
   })
 
@@ -51,7 +52,7 @@ export default function Tags() {
   useEffect(() => {
     let cancelled = false
     api
-      .get<Page<Household>>('/api/v1/households?sort_by=id&sort_dir=asc&page_size=100')
+      .get<Page<Household>>(`${endpoints.households.root}?sort_by=id&sort_dir=asc&page_size=100`)
       .then((page) => {
         if (!cancelled) setHouseholds(page.items)
       })
@@ -69,7 +70,7 @@ export default function Tags() {
   async function remove(tag: Tag) {
     setError(null)
     try {
-      await api.del(`/api/v1/tags/${tag.id}`)
+      await api.del(endpoints.tags.byId(tag.id))
       toast.success(t('tags.deleted'))
       table.reload()
     } catch (err) {
