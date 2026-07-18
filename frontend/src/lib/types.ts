@@ -69,6 +69,20 @@ export type Chore = {
   tags: Tag[]
 }
 
+// Prefill payload carried in router state when cloning a chore. Mirrors the
+// creation form's fields plus the source household, so ChoreCreate can seed the
+// form and default to the source household (see Chores' clone action).
+export type ChoreCloneState = {
+  household_id: number
+  title: string
+  description: string
+  start_date: string
+  repeats: RepeatPeriod
+  assignment_type: AssignmentType
+  assignee_ids: number[]
+  tag_ids: number[]
+}
+
 // The member list / assignee picker only needs a name (data minimisation).
 export type HouseholdMember = Pick<User, 'id' | 'first_name' | 'last_name'>
 

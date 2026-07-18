@@ -56,6 +56,7 @@
     "title": "Chores",
     "new": "New chore",
     "edit": "Edit",
+    "clone": "Clone",
     "loadError": "Failed to load chores",
     "deleted": "Chore deleted",
     "deleteError": "Delete failed",
@@ -104,7 +105,11 @@
     "tagsPlaceholder": "Select tags",
     "tagsSearch": "Search tags…",
     "tagsEmpty": "No tags found.",
-    "submit": "Add chore"
+    "submit": "Add chore",
+    "cloneDroppedAssignees_one": "{{count}} assignee was not added because it does not belong to this household.",
+    "cloneDroppedAssignees_other": "{{count}} assignees were not added because they do not belong to this household.",
+    "cloneDroppedTags_one": "{{count}} tag was not added because it does not belong to this household.",
+    "cloneDroppedTags_other": "{{count}} tags were not added because they do not belong to this household."
   },
   "choreEdit": {
     "title": "Edit chore",

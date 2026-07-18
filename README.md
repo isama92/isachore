@@ -149,7 +149,6 @@ The app is organised into four areas (context for future work):
 - **Chores management**: manage the household's chores.
 - **Tags management**: create, edit and delete tags.
 
-- [ ] in the chores table add clone button, it will open the chores creation page prefilled
 - [ ] Due views: what is **overdue**, what has to be done **today**, what is due **in a few days**
 - [ ] Mark chore as done / completion history
 - [ ] CI (lint + test on push)

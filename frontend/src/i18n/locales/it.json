@@ -56,6 +56,7 @@
     "title": "Faccende",
     "new": "Nuova faccenda",
     "edit": "Modifica",
+    "clone": "Clona",
     "loadError": "Impossibile caricare le faccende",
     "deleted": "Faccenda eliminata",
     "deleteError": "Eliminazione non riuscita",
@@ -104,7 +105,11 @@
     "tagsPlaceholder": "Seleziona etichette",
     "tagsSearch": "Cerca etichette…",
     "tagsEmpty": "Nessuna etichetta trovata.",
-    "submit": "Aggiungi faccenda"
+    "submit": "Aggiungi faccenda",
+    "cloneDroppedAssignees_one": "{{count}} assegnatario non è stato aggiunto perché non appartiene a questo nucleo domestico.",
+    "cloneDroppedAssignees_other": "{{count}} assegnatari non sono stati aggiunti perché non appartengono a questo nucleo domestico.",
+    "cloneDroppedTags_one": "{{count}} etichetta non è stata aggiunta perché non appartiene a questo nucleo domestico.",
+    "cloneDroppedTags_other": "{{count}} etichette non sono state aggiunte perché non appartengono a questo nucleo domestico."
   },
   "choreEdit": {
     "title": "Modifica faccenda",

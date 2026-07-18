@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate } from 'react-router'
+import { useLocation, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { api, ApiError } from '../lib/api'
 import { todayISO } from '../lib/chores'
-import { ChoreForm, type ChoreSubmit } from '@/components/chores/ChoreForm'
+import { ChoreForm, type ChoreFormValues, type ChoreSubmit } from '@/components/chores/ChoreForm'
 import { Label } from '@/components/ui/label'
 import {
   Select,
@@ -13,19 +13,27 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import type { Chore, Household, HouseholdMember, Page, Tag } from '../lib/types'
+import type { Chore, ChoreCloneState, Household, HouseholdMember, Page, Tag } from '../lib/types'
 
 export default function ChoreCreate() {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const location = useLocation()
+  // Present when arriving via a chore's "Clone" action: prefills the form and
+  // defaults the household to the source chore's.
+  const clone = (location.state as { clone?: ChoreCloneState } | null)?.clone
   const [households, setHouseholds] = useState<Household[]>([])
-  const [householdId, setHouseholdId] = useState<number | null>(null)
+  const [householdId, setHouseholdId] = useState<number | null>(clone?.household_id ?? null)
   const [members, setMembers] = useState<HouseholdMember[]>([])
   const [tags, setTags] = useState<Tag[]>([])
+  // Which household the currently loaded members/tags belong to; gates the clone
+  // drop note so it doesn't flash while a household's pickers are still loading.
+  const [optionsHouseholdId, setOptionsHouseholdId] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Load the user's households once; default the chore to the lowest-id one.
+  // Load the user's households once; default the chore to the lowest-id one
+  // (unless cloning already seeded the source chore's household).
   useEffect(() => {
     let cancelled = false
     api
@@ -33,7 +41,7 @@ export default function ChoreCreate() {
       .then((page) => {
         if (cancelled) return
         setHouseholds(page.items)
-        setHouseholdId(page.items[0]?.id ?? null)
+        setHouseholdId((cur) => cur ?? page.items[0]?.id ?? null)
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof ApiError ? err.message : t('choreCreate.loadError'))
@@ -62,6 +70,7 @@ export default function ChoreCreate() {
         if (cancelled) return
         setMembers(membersPage.items)
         setTags(tagsPage.items)
+        setOptionsHouseholdId(householdId)
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof ApiError ? err.message : t('choreCreate.loadError'))
@@ -103,6 +112,46 @@ export default function ChoreCreate() {
       </div>
     ) : null
 
+  // Prefilled values when cloning; empty defaults otherwise. ChoreForm lazy-inits
+  // from this and the form mounts only after households load, so clone values are
+  // ready in time.
+  const initial: ChoreFormValues = {
+    title: clone?.title ?? '',
+    description: clone?.description ?? '',
+    start_date: clone?.start_date ?? todayISO(),
+    repeats: clone?.repeats ?? 'weekly',
+    assignment_type: clone?.assignment_type ?? 'manual',
+    assignee_ids: clone?.assignee_ids ?? [],
+    tag_ids: clone?.tag_ids ?? [],
+  }
+
+  // How many cloned assignees/tags don't belong to the selected household and so
+  // won't be added. Gated on optionsHouseholdId so it reflects loaded pickers.
+  const memberIdSet = new Set(members.map((m) => m.id))
+  const tagIdSet = new Set(tags.map((tag) => tag.id))
+  const droppedAssignees = clone
+    ? clone.assignee_ids.filter((id) => !memberIdSet.has(id)).length
+    : 0
+  const droppedTags = clone ? clone.tag_ids.filter((id) => !tagIdSet.has(id)).length : 0
+  const showDrop = optionsHouseholdId === householdId && (droppedAssignees > 0 || droppedTags > 0)
+
+  const header = (
+    <>
+      {householdSelect}
+      {showDrop && (
+        <div
+          role="status"
+          className="rounded-input border border-line bg-muted p-3 text-[13px] font-medium text-muted-foreground"
+        >
+          {droppedAssignees > 0 && (
+            <p>{t('choreCreate.cloneDroppedAssignees', { count: droppedAssignees })}</p>
+          )}
+          {droppedTags > 0 && <p>{t('choreCreate.cloneDroppedTags', { count: droppedTags })}</p>}
+        </div>
+      )}
+    </>
+  )
+
   return (
     <main className="mx-auto w-full max-w-lg px-5 py-8">
       <h1 className="mb-6 font-display text-2xl font-bold tracking-tight">
@@ -121,19 +170,11 @@ export default function ChoreCreate() {
           <ChoreForm
             members={members}
             tags={tags}
-            initial={{
-              title: '',
-              description: '',
-              start_date: todayISO(),
-              repeats: 'weekly',
-              assignment_type: 'manual',
-              assignee_ids: [],
-              tag_ids: [],
-            }}
+            initial={initial}
             submitLabel={t('choreCreate.submit')}
             cancelTo="/chores"
             errorMessage={t('choreCreate.createError')}
-            header={householdSelect}
+            header={header}
             onSubmit={handleSubmit}
           />
         </>

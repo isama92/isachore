@@ -46,14 +46,31 @@ function singleHouseholdMocks() {
   ])
 }
 
-function withRoutes() {
+function withRoutes(state?: unknown) {
   return renderWithProviders(
     <Routes>
       <Route path="/chores/new" element={<ChoreCreate />} />
       <Route path="/chores" element={<div>chores-list</div>} />
     </Routes>,
-    { authValue: { user: me }, route: '/chores/new' },
+    { authValue: { user: me }, route: '/chores/new', state },
   )
+}
+
+// The prefill payload a chore's "Clone" action pushes into router state.
+function cloneState(overrides: Record<string, unknown> = {}) {
+  return {
+    clone: {
+      household_id: 1,
+      title: 'Scrub the tub',
+      description: 'Do it well',
+      start_date: '2026-07-16',
+      repeats: 'daily',
+      assignment_type: 'least_done',
+      assignee_ids: [2],
+      tag_ids: [3],
+      ...overrides,
+    },
+  }
 }
 
 describe('ChoreCreate', () => {
@@ -186,6 +203,87 @@ describe('ChoreCreate', () => {
 
     await screen.findByText('chores-list')
     expect(String(postBody(fetchMock).start_date)).toMatch(/-15$/)
+  })
+
+  it('prefills the form from clone state and creates a faithful copy in the same household', async () => {
+    const fetchMock = singleHouseholdMocks()
+    withRoutes(cloneState())
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    // Fields are seeded from the source chore, and its assignee is pre-selected.
+    expect(await screen.findByLabelText('Title')).toHaveValue('Scrub the tub')
+    expect(screen.getByLabelText('Description')).toHaveValue('Do it well')
+    expect(await screen.findByRole('button', { name: 'Jo Ng' })).toHaveAttribute('data-state', 'on')
+    // Same household as the source, so nothing is dropped and no note shows.
+    expect(screen.queryByText(/were not added/)).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Add chore' }))
+
+    await screen.findByText('chores-list')
+    expect(postBody(fetchMock)).toMatchObject({
+      household_id: 1,
+      title: 'Scrub the tub',
+      description: 'Do it well',
+      start_date: '2026-07-16',
+      repeats: 'daily',
+      assignment_type: 'least_done',
+      assignee_ids: [2],
+      tag_ids: [3],
+    })
+  })
+
+  it('drops clone assignees/tags absent from the chosen household and notes it', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const path = url.split('?')[0]
+      const method = (init?.method ?? 'GET').toUpperCase()
+      if (method === 'GET' && path.endsWith('/api/v1/households')) {
+        return jsonBody(
+          page([
+            makeHousehold({ id: 1, name: 'Flat 3B' }),
+            makeHousehold({ id: 2, name: 'Beach House' }),
+          ]),
+        )
+      }
+      if (method === 'GET' && /\/households\/1\/members/.test(url)) {
+        return jsonBody(page([makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })]))
+      }
+      if (method === 'GET' && /\/households\/2\/members/.test(url)) {
+        return jsonBody(page([makeHouseholdMember({ id: 5, first_name: 'Mia', last_name: 'Fox' })]))
+      }
+      if (method === 'GET' && path.endsWith('/api/v1/tags')) {
+        // Only the source household (1) owns the cloned tag.
+        return url.includes('household_id=1')
+          ? jsonBody(page([makeTag({ id: 3, name: 'deep-clean' })]))
+          : jsonBody(page([]))
+      }
+      if (method === 'POST' && path.endsWith('/api/v1/chores')) return jsonBody(makeChore(), 201)
+      return jsonBody(undefined, 204)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    withRoutes(cloneState())
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    // Opens in the source household with its assignee prefilled and no note.
+    expect(await screen.findByRole('button', { name: 'Jo Ng' })).toBeInTheDocument()
+    expect(screen.queryByText(/were not added/)).not.toBeInTheDocument()
+
+    // Switch to Beach House: the source's assignee and tag don't belong there.
+    await user.click(screen.getByRole('combobox', { name: 'Household' }))
+    await user.click(await screen.findByRole('option', { name: 'Beach House' }))
+
+    expect(await screen.findByRole('button', { name: 'Mia Fox' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Jo Ng' })).not.toBeInTheDocument()
+    expect(await screen.findByText(/1 assignee was not added/)).toBeInTheDocument()
+    expect(screen.getByText(/1 tag was not added/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Add chore' }))
+
+    await screen.findByText('chores-list')
+    const call = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST')!
+    const body = JSON.parse(String(call[1]?.body)) as Record<string, unknown>
+    // Lands in Beach House with the non-member assignee and tag dropped.
+    expect(body).toMatchObject({ household_id: 2, assignee_ids: [], tag_ids: [] })
   })
 
   it('surfaces a create error and stays on the form', async () => {

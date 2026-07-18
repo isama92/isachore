@@ -1,11 +1,18 @@
 import { describe, expect, it, vi } from 'vitest'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { Route, Routes, useLocation } from 'react-router'
 import { toast } from 'sonner'
 import Chores from './Chores'
 import { renderWithProviders } from '../test/utils'
 import { makeChore, makeHousehold, makeTag, makeUser } from '../test/fixtures'
 import type { Chore, Household } from '../lib/types'
+
+// Reads the router state pushed by the clone action so a test can assert it.
+function CloneProbe() {
+  const location = useLocation()
+  return <pre data-testid="clone-state">{JSON.stringify(location.state)}</pre>
+}
 
 const me = makeUser({ id: 1, first_name: 'Alex', last_name: 'Kim' })
 
@@ -126,6 +133,47 @@ describe('Chores', () => {
 
     await screen.findByText('Scrub the tub')
     expect(screen.getByRole('link', { name: 'Edit' })).toHaveAttribute('href', '/chores/7/edit')
+  })
+
+  it('clones a chore into the prefilled create page, carrying its details in router state', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    const chore = makeChore({
+      id: 7,
+      title: 'Scrub the tub',
+      description: 'Do it well',
+      repeats: 'daily',
+      assignment_type: 'least_done',
+      household: { id: 4, name: 'Beach House' },
+      assignees: [makeUser({ id: 2 }), makeUser({ id: 3 })],
+      tags: [makeTag({ id: 9, name: 'deep-clean' })],
+    })
+    stubFetch({ chores: [chore] })
+    renderWithProviders(
+      <Routes>
+        <Route path="/chores" element={<Chores />} />
+        <Route path="/chores/new" element={<CloneProbe />} />
+      </Routes>,
+      { authValue: { user: me }, route: '/chores' },
+    )
+
+    const row = (await screen.findByText('Scrub the tub')).closest('tr')!
+    const cloneLink = within(row).getByRole('link', { name: 'Clone' })
+    expect(cloneLink).toHaveAttribute('href', '/chores/new')
+
+    await user.click(cloneLink)
+
+    const state = JSON.parse(screen.getByTestId('clone-state').textContent!) as {
+      clone: Record<string, unknown>
+    }
+    expect(state.clone).toMatchObject({
+      household_id: 4,
+      title: 'Scrub the tub',
+      description: 'Do it well',
+      repeats: 'daily',
+      assignment_type: 'least_done',
+      assignee_ids: [2, 3],
+      tag_ids: [9],
+    })
   })
 
   it('shows a household filter and pushes the choice into the query', async () => {
