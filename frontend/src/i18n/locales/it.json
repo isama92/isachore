@@ -404,7 +404,6 @@
   "options": {
     "repeat": {
       "manual": "Manuale",
-      "hourly": "Ogni ora",
       "daily": "Ogni giorno",
       "weekly": "Ogni settimana",
       "monthly": "Ogni mese",

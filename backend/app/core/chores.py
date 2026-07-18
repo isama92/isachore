@@ -39,8 +39,6 @@ def _add_months(dt: datetime, months: int) -> datetime:
 def _add_interval(dt: datetime, repeats: RepeatPeriod) -> datetime:
     """The datetime one recurrence interval after `dt`. Never call with `manual`."""
     match repeats:
-        case RepeatPeriod.hourly:
-            return dt + timedelta(hours=1)
         case RepeatPeriod.daily:
             return dt + timedelta(days=1)
         case RepeatPeriod.weekly:

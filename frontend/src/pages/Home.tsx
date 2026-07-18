@@ -77,9 +77,10 @@ export default function Home() {
     // Optimistic: drop the row now (it "disappears" on check), and bump today's
     // progress if this was an overdue/due-today task. A "soon" chore completed
     // early doesn't move today's progress, matching the server. We don't refetch:
-    // a just-completed hourly chore's next occurrence is still today and would
-    // bounce back into the list. Functional updates so overlapping completions
-    // compose (each only ever touches its own row).
+    // a repeating chore whose next occurrence lands within the window (daily ->
+    // tomorrow, weekly -> +7d) would otherwise bounce straight back into the list.
+    // Functional updates so overlapping completions compose (each only ever
+    // touches its own row).
     const bump = chore.days_until_due <= 0 ? 1 : 0
     setData((d) =>
       d

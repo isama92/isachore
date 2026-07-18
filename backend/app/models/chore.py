@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 
 class RepeatPeriod(enum.StrEnum):
     manual = "manual"
-    hourly = "hourly"
     daily = "daily"
     weekly = "weekly"
     monthly = "monthly"

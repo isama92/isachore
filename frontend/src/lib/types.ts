@@ -44,7 +44,7 @@ export type ServerSettings = {
   smtp_from: string | null
 }
 
-export type RepeatPeriod = 'manual' | 'hourly' | 'daily' | 'weekly' | 'monthly' | 'yearly'
+export type RepeatPeriod = 'manual' | 'daily' | 'weekly' | 'monthly' | 'yearly'
 
 export type AssignmentType = 'manual' | 'alphabetical' | 'random' | 'least_done'
 

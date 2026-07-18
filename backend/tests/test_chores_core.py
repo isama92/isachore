@@ -18,9 +18,8 @@ def _chore(*, start_date: date, repeats: RepeatPeriod, last_completed_at: dateti
     )
 
 
-def test_add_interval_hourly_daily_weekly_preserve_time() -> None:
+def test_add_interval_daily_weekly_preserve_time() -> None:
     base = datetime(2026, 7, 18, 14, 30, tzinfo=UTC)
-    assert _add_interval(base, RepeatPeriod.hourly) == datetime(2026, 7, 18, 15, 30, tzinfo=UTC)
     assert _add_interval(base, RepeatPeriod.daily) == datetime(2026, 7, 19, 14, 30, tzinfo=UTC)
     assert _add_interval(base, RepeatPeriod.weekly) == datetime(2026, 7, 25, 14, 30, tzinfo=UTC)
 
