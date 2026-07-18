@@ -41,7 +41,7 @@ function singleHouseholdMocks() {
       method: 'GET',
       body: page([makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })]),
     },
-    { path: TAGS, method: 'GET', body: [makeTag({ id: 3, name: 'deep-clean' })] },
+    { path: TAGS, method: 'GET', body: page([makeTag({ id: 3, name: 'deep-clean' })]) },
     { path: '/api/v1/chores', method: 'POST', status: 201, body: makeChore() },
   ])
 }
@@ -131,7 +131,7 @@ describe('ChoreCreate', () => {
       if (method === 'GET' && /\/households\/2\/members/.test(url)) {
         return jsonBody(page([makeHouseholdMember({ id: 5, first_name: 'Mia', last_name: 'Fox' })]))
       }
-      if (method === 'GET' && path.endsWith('/api/v1/tags')) return jsonBody([])
+      if (method === 'GET' && path.endsWith('/api/v1/tags')) return jsonBody(page([]))
       if (method === 'POST' && path.endsWith('/api/v1/chores')) return jsonBody(makeChore(), 201)
       return jsonBody(undefined, 204)
     })
@@ -167,7 +167,7 @@ describe('ChoreCreate', () => {
         body: page([makeHousehold({ id: 1 })]),
       },
       { path: MEMBERS, method: 'GET', body: page([]) },
-      { path: TAGS, method: 'GET', body: [] },
+      { path: TAGS, method: 'GET', body: page([]) },
       { path: '/api/v1/chores', method: 'POST', status: 201, body: makeChore() },
     ])
     withRoutes()
@@ -190,7 +190,7 @@ describe('ChoreCreate', () => {
         body: page([makeHousehold({ id: 1 })]),
       },
       { path: MEMBERS, method: 'GET', body: page([]) },
-      { path: TAGS, method: 'GET', body: [] },
+      { path: TAGS, method: 'GET', body: page([]) },
       {
         path: '/api/v1/chores',
         method: 'POST',

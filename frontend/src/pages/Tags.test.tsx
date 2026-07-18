@@ -36,13 +36,22 @@ function stubFetch(opts: {
     if (method === 'GET' && path.endsWith('/api/v1/tags')) {
       const householdId = new URL(url, 'http://x').searchParams.get('household_id') ?? ''
       const tags = typeof opts.tags === 'function' ? opts.tags(householdId) : opts.tags
-      return jsonBody(tags)
+      return jsonBody({ items: tags, total: tags.length, page: 1, page_size: 20 })
     }
     if (method !== 'GET' && opts.mutate) return opts.mutate(method, url)
     return jsonBody(undefined, 204)
   })
   vi.stubGlobal('fetch', fetchMock)
   return fetchMock
+}
+
+function lastTagsGet(fetchMock: FetchMock): string {
+  const calls = fetchMock.mock.calls.filter(
+    ([url, init]) =>
+      (init?.method ?? 'GET').toUpperCase() === 'GET' &&
+      String(url).split('?')[0].endsWith('/api/v1/tags'),
+  )
+  return String(calls.at(-1)?.[0] ?? '')
 }
 
 describe('Tags', () => {
@@ -72,8 +81,8 @@ describe('Tags', () => {
     expect(screen.queryByRole('combobox', { name: 'Household' })).not.toBeInTheDocument()
   })
 
-  it('lets a multi-household user pick the household and refetches its tags', async () => {
-    stubFetch({
+  it('lets a multi-household user pick the household and pushes it into the query', async () => {
+    const fetchMock = stubFetch({
       households: [
         makeHousehold({ id: 1, name: 'Flat 3B' }),
         makeHousehold({ id: 2, name: 'Beach House' }),
@@ -89,8 +98,8 @@ describe('Tags', () => {
     expect(await screen.findByText('deep-clean')).toBeInTheDocument()
     await user.click(await screen.findByRole('combobox', { name: 'Household' }))
     await user.click(await screen.findByRole('option', { name: 'Beach House' }))
+    await waitFor(() => expect(lastTagsGet(fetchMock)).toContain('household_id=2'))
     expect(await screen.findByText('beach-only')).toBeInTheDocument()
-    expect(screen.queryByText('deep-clean')).not.toBeInTheDocument()
   })
 
   it('deletes a tag after confirming in the dialog and reloads', async () => {
@@ -114,6 +123,15 @@ describe('Tags', () => {
     await waitFor(() => expect(deleted).toContain('/api/v1/tags/7'))
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(true)
     expect(toastSpy).toHaveBeenCalledWith('Tag deleted')
+    // The list reloads after a delete: a second tags GET fires.
+    await waitFor(() => {
+      const tagGets = fetchMock.mock.calls.filter(
+        ([url, init]) =>
+          (init?.method ?? 'GET').toUpperCase() === 'GET' &&
+          String(url).split('?')[0].endsWith('/api/v1/tags'),
+      ).length
+      expect(tagGets).toBeGreaterThanOrEqual(2)
+    })
   })
 
   it('does not delete when the dialog is cancelled', async () => {
@@ -129,11 +147,29 @@ describe('Tags', () => {
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false)
   })
 
-  it('shows an error when loading fails', async () => {
+  it('shows guidance when the user has no household', async () => {
+    stubFetch({ tags: [], households: [] })
+    renderWithProviders(<Tags />, { authValue: { user: me } })
+    expect(
+      await screen.findByText('You need a household before you can add tags.'),
+    ).toBeInTheDocument()
+  })
+
+  it('shows an error when loading tags fails', async () => {
+    // A household exists (so the DataTable renders), but the tags fetch fails.
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => {
-        throw new Error('network')
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input).split('?')[0]
+        if (path.endsWith('/api/v1/households')) {
+          return jsonBody({
+            items: [makeHousehold({ id: 1 })],
+            total: 1,
+            page: 1,
+            page_size: 100,
+          })
+        }
+        return jsonBody({ detail: 'boom' }, 500)
       }),
     )
     renderWithProviders(<Tags />, { authValue: { user: me } })

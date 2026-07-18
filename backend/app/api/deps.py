@@ -82,11 +82,14 @@ Impersonator = Annotated[User | None, Depends(get_impersonator)]
 
 
 async def get_current_household(user: CurrentUser, session: SessionDep) -> Household:
-    """The current user's household (lowest id while a user has just one)."""
+    """The current user's active household (lowest id while a user has just one).
+
+    Excludes soft-deleted households so the fallback stays consistent with
+    get_member_household and the /households list (which both hide deleted ones)."""
     result = await session.execute(
         select(Household)
         .join(household_members, household_members.c.household_id == Household.id)
-        .where(household_members.c.user_id == user.id)
+        .where(household_members.c.user_id == user.id, Household.deleted_at.is_(None))
         .order_by(Household.id)
         .limit(1)
     )

@@ -27,12 +27,15 @@ export default function ChoreEdit() {
           api.get<Page<HouseholdMember>>(
             `/api/v1/households/${data.household.id}/members?page_size=100`,
           ),
-          api.get<Tag[]>(`/api/v1/tags?household_id=${data.household.id}`),
-        ]).then(([membersPage, tagList]) => {
+          // page_size=100 loads the whole household's tags for the picker.
+          api.get<Page<Tag>>(
+            `/api/v1/tags?household_id=${data.household.id}&page_size=100&sort_by=name&sort_dir=asc`,
+          ),
+        ]).then(([membersPage, tagsPage]) => {
           if (cancelled) return
           setChore(data)
           setMembers(membersPage.items)
-          setTags(tagList)
+          setTags(tagsPage.items)
         }),
       )
       .catch((err: unknown) => {

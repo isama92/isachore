@@ -39,7 +39,7 @@ function editMocks(overrides: { patchStatus?: number; patchBody?: unknown } = {}
       method: 'GET',
       body: page([makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })]),
     },
-    { path: TAGS, method: 'GET', body: [makeTag({ id: 3, name: 'deep-clean' })] },
+    { path: TAGS, method: 'GET', body: page([makeTag({ id: 3, name: 'deep-clean' })]) },
     {
       path: '/api/v1/chores/7',
       method: 'PATCH',

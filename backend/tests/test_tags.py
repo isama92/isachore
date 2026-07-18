@@ -29,8 +29,9 @@ async def test_list_tags(
     resp = await client.get("/api/v1/tags")
     assert resp.status_code == 200
     body = resp.json()
-    assert [t["name"] for t in body] == ["deep-clean", "shared"]
-    assert body[0]["color"] == "#0d9488"
+    assert body["total"] == 2
+    assert [t["name"] for t in body["items"]] == ["deep-clean", "shared"]
+    assert body["items"][0]["color"] == "#0d9488"
 
 
 async def test_list_tags_scoped_to_household(
@@ -47,7 +48,7 @@ async def test_list_tags_scoped_to_household(
     client = await auth_client(user)
 
     resp = await client.get("/api/v1/tags")
-    assert [t["name"] for t in resp.json()] == ["mine-tag"]
+    assert [t["name"] for t in resp.json()["items"]] == ["mine-tag"]
 
 
 async def test_list_tags_for_chosen_household(
@@ -67,7 +68,7 @@ async def test_list_tags_for_chosen_household(
 
     resp = await client.get(f"/api/v1/tags?household_id={second.id}")
     assert resp.status_code == 200
-    assert [t["name"] for t in resp.json()] == ["second-tag"]
+    assert [t["name"] for t in resp.json()["items"]] == ["second-tag"]
 
 
 async def test_list_tags_foreign_household_rejected(
@@ -92,9 +93,74 @@ async def test_list_tags_without_household(make_user: MakeUser, auth_client: Aut
     assert resp.json()["detail"] == "You are not a member of any household"
 
 
+async def test_list_tags_soft_deleted_only_household(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    # A member of only a soft-deleted household has no active household, so the
+    # no-household_id fallback must not resolve to the deleted one.
+    from datetime import UTC, datetime
+
+    user = await make_user()
+    await make_household(members=[user], deleted_at=datetime.now(UTC))
+    client = await auth_client(user)
+
+    resp = await client.get("/api/v1/tags")
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "You are not a member of any household"
+
+
 async def test_list_tags_requires_auth(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/tags")
     assert resp.status_code == 401
+
+
+async def test_list_tags_sorted_by_name(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_tag: MakeTag,
+    auth_client: AuthClient,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    for name in ("banana", "apple", "cherry"):
+        await make_tag(household=household, name=name)
+    client = await auth_client(user)
+
+    resp = await client.get("/api/v1/tags?sort_by=name&sort_dir=asc")
+    assert [t["name"] for t in resp.json()["items"]] == ["apple", "banana", "cherry"]
+
+
+async def test_list_tags_paginates(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_tag: MakeTag,
+    auth_client: AuthClient,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    for i in range(5):
+        await make_tag(household=household, name=f"tag-{i}")
+    client = await auth_client(user)
+
+    first = (await client.get("/api/v1/tags?page=1&page_size=2&sort_by=id")).json()
+    second = (await client.get("/api/v1/tags?page=2&page_size=2&sort_by=id")).json()
+    assert first["total"] == 5
+    assert len(first["items"]) == 2
+    assert len(second["items"]) == 2
+    # Disjoint pages.
+    assert {t["id"] for t in first["items"]}.isdisjoint(t["id"] for t in second["items"])
+
+
+async def test_list_tags_invalid_params_rejected(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    user = await make_user()
+    await make_household(members=[user])
+    client = await auth_client(user)
+
+    for query in ("sort_by=bogus", "sort_dir=sideways", "page_size=101", "page=0"):
+        resp = await client.get(f"/api/v1/tags?{query}")
+        assert resp.status_code == 422, query
 
 
 # --- create -----------------------------------------------------------------
@@ -118,7 +184,7 @@ async def test_create_tag(
 
     # It shows up in the household's list.
     listed = await client.get("/api/v1/tags")
-    assert [t["name"] for t in listed.json()] == ["urgent"]
+    assert [t["name"] for t in listed.json()["items"]] == ["urgent"]
 
 
 async def test_create_tag_foreign_household_rejected(
@@ -350,7 +416,7 @@ async def test_delete_tag(
     assert resp.status_code == 204
 
     listed = await client.get("/api/v1/tags")
-    assert listed.json() == []
+    assert listed.json()["items"] == []
 
 
 async def test_delete_tag_foreign_household_rejected(

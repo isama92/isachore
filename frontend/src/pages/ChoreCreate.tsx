@@ -52,12 +52,16 @@ export default function ChoreCreate() {
     let cancelled = false
     Promise.all([
       api.get<Page<HouseholdMember>>(`/api/v1/households/${householdId}/members?page_size=100`),
-      api.get<Tag[]>(`/api/v1/tags?household_id=${householdId}`),
+      // page_size=100 loads the whole household's tags for the picker (same cap
+      // the members/households pickers use).
+      api.get<Page<Tag>>(
+        `/api/v1/tags?household_id=${householdId}&page_size=100&sort_by=name&sort_dir=asc`,
+      ),
     ])
-      .then(([membersPage, tagList]) => {
+      .then(([membersPage, tagsPage]) => {
         if (cancelled) return
         setMembers(membersPage.items)
-        setTags(tagList)
+        setTags(tagsPage.items)
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof ApiError ? err.message : t('choreCreate.loadError'))

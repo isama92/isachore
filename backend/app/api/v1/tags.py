@@ -1,15 +1,26 @@
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, SessionDep, get_current_household
+from app.api.v1.households import SortDir
 from app.core.households import get_member_household
 from app.models import Household, Tag, User, household_members
-from app.schemas import TagCreate, TagRead, TagUpdate
+from app.schemas import Page, TagCreate, TagRead, TagUpdate
 
 router = APIRouter()
+
+# Whitelisted sort keys -> the column(s) to order by; the Literal makes anything
+# else a 422, so the map lookup can never KeyError (mirrors the chores router).
+TagSortBy = Literal["id", "name", "created_at"]
+
+TAG_SORT_COLUMNS = {
+    "id": (Tag.id,),
+    "name": (Tag.name,),
+    "created_at": (Tag.created_at,),
+}
 
 # The (household_id, name) unique constraint means two tags can't share a name
 # within one household; surface that as a 409 rather than a 500.
@@ -39,25 +50,46 @@ async def _get_member_tag_or_404(session: SessionDep, user: User, tag_id: int) -
     return tag
 
 
-@router.get("", response_model=list[TagRead])
+@router.get("", response_model=Page[TagRead])
 async def list_tags(
     user: CurrentUser,
     session: SessionDep,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    sort_by: TagSortBy = "name",
+    sort_dir: SortDir = "asc",
     household_id: Annotated[int | None, Query(ge=1)] = None,
-) -> list[Tag]:
-    # Chores can belong to any of the caller's households, so the tag picker must
-    # be able to load a chosen household's tags; without household_id we fall back
-    # to the caller's current (lowest-id) household.
+) -> Page[TagRead]:
+    # Tags are per-household. An explicit household_id must be one the caller
+    # belongs to; without it we fall back to their current (lowest-id) household.
+    # (The chore tag picker also loads a chosen household's tags this way.)
     if household_id is None:
         household = await get_current_household(user, session)
     else:
         household = await get_member_household(session, user.id, household_id)
         if household is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Household not found")
-    result = await session.execute(
-        select(Tag).where(Tag.household_id == household.id).order_by(Tag.id)
+
+    total = (
+        await session.scalar(
+            select(func.count()).select_from(Tag).where(Tag.household_id == household.id)
+        )
+        or 0
     )
-    return list(result.scalars())
+
+    descending = sort_dir == "desc"
+    order_by = [col.desc() if descending else col.asc() for col in TAG_SORT_COLUMNS[sort_by]]
+    order_by.append(Tag.id.desc() if descending else Tag.id.asc())  # stable tiebreaker
+
+    result = await session.execute(
+        select(Tag)
+        .where(Tag.household_id == household.id)
+        .order_by(*order_by)
+        .limit(page_size)
+        .offset((page - 1) * page_size)
+    )
+    items = [TagRead.model_validate(tag) for tag in result.scalars().all()]
+    return Page[TagRead](items=items, total=total, page=page, page_size=page_size)
 
 
 @router.post("", response_model=TagRead, status_code=status.HTTP_201_CREATED)
