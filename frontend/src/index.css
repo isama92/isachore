@@ -79,6 +79,12 @@
   --color-placeholder: var(--placeholder);
   --color-primary-dark: var(--primary-dark);
   --color-warning: var(--warning);
+
+  /* Home due-view status colours (dots + labels): overdue / due-today / due-soon.
+     Resolve lazily per flavour like --warning above. */
+  --color-due-overdue: var(--due-overdue);
+  --color-due-today: var(--due-today);
+  --color-due-soon: var(--due-soon);
 }
 
 /* Theme palettes = the four Catppuccin flavours. Each [data-theme] block sets
@@ -112,6 +118,12 @@
      flavour's peach; resolves lazily per theme like --sidebar above, so one
      definition works for every flavour. */
   --warning: var(--ctp-peach);
+
+  /* Home due-view status colours: overdue (red), due today (yellow), due soon
+     (green). Track the active flavour's --ctp-* accents; resolve lazily. */
+  --due-overdue: var(--ctp-red);
+  --due-today: var(--ctp-yellow);
+  --due-soon: var(--ctp-green);
 }
 
 /* Latte (light). Also serves as the no-attribute fallback via :root. */

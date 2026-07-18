@@ -49,8 +49,22 @@
   },
   "home": {
     "greeting": "Ciao {{name}}",
-    "placeholder": "La tua vista delle scadenze arriverà presto. Per ora, gestisci le faccende del nucleo domestico.",
-    "manageChores": "Gestisci le faccende"
+    "progress": {
+      "doneToday": "{{done}} di {{total}} fatte oggi",
+      "left": "{{count}} da fare"
+    },
+    "due": {
+      "overdue_one": "{{count}} giorno di ritardo",
+      "overdue_other": "{{count}} giorni di ritardo",
+      "today": "Scade oggi",
+      "soon_one": "tra {{count}} giorno",
+      "soon_other": "tra {{count}} giorni"
+    },
+    "emptyTitle": "Tutto in ordine",
+    "emptyHint": "Niente in scadenza nei prossimi 7 giorni.",
+    "markDone": "Segna “{{title}}” come completata",
+    "loadError": "Impossibile caricare le tue faccende in scadenza",
+    "completeError": "Impossibile segnare la faccenda come completata"
   },
   "chores": {
     "title": "Faccende",
