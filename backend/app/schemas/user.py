@@ -101,6 +101,9 @@ class UserUpdate(BaseModel):
 class LoginRequest(BaseModel):
     email: NormalisedEmail
     password: str
+    # When true, the session persists across browser restarts (a long-lived
+    # cookie + token); when false (the default) it's a browser-session cookie.
+    remember: bool = False
 
 
 class ProfileUpdate(BaseModel):

@@ -15,6 +15,16 @@ async def _token_count(session: AsyncSession) -> int:
     return await session.scalar(select(func.count()).select_from(AuthToken)) or 0
 
 
+def _auth_cookie_header(resp: object) -> str:
+    # The login response sets two cookies (the session token and the cleared
+    # admin token); pick out the auth-token one so Max-Age can be asserted on it
+    # rather than on the always-max-age=0 admin cookie.
+    for header in resp.headers.get_list("set-cookie"):  # type: ignore[attr-defined]
+        if header.startswith("isachore_token="):
+            return header
+    raise AssertionError("no isachore_token Set-Cookie header on the response")
+
+
 async def test_login_success(
     client: AsyncClient, make_user: Login, db_session: AsyncSession
 ) -> None:
@@ -32,6 +42,48 @@ async def test_login_success(
     assert "password_hash" not in body
     assert client.cookies.get("isachore_token")
     assert await _token_count(db_session) == 1
+
+
+async def test_login_remember_sets_persistent_cookie(
+    client: AsyncClient, make_user: Login, db_session: AsyncSession
+) -> None:
+    # "Remember me" -> a long-lived cookie (30-day Max-Age) and a token whose DB
+    # expiry matches, so the session survives a browser restart.
+    user = await make_user(email="alice@example.com", password="password12345")
+
+    resp = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "alice@example.com", "password": "password12345", "remember": True},
+    )
+
+    assert resp.status_code == 200
+    assert "max-age=2592000" in _auth_cookie_header(resp).lower()  # 30 days
+    token = (
+        await db_session.execute(select(AuthToken).where(AuthToken.user_id == user.id))
+    ).scalar_one()
+    assert token.expires_at > datetime.now(UTC) + timedelta(days=29)
+
+
+async def test_login_without_remember_sets_session_cookie(
+    client: AsyncClient, make_user: Login, db_session: AsyncSession
+) -> None:
+    # No "remember me" (the default) -> a session cookie (no Max-Age, dropped on
+    # browser close) capped by a short-lived token, so a leaked token can't
+    # outlive the browser session by more than a day.
+    user = await make_user(email="alice@example.com", password="password12345")
+
+    resp = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "alice@example.com", "password": "password12345"},
+    )
+
+    assert resp.status_code == 200
+    assert "max-age" not in _auth_cookie_header(resp).lower()
+    token = (
+        await db_session.execute(select(AuthToken).where(AuthToken.user_id == user.id))
+    ).scalar_one()
+    now = datetime.now(UTC)
+    assert now < token.expires_at < now + timedelta(days=2)
 
 
 async def test_login_clears_admin_cookie(client: AsyncClient, make_user: Login) -> None:

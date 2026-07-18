@@ -8,6 +8,9 @@ from pwdlib import PasswordHash
 from app.core.config import settings
 
 TOKEN_TTL = timedelta(days=30)
+# A login without "remember me" gets a browser-session cookie; this caps how
+# long the matching DB token stays valid so a leaked token can't outlive it.
+SESSION_TOKEN_TTL = timedelta(days=1)
 # Account-confirmation links are longer-lived than a login session but still
 # expire so a stale invite can't be redeemed indefinitely; the admin can resend.
 CONFIRMATION_TOKEN_TTL = timedelta(days=1)
@@ -41,11 +44,20 @@ def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def set_auth_cookie(response: Response, token: str, name: str = COOKIE_NAME) -> None:
+def set_auth_cookie(
+    response: Response,
+    token: str,
+    name: str = COOKIE_NAME,
+    max_age: int | None = int(TOKEN_TTL.total_seconds()),
+) -> None:
+    # max_age=None emits a session cookie (Starlette omits the Max-Age
+    # attribute), which browsers drop at the end of the session; the login route
+    # also caps the matching token at a day so it can't linger. The default
+    # keeps the 30-day persistent behaviour every existing caller relies on.
     response.set_cookie(
         name,
         token,
-        max_age=int(TOKEN_TTL.total_seconds()),
+        max_age=max_age,
         path="/",
         httponly=True,
         samesite="lax",

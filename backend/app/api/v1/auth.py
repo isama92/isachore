@@ -22,6 +22,7 @@ from app.core.rate_limit import (
 from app.core.security import (
     ADMIN_COOKIE_NAME,
     DUMMY_PASSWORD_HASH,
+    SESSION_TOKEN_TTL,
     TOKEN_TTL,
     clear_auth_cookie,
     generate_token,
@@ -67,12 +68,15 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
         )
 
+    # "Remember me" opts into a persistent session (long-lived cookie + token);
+    # otherwise it's a browser-session cookie capped by a short token TTL.
+    ttl = TOKEN_TTL if payload.remember else SESSION_TOKEN_TTL
     token = generate_token()
     session.add(
         AuthToken(
             token_hash=hash_token(token),
             user_id=user.id,
-            expires_at=datetime.now(UTC) + TOKEN_TTL,
+            expires_at=datetime.now(UTC) + ttl,
         )
     )
     await record_event(session, action=AuditAction.login_success, actor_id=user.id, ip=ip)
@@ -81,7 +85,13 @@ async def login(
     await session.commit()
 
     await clear_login_failures(redis, email=email)
-    set_auth_cookie(response, token)
+    set_auth_cookie(
+        response,
+        token,
+        # Same source as the DB expiry above: persistent when remembering,
+        # a session cookie (no Max-Age) otherwise.
+        max_age=int(ttl.total_seconds()) if payload.remember else None,
+    )
     clear_auth_cookie(response, ADMIN_COOKIE_NAME)
     return user
 

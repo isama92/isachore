@@ -32,6 +32,27 @@ def test_auth_cookie_omits_secure_flag_when_disabled(monkeypatch: pytest.MonkeyP
     assert "path=/" in header
 
 
+def test_auth_cookie_defaults_to_persistent(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The default call (used by impersonation / confirmation login) keeps the
+    # 30-day persistent session: a Max-Age is present.
+    header = _set_cookie_header(True, monkeypatch).lower()
+    assert "max-age=2592000" in header  # 30 days
+
+
+def test_auth_cookie_session_when_max_age_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A login without "remember me" passes max_age=None, yielding a browser-
+    # session cookie (no Max-Age) while keeping every hardening attribute.
+    monkeypatch.setattr(settings, "cookies_secure", True)
+    response = Response()
+    set_auth_cookie(response, "a-token", max_age=None)
+    header = response.headers["set-cookie"].lower()
+    assert "max-age" not in header
+    assert "; secure" in header
+    assert "httponly" in header
+    assert "samesite=lax" in header
+    assert "path=/" in header
+
+
 def test_cookies_secure_defaults_to_true() -> None:
     # Fail-closed: a deploy that configures nothing gets Secure cookies. Assert
     # the declared default so ambient env (.env / COOKIES_SECURE) can't mask it.

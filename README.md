@@ -158,6 +158,6 @@ The app is organised into four areas (context for future work):
 - [ ] API keys for mobile / 3rd-party clients (reuse `auth_tokens` via `Authorization: Bearer`)
 - [ ] CI (lint + test on push)
 - [ ] Prod deploy hardening (TLS, real secrets management, DB backups)
-- [ ] login remember me button
+- [x] login remember me button
 
 Design mockups live in `../isachore-design/` (login = variant 1a).

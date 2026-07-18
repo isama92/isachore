@@ -62,8 +62,8 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   }, [syncAppearance])
 
   const login = useCallback(
-    async (email: string, password: string) => {
-      const me = await api.post<User>('/api/v1/auth/login', { email, password })
+    async (email: string, password: string, remember: boolean) => {
+      const me = await api.post<User>('/api/v1/auth/login', { email, password, remember })
       setUser(me)
       setImpersonating(false)
       syncAppearance(me)

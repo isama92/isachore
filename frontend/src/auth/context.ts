@@ -5,7 +5,7 @@ export type AuthContextValue = {
   user: User | null
   impersonating: boolean
   loading: boolean
-  login: (email: string, password: string) => Promise<void>
+  login: (email: string, password: string, remember: boolean) => Promise<void>
   logout: () => Promise<void>
   refresh: () => Promise<void>
 }

@@ -51,11 +51,25 @@ describe('Login', () => {
     await userEvent.type(screen.getByLabelText('Password'), 'password12345')
     await userEvent.click(screen.getByRole('button', { name: 'Sign in' }))
 
-    expect(value.login).toHaveBeenCalledWith('a@example.com', 'password12345')
+    expect(value.login).toHaveBeenCalledWith('a@example.com', 'password12345', false)
     expect(screen.getByRole('button', { name: 'Signing in…' })).toBeDisabled()
 
     resolveLogin()
     await waitFor(() => expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled())
+  })
+
+  it('passes remember=true when the box is ticked', async () => {
+    const { value } = renderWithProviders(<Login />, {
+      route: '/login',
+      authValue: { login: vi.fn(() => Promise.resolve()) },
+    })
+
+    await userEvent.type(screen.getByLabelText('Email'), 'a@example.com')
+    await userEvent.type(screen.getByLabelText('Password'), 'password12345')
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Remember me' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    expect(value.login).toHaveBeenCalledWith('a@example.com', 'password12345', true)
   })
 
   it('shows the API error message on a failed login', async () => {

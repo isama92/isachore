@@ -15,7 +15,7 @@ function Harness() {
       <span data-testid="loading">{String(loading)}</span>
       <span data-testid="user">{user ? user.email : 'none'}</span>
       <span data-testid="impersonating">{String(impersonating)}</span>
-      <button onClick={() => void login('a@example.com', 'password12345')}>login</button>
+      <button onClick={() => void login('a@example.com', 'password12345', true)}>login</button>
       <button onClick={() => void logout()}>logout</button>
       <button onClick={() => void refresh()}>refresh</button>
     </div>
@@ -83,7 +83,15 @@ describe('AuthProvider', () => {
     await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('a@example.com'))
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/auth/login',
-      expect.objectContaining({ method: 'POST' }),
+      expect.objectContaining({
+        method: 'POST',
+        // The remember flag is threaded straight into the request body
+        body: JSON.stringify({
+          email: 'a@example.com',
+          password: 'password12345',
+          remember: true,
+        }),
+      }),
     )
   })
 

@@ -42,6 +42,7 @@
     "emailPlaceholder": "tu@esempio.com",
     "signIn": "Accedi",
     "signingIn": "Accesso…",
+    "rememberMe": "Ricordami",
     "hint": "Nuovo qui? Chiedi un account all'amministratore del tuo nucleo domestico.",
     "error": "Qualcosa è andato storto, riprova"
   },

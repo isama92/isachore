@@ -42,6 +42,7 @@
     "emailPlaceholder": "you@example.com",
     "signIn": "Sign in",
     "signingIn": "Signing in…",
+    "rememberMe": "Remember me",
     "hint": "New here? Ask your household admin for an account.",
     "error": "Something went wrong, please try again"
   },

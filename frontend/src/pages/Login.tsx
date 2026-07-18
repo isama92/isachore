@@ -4,6 +4,7 @@ import { Navigate, useLocation } from 'react-router'
 import { useAuth } from '../auth/useAuth'
 import { ApiError } from '../lib/api'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
@@ -13,6 +14,7 @@ export default function Login() {
   const location = useLocation()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [remember, setRemember] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -27,7 +29,7 @@ export default function Login() {
     setSubmitting(true)
     setError(null)
     try {
-      await login(email, password)
+      await login(email, password, remember)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t('login.error'))
     } finally {
@@ -79,6 +81,20 @@ export default function Login() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            <Checkbox
+              id="remember"
+              checked={remember}
+              onCheckedChange={(v) => setRemember(v === true)}
+            />
+            <Label
+              htmlFor="remember"
+              className="text-sm font-bold tracking-normal text-foreground normal-case"
+            >
+              {t('login.rememberMe')}
+            </Label>
           </div>
 
           {error && <p className="text-[13px] font-bold text-danger">{error}</p>}
