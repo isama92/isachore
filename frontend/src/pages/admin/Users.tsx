@@ -55,7 +55,7 @@ export default function Users() {
     initial: {
       sortBy: 'created_at',
       sortDir: 'desc',
-      pageSize: 20,
+      pageSize: 10,
       filters: { name: '', email: '', status: 'active', role: '' },
     },
   })

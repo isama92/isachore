@@ -33,7 +33,7 @@ export default function Households() {
 
   const table = useServerTable<Household, HouseholdFilters>({
     endpoint: '/api/v1/households',
-    initial: { sortBy: 'created_at', sortDir: 'desc', pageSize: 20, filters: { name: '' } },
+    initial: { sortBy: 'created_at', sortDir: 'desc', pageSize: 10, filters: { name: '' } },
   })
 
   const [error, setError] = useState<string | null>(null)

@@ -40,7 +40,7 @@ export default function Tags() {
   // selector below narrows to a specific one when the user has more than one.
   const table = useServerTable<Tag, TagFilters>({
     endpoint: '/api/v1/tags',
-    initial: { sortBy: 'name', sortDir: 'asc', pageSize: 20, filters: { household_id: '' } },
+    initial: { sortBy: 'name', sortDir: 'asc', pageSize: 10, filters: { household_id: '' } },
   })
 
   const [households, setHouseholds] = useState<Household[]>([])

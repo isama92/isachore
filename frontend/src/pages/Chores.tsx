@@ -42,7 +42,7 @@ export default function Chores() {
 
   const table = useServerTable<Chore, ChoreFilters>({
     endpoint: '/api/v1/chores',
-    initial: { sortBy: 'start_date', sortDir: 'asc', pageSize: 20, filters: { household_id: '' } },
+    initial: { sortBy: 'start_date', sortDir: 'asc', pageSize: 10, filters: { household_id: '' } },
   })
 
   const [households, setHouseholds] = useState<Household[]>([])

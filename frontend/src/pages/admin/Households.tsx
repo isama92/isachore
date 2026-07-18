@@ -42,7 +42,7 @@ export default function AdminHouseholds() {
     initial: {
       sortBy: 'created_at',
       sortDir: 'desc',
-      pageSize: 20,
+      pageSize: 10,
       filters: { name: '', status: 'active' },
     },
   })
