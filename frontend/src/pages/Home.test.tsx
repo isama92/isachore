@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { screen } from '@testing-library/react'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import Home from './Home'
 import { mockFetch, renderWithProviders } from '../test/utils'
@@ -85,13 +85,13 @@ describe('Home', () => {
     const doneButton = await screen.findByRole('button', { name: /Do the dishes/ })
     await user.click(doneButton)
 
-    // Optimistic: the row is removed immediately on check.
-    expect(screen.queryByText('Do the dishes')).not.toBeInTheDocument()
+    // The POST fires immediately on click.
     const posted = fetchMock.mock.calls.some(
       ([url, init]) => String(url).includes('/api/v1/chores/7/complete') && init?.method === 'POST',
     )
     expect(posted).toBe(true)
-    // A due-today task is now done: progress moves to 1 of 1.
+    // The row plays its exit animation, then is removed and progress advances.
+    await waitFor(() => expect(screen.queryByText('Do the dishes')).not.toBeInTheDocument())
     expect(screen.getByText('1 of 1 done today')).toBeInTheDocument()
   })
 
@@ -113,7 +113,8 @@ describe('Home', () => {
     const doneButton = await screen.findByRole('button', { name: /Water the plants/ })
     await user.click(doneButton)
 
-    expect(screen.queryByText('Water the plants')).not.toBeInTheDocument()
+    // The row animates out, then is removed.
+    await waitFor(() => expect(screen.queryByText('Water the plants')).not.toBeInTheDocument())
     // A future ("soon") occurrence doesn't count toward today, so progress holds.
     expect(screen.getByText('1 of 2 done today')).toBeInTheDocument()
   })
@@ -137,6 +138,32 @@ describe('Home', () => {
 
     expect(await screen.findByText('server exploded')).toBeInTheDocument()
     expect(screen.getByText('Do the dishes')).toBeInTheDocument() // rolled back
+  })
+
+  it('marks the row exiting and disables the button while it animates out', async () => {
+    mockFetch([
+      {
+        path: '/api/v1/home',
+        method: 'GET',
+        body: homeBody(0, 1, [
+          makeDueChore({ id: 7, title: 'Do the dishes', status: 'today', days_until_due: 0 }),
+        ]),
+      },
+      { path: COMPLETE, method: 'POST', status: 201, body: {} },
+    ])
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderWithProviders(<Home />, { authValue: { user: makeUser() } })
+
+    const doneButton = await screen.findByRole('button', { name: /Do the dishes/ })
+    const row = doneButton.closest('li')!
+    await user.click(doneButton)
+
+    // The row is flagged exiting (which drives the CSS animation) and its button
+    // is disabled so it can't be double-completed mid-animation.
+    expect(row).toHaveAttribute('data-exiting')
+    expect(doneButton).toBeDisabled()
+    // ...then it's removed once the animation finishes.
+    await waitFor(() => expect(screen.queryByText('Do the dishes')).not.toBeInTheDocument())
   })
 
   it('shows the empty state when nothing is due', async () => {
