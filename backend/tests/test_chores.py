@@ -553,6 +553,25 @@ async def test_update_chore_foreign_assignee_rejected(
     assert resp.json()["detail"] == "Assignees must be members of your household"
 
 
+async def test_update_chore_foreign_tag_rejected(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_tag: MakeTag,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    user = await make_user(email="me@example.com")
+    household = await make_household(name="Mine", members=[user])
+    other = await make_household(name="Other")
+    other_tag = await make_tag(household=other, name="not-mine")
+    chore = await make_chore(household=household)
+    client = await auth_client(user)
+
+    resp = await client.patch(f"/api/v1/chores/{chore.id}", json=_payload(tag_ids=[other_tag.id]))
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "Tags must belong to your household"
+
+
 async def test_update_chore_empty_title_rejected(
     make_user: MakeUser,
     make_household: MakeHousehold,
