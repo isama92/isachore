@@ -13,6 +13,7 @@ import ChoreCreate from './pages/ChoreCreate'
 import ChoreEdit from './pages/ChoreEdit'
 import Chores from './pages/Chores'
 import ConfirmAccount from './pages/ConfirmAccount'
+import History from './pages/History'
 import Home from './pages/Home'
 import HouseholdCreate from './pages/HouseholdCreate'
 import HouseholdEdit from './pages/HouseholdEdit'
@@ -35,6 +36,7 @@ export default function App() {
         <Route path="/chores" element={<Chores />} />
         <Route path="/chores/new" element={<ChoreCreate />} />
         <Route path="/chores/:id/edit" element={<ChoreEdit />} />
+        <Route path="/history" element={<History />} />
         <Route path="/households" element={<Households />} />
         <Route path="/households/new" element={<HouseholdCreate />} />
         <Route path="/households/:id/edit" element={<HouseholdEdit />} />

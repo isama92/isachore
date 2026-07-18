@@ -16,9 +16,9 @@ describe('i18n', () => {
   })
 
   it('interpolates variables in both languages', async () => {
-    expect(i18n.t('home.greeting', { name: 'Ada' })).toBe('Hi Ada')
+    expect(i18n.t('home.greeting', { name: 'Ada' })).toBe('Hi, Ada')
     await i18n.changeLanguage('it')
-    expect(i18n.t('home.greeting', { name: 'Ada' })).toBe('Ciao Ada')
+    expect(i18n.t('home.greeting', { name: 'Ada' })).toBe('Ciao, Ada')
   })
 
   it('persists an explicit choice to localStorage and mirrors <html lang>', async () => {

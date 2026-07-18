@@ -69,6 +69,27 @@ export type Chore = {
   tags: Tag[]
 }
 
+// A completed-chore row for the History view: GET /api/v1/completions.
+// `title` is the snapshot taken at completion (survives a rename/soft-delete);
+// `completed_at` is when it was checked off and `scheduled_for` the occurrence's
+// due datetime, so `days_late` (>0 late, <=0 on time/early) is their date diff.
+// `completed_by` is null when the completer's account was hard-deleted.
+export type HistoryEntry = {
+  id: number
+  title: string
+  scheduled_for: string
+  completed_at: string
+  days_late: number
+  completed_by: HouseholdMember | null
+  household: { id: number; name: string }
+}
+
+// Option lists for the History filters: GET /api/v1/completions/filters.
+export type HistoryFilterOptions = {
+  households: { id: number; name: string }[]
+  members: HouseholdMember[]
+}
+
 export type DueStatus = 'overdue' | 'today' | 'soon'
 
 // A chore due within the Home window (overdue / today / next 7 days), with its

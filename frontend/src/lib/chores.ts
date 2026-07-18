@@ -39,3 +39,18 @@ export function formatDate(iso: string): string {
     year: 'numeric',
   })
 }
+
+// Formatting of a full ISO timestamp like "2026-07-16T14:30:00Z" as date + time
+// in the active language's locale, rendered in the viewer's timezone. Used by the
+// History view, where several chores can be completed on the same day.
+export function formatDateTime(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+  return date.toLocaleString(localeFor(i18n.language), {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}

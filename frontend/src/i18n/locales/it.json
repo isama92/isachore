@@ -28,6 +28,7 @@
     "home": "Home",
     "households": "Nuclei domestici",
     "chores": "Faccende",
+    "history": "Cronologia",
     "tags": "Etichette",
     "profile": "Profilo",
     "admin": "Admin",
@@ -94,6 +95,28 @@
       "actions": "Azioni"
     },
     "filters": {
+      "householdLabel": "Nucleo domestico",
+      "householdAll": "Tutti i nuclei domestici"
+    }
+  },
+  "history": {
+    "title": "Cronologia",
+    "empty": "Ancora nessuna faccenda completata.",
+    "loadError": "Impossibile caricare la cronologia",
+    "onTime": "Puntuale",
+    "daysLate_one": "{{count}} giorno di ritardo",
+    "daysLate_other": "{{count}} giorni di ritardo",
+    "unknownUser": "Sconosciuto",
+    "headers": {
+      "title": "Faccenda",
+      "household": "Nucleo domestico",
+      "completed": "Completata",
+      "overdue": "Ritardo",
+      "completedBy": "Completata da"
+    },
+    "filters": {
+      "userLabel": "Persona",
+      "userAll": "Tutti",
       "householdLabel": "Nucleo domestico",
       "householdAll": "Tutti i nuclei domestici"
     }

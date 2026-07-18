@@ -1,6 +1,7 @@
 import type {
   Chore,
   DueChore,
+  HistoryEntry,
   Household,
   HouseholdInvitation,
   HouseholdMember,
@@ -110,6 +111,19 @@ export function makeInvitationInfo(overrides: Partial<InvitationInfo> = {}): Inv
   return {
     household_name: 'Test Household',
     invited_by: makeHouseholdMember(),
+    ...overrides,
+  }
+}
+
+export function makeHistoryEntry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
+  return {
+    id: 1,
+    title: 'Clean the bathroom',
+    scheduled_for: '2026-07-16T00:00:00Z',
+    completed_at: '2026-07-16T14:30:00Z',
+    days_late: 0,
+    completed_by: makeHouseholdMember(),
+    household: { id: 1, name: 'Test Household' },
     ...overrides,
   }
 }

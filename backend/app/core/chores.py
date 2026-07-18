@@ -69,6 +69,14 @@ def days_until_due(due: datetime, now: datetime) -> int:
     return (due.astimezone(UTC).date() - now.astimezone(UTC).date()).days
 
 
+def days_late(scheduled_for: datetime, completed_at: datetime) -> int:
+    """How many whole days late a completion was (>0 late, 0 on time, <0 early).
+    The mirror of days_until_due for a past occurrence, using the same date-based
+    UTC-day convention so a chore checked off at 23:00 on its due date reads as
+    on time, not a day late."""
+    return (completed_at.astimezone(UTC).date() - scheduled_for.astimezone(UTC).date()).days
+
+
 def due_status(days: int) -> DueStatus:
     """Bucket a days-until-due value. `soon` covers everything in the future here;
     the caller restricts the list to the next 7 days."""

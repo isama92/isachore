@@ -1,4 +1,5 @@
 from app.schemas.chore import ChoreCreate, ChoreRead, ChoreUpdate
+from app.schemas.completion import HistoryEntryRead, HistoryFilterOptions
 from app.schemas.home import CompletionRead, DueChoreRead, HomeRead, ProgressRead
 from app.schemas.household import (
     HouseholdCreate,
@@ -30,6 +31,8 @@ __all__ = [
     "ConfirmRequest",
     "ConfirmTokenInfo",
     "DueChoreRead",
+    "HistoryEntryRead",
+    "HistoryFilterOptions",
     "HomeRead",
     "HouseholdCreate",
     "HouseholdInvitationInfo",

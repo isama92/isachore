@@ -28,6 +28,7 @@
     "home": "Home",
     "households": "Households",
     "chores": "Chores",
+    "history": "History",
     "tags": "Tags",
     "profile": "Profile",
     "admin": "Admin",
@@ -94,6 +95,28 @@
       "actions": "Actions"
     },
     "filters": {
+      "householdLabel": "Household",
+      "householdAll": "All households"
+    }
+  },
+  "history": {
+    "title": "History",
+    "empty": "No completed chores yet.",
+    "loadError": "Failed to load history",
+    "onTime": "On time",
+    "daysLate_one": "{{count}} day late",
+    "daysLate_other": "{{count}} days late",
+    "unknownUser": "Unknown",
+    "headers": {
+      "title": "Chore",
+      "household": "Household",
+      "completed": "Completed",
+      "overdue": "Overdue",
+      "completedBy": "Completed by"
+    },
+    "filters": {
+      "userLabel": "Person",
+      "userAll": "Everyone",
       "householdLabel": "Household",
       "householdAll": "All households"
     }

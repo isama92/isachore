@@ -4,6 +4,7 @@ from app.api.v1 import (
     admin_households,
     auth,
     chores,
+    completions,
     confirmations,
     health,
     home,
@@ -30,3 +31,4 @@ api_router.include_router(
 api_router.include_router(invitations.router, prefix="/invitations", tags=["invitations"])
 api_router.include_router(tags.router, prefix="/tags", tags=["tags"])
 api_router.include_router(chores.router, prefix="/chores", tags=["chores"])
+api_router.include_router(completions.router, prefix="/completions", tags=["completions"])
