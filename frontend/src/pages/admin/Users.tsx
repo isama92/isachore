@@ -400,7 +400,7 @@ export default function Users() {
 
   return (
     <TooltipProvider>
-      <main className="mx-auto max-w-6xl px-5 py-8">
+      <main className="mx-auto w-full max-w-6xl px-5 py-8">
         <div className="mb-6 flex items-center justify-between">
           <h1 className="font-display text-2xl font-bold tracking-tight">{t('users.title')}</h1>
           <Button type="button" size="lg" onClick={openCreate}>

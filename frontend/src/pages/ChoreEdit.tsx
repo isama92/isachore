@@ -53,7 +53,7 @@ export default function ChoreEdit() {
   }
 
   return (
-    <main className="mx-auto max-w-lg px-5 py-8">
+    <main className="mx-auto w-full max-w-lg px-5 py-8">
       <h1 className="mb-6 font-display text-2xl font-bold tracking-tight">
         {t('choreEdit.title')}
       </h1>

@@ -67,7 +67,7 @@ export default function AdminHouseholdEdit() {
   }
 
   return (
-    <main className="mx-auto max-w-3xl px-5 py-8">
+    <main className="mx-auto w-full max-w-3xl px-5 py-8">
       <h1 className="mb-6 font-display text-2xl font-bold tracking-tight">
         {t('households.edit')}
       </h1>

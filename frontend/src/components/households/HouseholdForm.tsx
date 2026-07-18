@@ -37,7 +37,7 @@ export function HouseholdForm({ initialName = '', submitLabel, cancelTo, onSubmi
   }
 
   return (
-    <form onSubmit={(e) => void handleSubmit(e)} className="flex max-w-lg flex-col gap-5">
+    <form onSubmit={(e) => void handleSubmit(e)} className="flex w-full max-w-lg flex-col gap-5">
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="household-name">{t('households.nameLabel')}</Label>
         <Input
