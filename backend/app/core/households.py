@@ -1,4 +1,4 @@
-from sqlalchemy import ColumnElement, func, insert, select
+from sqlalchemy import ColumnElement, Select, func, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Chore, Household, User, UserStatus, household_members
@@ -53,6 +53,17 @@ def member_of(user_id: int) -> ColumnElement[bool]:
     """Filter selecting households the given user is a member of."""
     return Household.id.in_(
         select(household_members.c.household_id).where(household_members.c.user_id == user_id)
+    )
+
+
+def member_household_ids(user_id: int) -> Select[tuple[int]]:
+    """Subquery of the ids of the active (non-deleted) households a user belongs to.
+    The canonical scope for "chores this user can see" (used by the chores list and
+    the Home due view)."""
+    return (
+        select(household_members.c.household_id)
+        .join(Household, Household.id == household_members.c.household_id)
+        .where(household_members.c.user_id == user_id, Household.deleted_at.is_(None))
     )
 
 

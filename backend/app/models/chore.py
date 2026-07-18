@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 
 class RepeatPeriod(enum.StrEnum):
     manual = "manual"
-    hourly = "hourly"
     daily = "daily"
     weekly = "weekly"
     monthly = "monthly"
@@ -58,6 +57,12 @@ class Chore(Base):
     repeats: Mapped[RepeatPeriod] = mapped_column(SAEnum(RepeatPeriod, name="repeat_period"))
     assignment_type: Mapped[AssignmentType] = mapped_column(
         SAEnum(AssignmentType, name="assignment_type")
+    )
+    # When this chore was last checked off. NULL means never completed. Denormalised
+    # from completed_chores so the due-date computation (next_due = last_completed_at
+    # + interval) doesn't have to query the history table. Set on each completion.
+    last_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
     )
     # Soft delete: NULL means active, a timestamp means the chore is deleted and
     # hidden from the list (mirrors households; recoverable only via the DB).

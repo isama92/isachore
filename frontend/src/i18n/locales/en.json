@@ -49,8 +49,22 @@
   },
   "home": {
     "greeting": "Hi {{name}}",
-    "placeholder": "Your due view lands here soon. For now, manage the household chores.",
-    "manageChores": "Manage chores"
+    "progress": {
+      "doneToday": "{{done}} of {{total}} done today",
+      "left": "{{count}} left"
+    },
+    "due": {
+      "overdue_one": "{{count}} day overdue",
+      "overdue_other": "{{count}} days overdue",
+      "today": "Due today",
+      "soon_one": "in {{count}} day",
+      "soon_other": "in {{count}} days"
+    },
+    "emptyTitle": "All caught up",
+    "emptyHint": "Nothing due in the next 7 days.",
+    "markDone": "Mark “{{title}}” done",
+    "loadError": "Failed to load your due chores",
+    "completeError": "Could not mark the chore done"
   },
   "chores": {
     "title": "Chores",
@@ -390,7 +404,6 @@
   "options": {
     "repeat": {
       "manual": "Manual",
-      "hourly": "Hourly",
       "daily": "Daily",
       "weekly": "Weekly",
       "monthly": "Monthly",
