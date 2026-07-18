@@ -1,5 +1,6 @@
 import { Navigate, Outlet, useLocation } from 'react-router'
 import { useAuth } from '../auth/useAuth'
+import { routes } from '../lib/routes'
 import AppSidebar from './AppSidebar'
 import TopBar from './TopBar'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
@@ -19,7 +20,7 @@ export default function RequireAuth() {
   const location = useLocation()
 
   if (loading) return null
-  if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />
+  if (!user) return <Navigate to={routes.login} replace state={{ from: location.pathname }} />
 
   return (
     <TooltipProvider delayDuration={0}>

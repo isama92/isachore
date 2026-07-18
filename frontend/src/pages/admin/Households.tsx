@@ -6,6 +6,7 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { ArchiveRestoreIcon, SquarePenIcon, Trash2Icon } from 'lucide-react'
 import { api, ApiError } from '../../lib/api'
 import { endpoints } from '../../lib/endpoints'
+import { routes } from '../../lib/routes'
 import { formatDateTime, formatDateTimeFull } from '../../lib/format'
 import type { Household } from '../../lib/types'
 import { DataTable } from '@/components/data-table/DataTable'
@@ -158,7 +159,7 @@ export default function AdminHouseholds() {
         <Tooltip>
           <TooltipTrigger asChild>
             <Button asChild variant="ghost" size="icon-sm" aria-label={t('households.editAction')}>
-              <Link to={`/admin/households/${household.id}/edit`}>
+              <Link to={routes.admin.households.edit.to(household.id)}>
                 <SquarePenIcon />
               </Link>
             </Button>
@@ -239,7 +240,7 @@ export default function AdminHouseholds() {
             {t('households.title')}
           </h1>
           <Button asChild size="lg">
-            <Link to="/admin/households/new">{t('households.add')}</Link>
+            <Link to={routes.admin.households.new}>{t('households.add')}</Link>
           </Button>
         </div>
 

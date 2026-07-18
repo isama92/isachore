@@ -6,6 +6,7 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { SquarePenIcon, Trash2Icon } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
+import { routes } from '../lib/routes'
 import type { Household, Page, Tag } from '../lib/types'
 import { DataTable } from '@/components/data-table/DataTable'
 import { useServerTable } from '@/components/data-table/useServerTable'
@@ -121,7 +122,7 @@ export default function Tags() {
         <Tooltip>
           <TooltipTrigger asChild>
             <Button asChild variant="ghost" size="icon-sm" aria-label={editLabel}>
-              <Link to={`/tags/${tag.id}/edit`}>
+              <Link to={routes.tags.edit.to(tag.id)}>
                 <SquarePenIcon />
               </Link>
             </Button>
@@ -162,7 +163,7 @@ export default function Tags() {
         <div className="mb-6 flex items-center justify-between">
           <h1 className="font-display text-2xl font-bold tracking-tight">{t('tags.title')}</h1>
           <Button asChild size="lg">
-            <Link to="/tags/new">{t('tags.new')}</Link>
+            <Link to={routes.tags.new}>{t('tags.new')}</Link>
           </Button>
         </div>
 

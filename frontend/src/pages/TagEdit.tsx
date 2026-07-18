@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router'
 import { toast } from 'sonner'
 import { api, ApiError } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
+import { routes } from '../lib/routes'
 import { TagForm } from '@/components/tags/TagForm'
 import type { Tag } from '../lib/types'
 
@@ -36,7 +37,7 @@ export default function TagEdit() {
   async function handleSubmit(name: string, color: string) {
     await api.patch<Tag>(endpoints.tags.byId(id), { name, color })
     toast.success(t('tagEdit.updated'))
-    await navigate('/tags')
+    await navigate(routes.tags.list)
   }
 
   return (
@@ -52,7 +53,7 @@ export default function TagEdit() {
           initialName={tag.name}
           initialColor={tag.color}
           submitLabel={t('tagEdit.submit')}
-          cancelTo="/tags"
+          cancelTo={routes.tags.list}
           errorMessage={t('tagEdit.updateError')}
           onSubmit={handleSubmit}
         />

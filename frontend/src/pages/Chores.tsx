@@ -6,6 +6,7 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { CopyPlusIcon, SquarePenIcon, Trash2Icon } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
+import { routes } from '../lib/routes'
 import { formatDate } from '../lib/chores'
 import type { Chore, ChoreCloneState, Household, Page } from '../lib/types'
 import { DataTable } from '@/components/data-table/DataTable'
@@ -138,7 +139,7 @@ export default function Chores() {
         <Tooltip>
           <TooltipTrigger asChild>
             <Button asChild variant="ghost" size="icon-sm" aria-label={editLabel}>
-              <Link to={`/chores/${chore.id}/edit`}>
+              <Link to={routes.chores.edit.to(chore.id)}>
                 <SquarePenIcon />
               </Link>
             </Button>
@@ -148,7 +149,7 @@ export default function Chores() {
         <Tooltip>
           <TooltipTrigger asChild>
             <Button asChild variant="ghost" size="icon-sm" aria-label={cloneLabel}>
-              <Link to="/chores/new" state={cloneState(chore)}>
+              <Link to={routes.chores.new} state={cloneState(chore)}>
                 <CopyPlusIcon />
               </Link>
             </Button>
@@ -282,7 +283,7 @@ export default function Chores() {
         <div className="mb-6 flex items-center justify-between">
           <h1 className="font-display text-2xl font-bold tracking-tight">{t('chores.title')}</h1>
           <Button asChild size="lg">
-            <Link to="/chores/new">{t('chores.new')}</Link>
+            <Link to={routes.chores.new}>{t('chores.new')}</Link>
           </Button>
         </div>
 

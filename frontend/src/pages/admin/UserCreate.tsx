@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { api } from '../../lib/api'
 import { endpoints } from '../../lib/endpoints'
+import { routes } from '../../lib/routes'
 import type { ServerSettings, User } from '../../lib/types'
 import { UserForm } from '@/components/users/UserForm'
 
@@ -36,7 +37,7 @@ export default function UserCreate() {
   async function create(payload: Record<string, unknown>) {
     await api.post<User>(endpoints.users.root, payload)
     toast.success(t('users.toastCreated'))
-    await navigate('/admin/users')
+    await navigate(routes.admin.users.list)
   }
 
   return (
@@ -51,7 +52,7 @@ export default function UserCreate() {
           smtpConfigured={settings?.smtp_configured ?? false}
           isSelf={false}
           submitLabel={t('users.addUser')}
-          cancelTo="/admin/users"
+          cancelTo={routes.admin.users.list}
           onSubmit={create}
         />
       )}

@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { ArchiveRestoreIcon } from 'lucide-react'
 import { api, ApiError } from '../../lib/api'
 import { endpoints } from '../../lib/endpoints'
+import { routes } from '../../lib/routes'
 import type { Household } from '../../lib/types'
 import { HouseholdForm } from '@/components/households/HouseholdForm'
 import { HouseholdMembersTable } from '@/components/households/HouseholdMembersTable'
@@ -53,7 +54,7 @@ export default function AdminHouseholdEdit() {
   async function save(name: string) {
     await api.patch<Household>(endpoints.adminHouseholds.byId(id), { name })
     toast.success(t('households.toastUpdated'))
-    await navigate('/admin/households')
+    await navigate(routes.admin.households.list)
   }
 
   async function restore() {
@@ -112,7 +113,7 @@ export default function AdminHouseholdEdit() {
           <HouseholdForm
             initialName={household.name}
             submitLabel={t('common.save')}
-            cancelTo="/admin/households"
+            cancelTo={routes.admin.households.list}
             onSubmit={save}
           />
           <div className="mt-6">

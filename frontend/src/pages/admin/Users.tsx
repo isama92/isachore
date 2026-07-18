@@ -7,6 +7,7 @@ import { LogInIcon, SendIcon, SquarePenIcon, UserCheckIcon, UserXIcon } from 'lu
 import { useAuth } from '../../auth/useAuth'
 import { api, ApiError } from '../../lib/api'
 import { endpoints } from '../../lib/endpoints'
+import { routes } from '../../lib/routes'
 import { formatDateTime, formatDateTimeFull } from '../../lib/format'
 import { fullName } from '../../lib/user'
 import type { ServerSettings, User, UserStatus } from '../../lib/types'
@@ -105,7 +106,7 @@ export default function Users() {
       await api.post<User>(endpoints.users.impersonate(u.id))
       toast.success(t('users.viewingAs', { name: fullName(u) }))
       await refresh()
-      await navigate('/')
+      await navigate(routes.home)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t('users.loginAsError'))
     }
@@ -241,7 +242,7 @@ export default function Users() {
         <Tooltip>
           <TooltipTrigger asChild>
             <Button asChild variant="ghost" size="icon-sm" aria-label={t('users.edit')}>
-              <Link to={`/admin/users/${u.id}/edit`}>
+              <Link to={routes.admin.users.edit.to(u.id)}>
                 <SquarePenIcon />
               </Link>
             </Button>
@@ -328,7 +329,7 @@ export default function Users() {
         <div className="mb-6 flex items-center justify-between">
           <h1 className="font-display text-2xl font-bold tracking-tight">{t('users.title')}</h1>
           <Button asChild size="lg">
-            <Link to="/admin/users/new">{t('users.addUser')}</Link>
+            <Link to={routes.admin.users.new}>{t('users.addUser')}</Link>
           </Button>
         </div>
 

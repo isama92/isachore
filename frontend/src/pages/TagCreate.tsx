@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { api, ApiError } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
+import { routes } from '../lib/routes'
 import { TagForm } from '@/components/tags/TagForm'
 import { Label } from '@/components/ui/label'
 import {
@@ -47,7 +48,7 @@ export default function TagCreate() {
   async function handleSubmit(name: string, color: string) {
     await api.post<Tag>(endpoints.tags.root, { household_id: householdId, name, color })
     toast.success(t('tagCreate.created'))
-    await navigate('/tags')
+    await navigate(routes.tags.list)
   }
 
   // Only offer a household choice when there is more than one; otherwise the
@@ -91,7 +92,7 @@ export default function TagCreate() {
           {error && <p className="mb-4 text-[13px] font-bold text-danger">{error}</p>}
           <TagForm
             submitLabel={t('tagCreate.submit')}
-            cancelTo="/tags"
+            cancelTo={routes.tags.list}
             errorMessage={t('tagCreate.createError')}
             header={householdSelect}
             onSubmit={handleSubmit}

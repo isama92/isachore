@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
+import { routes } from '../lib/routes'
 import { fullName } from '../lib/user'
 import type { InvitationInfo } from '../lib/types'
 import { Button } from '@/components/ui/button'
@@ -50,7 +51,7 @@ export default function AcceptInvite() {
     try {
       await api.post(endpoints.invitations.accept(token))
       toast.success(t('invite.joined', { household: info?.household_name ?? '' }))
-      await navigate('/households')
+      await navigate(routes.households.list)
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         setError(t('invite.alreadyMember'))
@@ -66,7 +67,9 @@ export default function AcceptInvite() {
   // carrying the token so login returns them here (Login honours state.from).
   if (authLoading) return null
   if (!user) {
-    return <Navigate to="/login" replace state={{ from: `/invite?token=${token}` }} />
+    return (
+      <Navigate to={routes.login} replace state={{ from: `${routes.invite}?token=${token}` }} />
+    )
   }
 
   return (
@@ -89,7 +92,10 @@ export default function AcceptInvite() {
             <p className="mt-1.5 mb-7 text-[14.5px] font-medium text-muted-foreground">
               {t('invite.invalidBody')}
             </p>
-            <Link to="/" className="text-[14px] font-bold text-primary hover:text-primary-dark">
+            <Link
+              to={routes.home}
+              className="text-[14px] font-bold text-primary hover:text-primary-dark"
+            >
               {t('invite.goHome')}
             </Link>
           </>

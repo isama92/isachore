@@ -14,6 +14,7 @@ import {
   Users,
 } from 'lucide-react'
 import { useAuth } from '../auth/useAuth'
+import { routes } from '../lib/routes'
 import { fullName, initials } from '../lib/user'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import {
@@ -43,20 +44,20 @@ export default function AppSidebar() {
   const closeMobile = () => setOpenMobile(false)
 
   const items = [
-    { to: '/', icon: Home, label: t('sidebar.home') },
-    { to: '/households', icon: House, label: t('sidebar.households') },
-    { to: '/chores', icon: ClipboardList, label: t('sidebar.chores') },
-    { to: '/history', icon: History, label: t('sidebar.history') },
-    { to: '/tags', icon: TagIcon, label: t('sidebar.tags') },
-    { to: '/profile', icon: CircleUser, label: t('sidebar.profile') },
+    { to: routes.home, icon: Home, label: t('sidebar.home') },
+    { to: routes.households.list, icon: House, label: t('sidebar.households') },
+    { to: routes.chores.list, icon: ClipboardList, label: t('sidebar.chores') },
+    { to: routes.history, icon: History, label: t('sidebar.history') },
+    { to: routes.tags.list, icon: TagIcon, label: t('sidebar.tags') },
+    { to: routes.profile, icon: CircleUser, label: t('sidebar.profile') },
   ]
 
   // Admin section: a foldable parent (links nowhere) with one sub-item per
   // admin page. Add future admin pages here.
   const adminItems = [
-    { to: '/admin/users', icon: Users, label: t('sidebar.users') },
-    { to: '/admin/households', icon: House, label: t('sidebar.adminHouseholds') },
-    { to: '/admin/server-settings', icon: Settings, label: t('sidebar.serverSettings') },
+    { to: routes.admin.users.list, icon: Users, label: t('sidebar.users') },
+    { to: routes.admin.households.list, icon: House, label: t('sidebar.adminHouseholds') },
+    { to: routes.admin.serverSettings, icon: Settings, label: t('sidebar.serverSettings') },
   ]
   const adminActive = pathname.startsWith('/admin')
 
@@ -69,7 +70,7 @@ export default function AppSidebar() {
     <Sidebar collapsible="icon">
       <SidebarHeader className="gap-2">
         <Link
-          to="/"
+          to={routes.home}
           onClick={closeMobile}
           className="flex items-center gap-2 px-1 py-1 outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring rounded-md"
         >

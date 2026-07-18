@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
+import { routes } from '../lib/routes'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -59,7 +60,7 @@ export default function ConfirmAccount() {
       await api.post(endpoints.confirm.byToken(token), { password })
       toast.success(t('confirmAccount.success'))
       await refresh()
-      await navigate('/')
+      await navigate(routes.home)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t('confirmAccount.error'))
     } finally {
@@ -88,7 +89,7 @@ export default function ConfirmAccount() {
               {t('confirmAccount.invalidBody')}
             </p>
             <Link
-              to="/login"
+              to={routes.login}
               className="text-[14px] font-bold text-primary hover:text-primary-dark"
             >
               {t('confirmAccount.toLogin')}

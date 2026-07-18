@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { api, ApiError } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
+import { routes } from '../lib/routes'
 import { todayISO } from '../lib/chores'
 import { ChoreForm, type ChoreFormValues, type ChoreSubmit } from '@/components/chores/ChoreForm'
 import { Label } from '@/components/ui/label'
@@ -84,7 +85,7 @@ export default function ChoreCreate() {
   async function handleSubmit(values: ChoreSubmit) {
     await api.post<Chore>(endpoints.chores.root, { household_id: householdId, ...values })
     toast.success(t('choreCreate.created'))
-    await navigate('/chores')
+    await navigate(routes.chores.list)
   }
 
   // Only offer a household choice when there is more than one; otherwise the
@@ -173,7 +174,7 @@ export default function ChoreCreate() {
             tags={tags}
             initial={initial}
             submitLabel={t('choreCreate.submit')}
-            cancelTo="/chores"
+            cancelTo={routes.chores.list}
             errorMessage={t('choreCreate.createError')}
             header={header}
             onSubmit={handleSubmit}

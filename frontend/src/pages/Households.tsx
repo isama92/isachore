@@ -7,6 +7,7 @@ import { EyeIcon, SquarePenIcon, Trash2Icon } from 'lucide-react'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
+import { routes } from '../lib/routes'
 import { formatDateTime, formatDateTimeFull } from '../lib/format'
 import type { Household } from '../lib/types'
 import { DataTable } from '@/components/data-table/DataTable'
@@ -109,7 +110,7 @@ export default function Households() {
         <Tooltip>
           <TooltipTrigger asChild>
             <Button asChild variant="ghost" size="icon-sm" aria-label={label}>
-              <Link to={`/households/${household.id}/edit`}>
+              <Link to={routes.households.edit.to(household.id)}>
                 {owned ? <SquarePenIcon /> : <EyeIcon />}
               </Link>
             </Button>
@@ -177,7 +178,7 @@ export default function Households() {
             {t('households.title')}
           </h1>
           <Button asChild size="lg">
-            <Link to="/households/new">{t('households.add')}</Link>
+            <Link to={routes.households.new}>{t('households.add')}</Link>
           </Button>
         </div>
 

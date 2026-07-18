@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { useAuth } from '../../auth/useAuth'
 import { api, ApiError } from '../../lib/api'
 import { endpoints } from '../../lib/endpoints'
+import { routes } from '../../lib/routes'
 import { fullName } from '../../lib/user'
 import type { ServerSettings, User } from '../../lib/types'
 import { UserForm } from '@/components/users/UserForm'
@@ -47,7 +48,7 @@ export default function UserEdit() {
   async function save(payload: Record<string, unknown>) {
     await api.patch<User>(endpoints.users.byId(id), payload)
     toast.success(t('users.toastUpdated'))
-    await navigate('/admin/users')
+    await navigate(routes.admin.users.list)
   }
 
   return (
@@ -68,7 +69,7 @@ export default function UserEdit() {
           smtpConfigured={settings?.smtp_configured ?? false}
           isSelf={me?.id === user.id}
           submitLabel={t('common.save')}
-          cancelTo="/admin/users"
+          cancelTo={routes.admin.users.list}
           onSubmit={save}
         />
       )}

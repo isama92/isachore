@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { api } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
+import { routes } from '../lib/routes'
 import type { Household } from '../lib/types'
 import { HouseholdForm } from '@/components/households/HouseholdForm'
 
@@ -13,13 +14,17 @@ export default function HouseholdCreate() {
   async function create(name: string) {
     await api.post<Household>(endpoints.households.root, { name })
     toast.success(t('households.toastCreated'))
-    await navigate('/households')
+    await navigate(routes.households.list)
   }
 
   return (
     <main className="mx-auto w-full max-w-3xl px-5 py-8">
       <h1 className="mb-6 font-display text-2xl font-bold tracking-tight">{t('households.new')}</h1>
-      <HouseholdForm submitLabel={t('households.add')} cancelTo="/households" onSubmit={create} />
+      <HouseholdForm
+        submitLabel={t('households.add')}
+        cancelTo={routes.households.list}
+        onSubmit={create}
+      />
     </main>
   )
 }

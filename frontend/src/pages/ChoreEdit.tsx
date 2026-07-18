@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router'
 import { toast } from 'sonner'
 import { api, ApiError } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
+import { routes } from '../lib/routes'
 import { ChoreForm, type ChoreSubmit } from '@/components/chores/ChoreForm'
 import { Label } from '@/components/ui/label'
 import type { Chore, HouseholdMember, Page, Tag } from '../lib/types'
@@ -53,7 +54,7 @@ export default function ChoreEdit() {
   async function handleSubmit(values: ChoreSubmit) {
     await api.patch<Chore>(endpoints.chores.byId(id), values)
     toast.success(t('choreEdit.updated'))
-    await navigate('/chores')
+    await navigate(routes.chores.list)
   }
 
   return (
@@ -80,7 +81,7 @@ export default function ChoreEdit() {
             tag_ids: chore.tags.map((tag) => tag.id),
           }}
           submitLabel={t('choreEdit.submit')}
-          cancelTo="/chores"
+          cancelTo={routes.chores.list}
           errorMessage={t('choreEdit.updateError')}
           header={
             <div className="flex flex-col gap-1.5">

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Navigate, useLocation } from 'react-router'
 import { useAuth } from '../auth/useAuth'
 import { ApiError } from '../lib/api'
+import { routes } from '../lib/routes'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -19,7 +20,7 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false)
 
   const state = location.state as { from?: string } | null
-  const from = state?.from ?? '/'
+  const from = state?.from ?? routes.home
 
   if (loading) return null
   if (user) return <Navigate to={from} replace />

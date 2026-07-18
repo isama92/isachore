@@ -6,6 +6,7 @@ import { LogOutIcon } from 'lucide-react'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
+import { routes } from '../lib/routes'
 import type { Household } from '../lib/types'
 import { HouseholdForm } from '@/components/households/HouseholdForm'
 import { HouseholdInvitations } from '@/components/households/HouseholdInvitations'
@@ -56,7 +57,7 @@ export default function HouseholdEdit() {
   async function save(name: string) {
     await api.patch<Household>(endpoints.households.byId(id), { name })
     toast.success(t('households.toastUpdated'))
-    await navigate('/households')
+    await navigate(routes.households.list)
   }
 
   async function leave() {
@@ -64,7 +65,7 @@ export default function HouseholdEdit() {
     try {
       await api.post(endpoints.households.leave(id))
       toast.success(t('households.left'))
-      await navigate('/households')
+      await navigate(routes.households.list)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t('households.leaveError'))
     }
@@ -89,7 +90,7 @@ export default function HouseholdEdit() {
           <HouseholdForm
             initialName={household.name}
             submitLabel={t('common.save')}
-            cancelTo="/households"
+            cancelTo={routes.households.list}
             onSubmit={save}
           />
           <div className="mt-6">

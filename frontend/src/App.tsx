@@ -1,4 +1,5 @@
 import { Route, Routes } from 'react-router'
+import { routes } from './lib/routes'
 import RequireAdmin from './components/RequireAdmin'
 import RequireAuth from './components/RequireAuth'
 import AdminHouseholdCreate from './pages/admin/HouseholdCreate'
@@ -27,30 +28,30 @@ import Tags from './pages/Tags'
 export default function App() {
   return (
     <Routes>
-      <Route path="/login" element={<Login />} />
-      <Route path="/confirm" element={<ConfirmAccount />} />
-      <Route path="/invite" element={<AcceptInvite />} />
+      <Route path={routes.login} element={<Login />} />
+      <Route path={routes.confirm} element={<ConfirmAccount />} />
+      <Route path={routes.invite} element={<AcceptInvite />} />
       <Route element={<RequireAuth />}>
-        <Route path="/" element={<Home />} />
-        <Route path="/profile" element={<Profile />} />
-        <Route path="/chores" element={<Chores />} />
-        <Route path="/chores/new" element={<ChoreCreate />} />
-        <Route path="/chores/:id/edit" element={<ChoreEdit />} />
-        <Route path="/history" element={<History />} />
-        <Route path="/households" element={<Households />} />
-        <Route path="/households/new" element={<HouseholdCreate />} />
-        <Route path="/households/:id/edit" element={<HouseholdEdit />} />
-        <Route path="/tags" element={<Tags />} />
-        <Route path="/tags/new" element={<TagCreate />} />
-        <Route path="/tags/:id/edit" element={<TagEdit />} />
+        <Route path={routes.home} element={<Home />} />
+        <Route path={routes.profile} element={<Profile />} />
+        <Route path={routes.chores.list} element={<Chores />} />
+        <Route path={routes.chores.new} element={<ChoreCreate />} />
+        <Route path={routes.chores.edit.pattern} element={<ChoreEdit />} />
+        <Route path={routes.history} element={<History />} />
+        <Route path={routes.households.list} element={<Households />} />
+        <Route path={routes.households.new} element={<HouseholdCreate />} />
+        <Route path={routes.households.edit.pattern} element={<HouseholdEdit />} />
+        <Route path={routes.tags.list} element={<Tags />} />
+        <Route path={routes.tags.new} element={<TagCreate />} />
+        <Route path={routes.tags.edit.pattern} element={<TagEdit />} />
         <Route element={<RequireAdmin />}>
-          <Route path="/admin/users" element={<Users />} />
-          <Route path="/admin/users/new" element={<UserCreate />} />
-          <Route path="/admin/users/:id/edit" element={<UserEdit />} />
-          <Route path="/admin/households" element={<AdminHouseholds />} />
-          <Route path="/admin/households/new" element={<AdminHouseholdCreate />} />
-          <Route path="/admin/households/:id/edit" element={<AdminHouseholdEdit />} />
-          <Route path="/admin/server-settings" element={<ServerSettings />} />
+          <Route path={routes.admin.users.list} element={<Users />} />
+          <Route path={routes.admin.users.new} element={<UserCreate />} />
+          <Route path={routes.admin.users.edit.pattern} element={<UserEdit />} />
+          <Route path={routes.admin.households.list} element={<AdminHouseholds />} />
+          <Route path={routes.admin.households.new} element={<AdminHouseholdCreate />} />
+          <Route path={routes.admin.households.edit.pattern} element={<AdminHouseholdEdit />} />
+          <Route path={routes.admin.serverSettings} element={<ServerSettings />} />
         </Route>
       </Route>
     </Routes>
