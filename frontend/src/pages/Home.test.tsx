@@ -50,7 +50,7 @@ describe('Home', () => {
       authValue: { user: makeUser({ first_name: 'Alex', last_name: 'Kim' }) },
     })
 
-    expect(screen.getByText('Hi Alex Kim')).toBeInTheDocument()
+    expect(screen.getByText('Hi, Alex')).toBeInTheDocument()
     expect(await screen.findByText('5 of 8 done today')).toBeInTheDocument()
     expect(screen.getByText('3 left')).toBeInTheDocument()
 

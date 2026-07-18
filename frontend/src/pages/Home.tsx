@@ -5,7 +5,6 @@ import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
 import { formatDateTime } from '../lib/format'
 import { dueDotClass, relativeDueLabel, sortByDue } from '../lib/home'
-import { fullName } from '../lib/user'
 import type { DueChore, HomeData } from '../lib/types'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Progress } from '@/components/ui/progress'
@@ -106,7 +105,7 @@ export default function Home() {
     }
   }
 
-  const greeting = user ? t('home.greeting', { name: fullName(user) }) : 'isachore'
+  const greeting = user ? t('home.greeting', { name: user.first_name }) : 'isachore'
   const left = data ? data.progress.total_today - data.progress.done_today : 0
   const pct =
     data && data.progress.total_today > 0

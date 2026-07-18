@@ -48,7 +48,7 @@
     "error": "Something went wrong, please try again"
   },
   "home": {
-    "greeting": "Hi {{name}}",
+    "greeting": "Hi, {{name}}",
     "progress": {
       "doneToday": "{{done}} of {{total}} done today",
       "left": "{{count}} left"

@@ -48,7 +48,7 @@
     "error": "Qualcosa è andato storto, riprova"
   },
   "home": {
-    "greeting": "Ciao {{name}}",
+    "greeting": "Ciao, {{name}}",
     "progress": {
       "doneToday": "{{done}} di {{total}} fatte oggi",
       "left": "{{count}} da fare"
