@@ -150,7 +150,8 @@ The app is organised into four areas (context for future work):
 - **Tags management**: create, edit and delete tags.
 
 - [ ] Tags management (create/edit/delete tags)
-- [x] Household crud
+- [ ] revoke expired invitations with a scheduled job, have expired as a real status in the db and clean up the code that uses the expiration date to check if invitation is valid (both backend and frontend)
+- [ ] change users add/edit page to be pages on their own path and not as a modal
 - [ ] if a user have multiple households, then it can clone chores from one household to the other one
 - [ ] Due views: what is **overdue**, what has to be done **today**, what is due **in a few days**
 - [ ] chores changes log (see who changed the chores)
