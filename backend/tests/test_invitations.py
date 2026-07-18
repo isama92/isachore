@@ -79,7 +79,11 @@ async def test_owner_creates_invitation(
     body = resp.json()
     assert "/invite?token=" in body["url"]
     assert body["status"] == "pending"
-    assert body["expired"] is False
+    # `expired` is no longer a separate field; it's a value of `status`.
+    assert "expired" not in body
+    # expires_at is rounded up to a whole hour so the hourly sweep lands on it.
+    expires_at = datetime.fromisoformat(body["expires_at"])
+    assert (expires_at.minute, expires_at.second, expires_at.microsecond) == (0, 0, 0)
 
 
 async def test_non_owner_cannot_create_invitation(
@@ -113,15 +117,15 @@ async def test_list_invitations_includes_expired(
 ) -> None:
     alice = await make_user(email="alice@example.com")
     household = await make_household(name="Flat 3B", members=[alice])
-    await _make_invitation(db_session, household, alice, ttl=timedelta(hours=24))
-    await _make_invitation(db_session, household, alice, ttl=timedelta(hours=-1))
+    await _make_invitation(db_session, household, alice)
+    await _make_invitation(db_session, household, alice, status=HouseholdInvitationStatus.expired)
     client = await auth_client(alice)
 
     resp = await client.get(f"/api/v1/households/{household.id}/invitations")
     assert resp.status_code == 200
     body = resp.json()
     assert len(body) == 2
-    assert {item["expired"] for item in body} == {True, False}
+    assert {item["status"] for item in body} == {"pending", "expired"}
 
 
 async def test_delete_live_pending_rejected(
@@ -154,7 +158,7 @@ async def test_delete_terminal_or_expired_invitation(
     # A revoked, an accepted, and an expired invite are all deletable.
     await _make_invitation(db_session, household, alice, status=HouseholdInvitationStatus.revoked)
     await _make_invitation(db_session, household, alice, status=HouseholdInvitationStatus.accepted)
-    await _make_invitation(db_session, household, alice, ttl=timedelta(hours=-1))  # expired pending
+    await _make_invitation(db_session, household, alice, status=HouseholdInvitationStatus.expired)
     client = await auth_client(alice)
 
     path = f"/api/v1/households/{household.id}/invitations"
@@ -214,11 +218,11 @@ async def test_revoke_non_pending_rejected(
     household = await make_household(name="Flat 3B", members=[alice])
     client = await auth_client(alice)
 
-    # Revoked, accepted, and expired-pending are all non-revocable.
+    # Revoked, accepted, and expired are all non-revocable.
     cases = [
         {"status": HouseholdInvitationStatus.revoked},
         {"status": HouseholdInvitationStatus.accepted},
-        {"ttl": timedelta(hours=-1)},
+        {"status": HouseholdInvitationStatus.expired},
     ]
     for kwargs in cases:
         token = await _make_invitation(db_session, household, alice, **kwargs)
@@ -287,10 +291,11 @@ async def test_pending_limit_ignores_terminal_and_expired(
     # Seed many non-counting invites: accepted, revoked, and expired.
     accepted = HouseholdInvitationStatus.accepted
     revoked = HouseholdInvitationStatus.revoked
+    expired = HouseholdInvitationStatus.expired
     for _ in range(5):
         await _make_invitation(db_session, household, alice, status=accepted)
         await _make_invitation(db_session, household, alice, status=revoked)
-        await _make_invitation(db_session, household, alice, ttl=timedelta(hours=-1))
+        await _make_invitation(db_session, household, alice, status=expired)
     client = await auth_client(alice)
 
     # None of those count, so creating a fresh live invite still works.
@@ -334,7 +339,9 @@ async def test_invitation_info_expired_404(
 ) -> None:
     alice = await make_user(email="alice@example.com")
     household = await make_household(name="Flat 3B", members=[alice])
-    token = await _make_invitation(db_session, household, alice, ttl=timedelta(hours=-1))
+    token = await _make_invitation(
+        db_session, household, alice, status=HouseholdInvitationStatus.expired
+    )
 
     resp = await client.get(f"/api/v1/invitations/{token}")
     assert resp.status_code == 404
@@ -438,7 +445,9 @@ async def test_accept_invitation_expired_404(
     alice = await make_user(email="alice@example.com")
     bob = await make_user(email="bob@example.com")
     household = await make_household(name="Flat 3B", members=[alice])
-    token = await _make_invitation(db_session, household, alice, ttl=timedelta(hours=-1))
+    token = await _make_invitation(
+        db_session, household, alice, status=HouseholdInvitationStatus.expired
+    )
     client = await auth_client(bob)
 
     resp = await client.post(f"/api/v1/invitations/{token}/accept")

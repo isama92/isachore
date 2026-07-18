@@ -101,7 +101,6 @@ export function makeHouseholdInvitation(
     status: 'pending',
     created_at: '2026-07-18T00:00:00Z',
     expires_at: '2026-07-19T00:00:00Z',
-    expired: false,
     ...overrides,
   }
 }

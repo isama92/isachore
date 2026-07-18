@@ -13,14 +13,16 @@ if TYPE_CHECKING:
 
 
 class HouseholdInvitationStatus(StrEnum):
-    """Stored lifecycle of an invitation. "expired" is NOT stored — it's a
-    frontend display state for a `pending` invite whose token has passed
-    `expires_at`. Stored as a plain String (closed set enforced at the schema
-    layer, like UserStatus)."""
+    """Stored lifecycle of an invitation. `expired` is set by the hourly sweep
+    (mark_expired_invitations) once a `pending` invite passes `expires_at`;
+    runtime checks trust `status`, not the date. Stored as a plain String
+    (closed set enforced at the schema layer, like UserStatus), so adding this
+    value stays migration-free."""
 
     pending = "pending"
     accepted = "accepted"
     revoked = "revoked"
+    expired = "expired"
 
 
 class HouseholdInvitation(Base):

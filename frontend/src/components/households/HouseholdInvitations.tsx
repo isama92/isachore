@@ -23,19 +23,11 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 // Kept in sync with MAX_PENDING_INVITATIONS on the backend.
 const MAX_PENDING = 5
 
-type DisplayStatus = 'pending' | 'accepted' | 'revoked' | 'expired'
-
-// A pending invite past its expiry displays as "expired" (a frontend-only
-// state); everything else shows its stored status.
-function displayStatus(invitation: HouseholdInvitation): DisplayStatus {
-  if (invitation.status === 'pending' && invitation.expired) return 'expired'
-  return invitation.status
-}
-
-// A live (non-expired) pending invite is the only revocable/copyable one, and
-// the only kind that counts toward the pending limit.
+// A pending invite is the only revocable/copyable one, and the only kind that
+// counts toward the pending limit. Expiry is a stored status now (the backend
+// sweep flips pending -> expired), so this just reads `status`.
 function isLivePending(invitation: HouseholdInvitation): boolean {
-  return invitation.status === 'pending' && !invitation.expired
+  return invitation.status === 'pending'
 }
 
 // The household owner's invitation manager: mint a single-use link ("Add
@@ -117,7 +109,7 @@ export function HouseholdInvitations({ basePath }: { basePath: string }) {
   }
 
   function statusBadge(invitation: HouseholdInvitation): ReactNode {
-    switch (displayStatus(invitation)) {
+    switch (invitation.status) {
       case 'accepted':
         return (
           <Badge variant="secondary" className="text-primary">
@@ -252,9 +244,9 @@ export function HouseholdInvitations({ basePath }: { basePath: string }) {
             >
               <div className="flex items-center gap-2.5 text-sm">
                 {statusBadge(invitation)}
-                {invitation.status === 'pending' && (
+                {(invitation.status === 'pending' || invitation.status === 'expired') && (
                   <span className="font-medium text-muted-foreground">
-                    {invitation.expired
+                    {invitation.status === 'expired'
                       ? t('households.inviteExpiredAt', {
                           date: formatDateTimeFull(invitation.expires_at),
                         })

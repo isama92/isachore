@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.households import add_to_default_household
+from app.core.invitations import run_expire_invitations
 from app.core.rate_limit import clear_login_throttle
 from app.core.security import hash_password
 from app.db.redis import redis_client
@@ -79,6 +80,13 @@ async def _clear_throttle_main(user_id: int | None) -> None:
     await redis_client.aclose()
 
 
+async def _expire_invitations_main() -> None:
+    """Run the invitation-expiry sweep once (the same job the hourly scheduler
+    runs). Handy for manual runs or an external cron."""
+    count = await run_expire_invitations()
+    print(f"expired {count} invitation{'' if count == 1 else 's'}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m app.cli")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -99,6 +107,11 @@ def main() -> None:
         "user_id", nargs="?", type=int, default=None, help="user id; omit to clear all throttles"
     )
 
+    subparsers.add_parser(
+        "expire-invitations",
+        help="mark stale pending household invitations as expired (the hourly job, run once)",
+    )
+
     args = parser.parse_args()
     if args.command == "init":
         password = args.password or getpass.getpass("Password: ")
@@ -107,6 +120,8 @@ def main() -> None:
         asyncio.run(init_admin(args.email, args.first_name, args.last_name, password))
     elif args.command == "clear-login-throttle":
         asyncio.run(_clear_throttle_main(args.user_id))
+    elif args.command == "expire-invitations":
+        asyncio.run(_expire_invitations_main())
 
 
 if __name__ == "__main__":

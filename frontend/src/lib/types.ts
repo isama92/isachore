@@ -73,15 +73,15 @@ export type Chore = {
 export type HouseholdMember = Pick<User, 'id' | 'first_name' | 'last_name'>
 
 // A household invite link as the owner sees it. `url` is the shareable link;
-// `status` is the stored lifecycle and `expired` (server-computed) marks a
-// pending invite past its expiry — together they drive the row's display + action.
+// `status` is the stored lifecycle (including `expired`, set by the hourly
+// backend sweep) and drives the row's display + action. `expires_at` is kept
+// only for the "expires/expired {when}" label.
 export type HouseholdInvitation = {
   id: number
   url: string
-  status: 'pending' | 'accepted' | 'revoked'
+  status: 'pending' | 'accepted' | 'revoked' | 'expired'
   created_at: string
   expires_at: string
-  expired: boolean
 }
 
 // Public info shown on the accept page.

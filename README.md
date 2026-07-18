@@ -149,14 +149,13 @@ The app is organised into four areas (context for future work):
 - **Chores management**: manage the household's chores.
 - **Tags management**: create, edit and delete tags.
 
-- [ ] revoke expired invitations with a scheduled job, have expired as a real status in the db and clean up the code that uses the expiration date to check if invitation is valid (both backend and frontend)
-- [ ] if a user have multiple households, then it can clone chores from one household to the other one
+- [ ] in the chores table add clone button, it will open the chores creation page prefilled
 - [ ] Due views: what is **overdue**, what has to be done **today**, what is due **in a few days**
-- [ ] chores changes log (see who changed the chores)
 - [ ] Mark chore as done / completion history
-- [ ] API keys for mobile / 3rd-party clients (reuse `auth_tokens` via `Authorization: Bearer`)
 - [ ] CI (lint + test on push)
 - [ ] Prod deploy hardening (TLS, real secrets management, DB backups)
-- [x] login remember me button
+- [ ] API keys for mobile / 3rd-party clients (reuse `auth_tokens` via `Authorization: Bearer`)
+- [ ] API docs
+- [ ] chores changes log (see who changed the chores)
 
 Design mockups live in `../isachore-design/` (login = variant 1a).

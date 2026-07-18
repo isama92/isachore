@@ -17,6 +17,7 @@ from app.core.households import (
     member_count_column,
     member_of,
 )
+from app.core.invitations import round_up_to_hour
 from app.core.security import INVITATION_TOKEN_TTL, generate_token
 from app.models import (
     Household,
@@ -41,8 +42,8 @@ HouseholdSortBy = Literal["id", "name", "created_at"]
 MemberSortBy = Literal["id", "name"]
 SortDir = Literal["asc", "desc"]
 
-# The most outstanding (live, non-expired, un-accepted) invitations a household
-# may have at once; the owner must revoke one (or have someone accept) to add more.
+# The most outstanding (pending) invitations a household may have at once; the
+# owner must revoke one (or have someone accept) to add more.
 MAX_PENDING_INVITATIONS = 5
 
 
@@ -366,13 +367,11 @@ def _invitation_url(token: str) -> str:
 
 
 def _is_live_pending(invitation: HouseholdInvitation) -> bool:
-    """A pending invite whose link still works (not yet expired). The only state
-    that is revocable (and the only one that counts toward the limit); every
-    other state (accepted / revoked / expired) is deletable instead."""
-    return (
-        invitation.status == HouseholdInvitationStatus.pending
-        and invitation.expires_at > datetime.now(UTC)
-    )
+    """A pending invite: the only revocable state (and the only one that counts
+    toward the limit); every other state (accepted / revoked / expired) is
+    deletable instead. Expiry is a stored status (flipped by the hourly sweep),
+    so this trusts `status` rather than re-checking `expires_at`."""
+    return invitation.status == HouseholdInvitationStatus.pending
 
 
 def _invitation_read(invitation: HouseholdInvitation) -> HouseholdInvitationRead:
@@ -382,7 +381,6 @@ def _invitation_read(invitation: HouseholdInvitation) -> HouseholdInvitationRead
         status=HouseholdInvitationStatus(invitation.status),
         created_at=invitation.created_at,
         expires_at=invitation.expires_at,
-        expired=invitation.expires_at <= datetime.now(UTC),
     )
 
 
@@ -411,14 +409,15 @@ async def create_invitation(
     household_id: int, user: CurrentUser, session: SessionDep
 ) -> HouseholdInvitationRead:
     await _get_owned_household(session, user.id, household_id)
-    # Cap outstanding invites: only live (non-expired) pending ones count.
+    # Cap outstanding invites: only pending ones count (expired/accepted/revoked
+    # don't). The hourly sweep keeps `status` current, so a stale pending row
+    # only lingers in the count for up to the sweep interval.
     live_pending = await session.scalar(
         select(func.count())
         .select_from(HouseholdInvitation)
         .where(
             HouseholdInvitation.household_id == household_id,
             HouseholdInvitation.status == HouseholdInvitationStatus.pending,
-            HouseholdInvitation.expires_at > datetime.now(UTC),
         )
     )
     if (live_pending or 0) >= MAX_PENDING_INVITATIONS:
@@ -432,7 +431,9 @@ async def create_invitation(
         token=generate_token(),
         household_id=household_id,
         invited_by=user.id,
-        expires_at=datetime.now(UTC) + INVITATION_TOKEN_TTL,
+        # Round the expiry up to the next whole hour so the sweep's :00 cadence
+        # lands cleanly on it (lifetime is the TTL, at most an hour more).
+        expires_at=round_up_to_hour(datetime.now(UTC) + INVITATION_TOKEN_TTL),
     )
     session.add(invitation)
     await session.commit()

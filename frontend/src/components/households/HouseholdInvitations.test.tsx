@@ -39,8 +39,8 @@ describe('HouseholdInvitations', () => {
   it('shows Copy + Revoke for pending and only Delete for expired', async () => {
     stubFetch({
       invitations: [
-        makeHouseholdInvitation({ id: 1, expired: false }),
-        makeHouseholdInvitation({ id: 2, expired: true }),
+        makeHouseholdInvitation({ id: 1, status: 'pending' }),
+        makeHouseholdInvitation({ id: 2, status: 'expired' }),
       ],
     })
     renderWithProviders(<HouseholdInvitations basePath={BASE} />)
@@ -58,7 +58,7 @@ describe('HouseholdInvitations', () => {
       invitations: [],
       mutate: (method) =>
         method === 'POST'
-          ? jsonBody(makeHouseholdInvitation({ id: 9, expired: false }), 201)
+          ? jsonBody(makeHouseholdInvitation({ id: 9, status: 'pending' }), 201)
           : jsonBody(undefined, 204),
     })
     renderWithProviders(<HouseholdInvitations basePath={BASE} />)
@@ -79,7 +79,7 @@ describe('HouseholdInvitations', () => {
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
     stubFetch({
       invitations: [
-        makeHouseholdInvitation({ id: 1, url: 'http://host/invite?token=abc', expired: false }),
+        makeHouseholdInvitation({ id: 1, url: 'http://host/invite?token=abc', status: 'pending' }),
       ],
     })
     renderWithProviders(<HouseholdInvitations basePath={BASE} />)
@@ -107,11 +107,11 @@ describe('HouseholdInvitations', () => {
   it('revokes a pending invitation, which becomes Revoked (kept, deletable)', async () => {
     let revoked = ''
     stubFetch({
-      invitations: [makeHouseholdInvitation({ id: 3, status: 'pending', expired: false })],
+      invitations: [makeHouseholdInvitation({ id: 3, status: 'pending' })],
       mutate: (method, url) => {
         if (method === 'POST' && url.includes('/revoke')) {
           revoked = url
-          return jsonBody(makeHouseholdInvitation({ id: 3, status: 'revoked', expired: false }))
+          return jsonBody(makeHouseholdInvitation({ id: 3, status: 'revoked' }))
         }
         return jsonBody(undefined, 204)
       },
@@ -131,13 +131,13 @@ describe('HouseholdInvitations', () => {
 
   it('disables Add member at 5 live-pending and re-enables after a revoke', async () => {
     const five = Array.from({ length: 5 }, (_, i) =>
-      makeHouseholdInvitation({ id: i + 1, status: 'pending', expired: false }),
+      makeHouseholdInvitation({ id: i + 1, status: 'pending' }),
     )
     stubFetch({
       invitations: five,
       mutate: (method, url) =>
         method === 'POST' && url.includes('/revoke')
-          ? jsonBody(makeHouseholdInvitation({ id: 1, status: 'revoked', expired: false }))
+          ? jsonBody(makeHouseholdInvitation({ id: 1, status: 'revoked' }))
           : jsonBody(undefined, 204),
     })
     renderWithProviders(<HouseholdInvitations basePath={BASE} />)
@@ -159,7 +159,7 @@ describe('HouseholdInvitations', () => {
   it('deletes an expired invitation', async () => {
     let deleted = ''
     stubFetch({
-      invitations: [makeHouseholdInvitation({ id: 4, expired: true })],
+      invitations: [makeHouseholdInvitation({ id: 4, status: 'expired' })],
       mutate: (method, url) => {
         if (method === 'DELETE') deleted = url
         return jsonBody(undefined, 204)

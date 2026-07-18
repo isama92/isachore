@@ -38,15 +38,15 @@ class HouseholdListRead(BaseModel):
 
 class HouseholdInvitationRead(BaseModel):
     """An invitation as the owner sees it in the list. `url` is the shareable
-    link; `expired` is server-computed (a `pending` invite past `expires_at`) so
-    the UI can render the display state and gate the row's action."""
+    link; `status` carries the full lifecycle including `expired` (set by the
+    hourly sweep), which the UI uses for the display state and the row's action.
+    `expires_at` is kept only for the "expires/expired {when}" label."""
 
     id: int
     url: str
     status: HouseholdInvitationStatus
     created_at: datetime
     expires_at: datetime
-    expired: bool
 
 
 class HouseholdInvitationInfo(BaseModel):

@@ -1,5 +1,3 @@
-from datetime import UTC, datetime
-
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
@@ -19,10 +17,12 @@ _invalid_token_exc = HTTPException(
 
 
 async def _resolve_token(session: SessionDep, token: str) -> HouseholdInvitation | None:
-    """A live, still-pending invitation for an active household, with household +
+    """A still-pending invitation for an active household, with household +
     inviter eager-loaded (async has no lazy loading). Accepted, revoked, and
     expired invites all resolve to None -> the same opaque 404, which also keeps
-    the link single-use (an accepted invite can't be redeemed again)."""
+    the link single-use (an accepted invite can't be redeemed again). Expiry is
+    a stored status (the hourly sweep flips pending -> expired), so this trusts
+    `status` rather than re-checking `expires_at`."""
     result = await session.execute(
         select(HouseholdInvitation)
         .options(
@@ -32,7 +32,6 @@ async def _resolve_token(session: SessionDep, token: str) -> HouseholdInvitation
         .where(
             HouseholdInvitation.token == token,
             HouseholdInvitation.status == HouseholdInvitationStatus.pending,
-            HouseholdInvitation.expires_at > datetime.now(UTC),
         )
     )
     invitation = result.scalar_one_or_none()
