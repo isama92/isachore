@@ -79,6 +79,24 @@ async def test_list_households_counts_members_and_chores(
     assert row["deleted_at"] is None
 
 
+async def test_list_households_chore_count_excludes_soft_deleted(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    alice = await make_user(email="alice@example.com")
+    household = await make_household(name="Flat 3B", members=[alice])
+    await make_chore(household=household, title="Dishes")
+    doomed = await make_chore(household=household, title="Bins")
+    client = await auth_client(alice)
+
+    await client.delete(f"/api/v1/chores/{doomed.id}")
+
+    resp = await client.get("/api/v1/households")
+    assert resp.json()["items"][0]["chore_count"] == 1
+
+
 async def test_list_households_pagination(
     make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
 ) -> None:

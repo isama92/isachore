@@ -27,7 +27,7 @@
     "nav": "Main navigation",
     "home": "Home",
     "households": "Households",
-    "chores": "Chores Management",
+    "chores": "Chores",
     "profile": "Profile",
     "admin": "Admin",
     "users": "Users",
@@ -53,6 +53,7 @@
   "chores": {
     "title": "Chores",
     "new": "New chore",
+    "edit": "Edit",
     "loadError": "Failed to load chores",
     "deleted": "Chore deleted",
     "deleteError": "Delete failed",
@@ -62,27 +63,34 @@
     "noTags": "None",
     "delete": "Delete",
     "deleteConfirm": "Delete “{{title}}”?",
-    "deleteConfirmBody": "This chore will be permanently removed. This cannot be undone.",
+    "deleteConfirmBody": "This chore will be removed. This cannot be undone.",
     "deleteConfirmAction": "Delete chore",
     "headers": {
       "title": "Title",
+      "household": "Household",
       "assignees": "Assignees",
       "repeats": "Repeats",
       "assignment": "Assignment",
       "tags": "Tags",
       "start": "Start",
       "actions": "Actions"
+    },
+    "filters": {
+      "householdLabel": "Household",
+      "householdAll": "All households"
     }
   },
   "choreCreate": {
     "title": "New chore",
     "loadError": "Failed to load the form",
+    "noHouseholds": "You need a household before you can add a chore.",
     "created": "Chore created",
     "createError": "Could not create the chore",
+    "household": "Household",
     "titleLabel": "Title",
     "titlePlaceholder": "Clean the bathroom",
-    "notes": "Notes",
-    "notesPlaceholder": "Scrub the tub, replace the towels…",
+    "description": "Description",
+    "descriptionPlaceholder": "Scrub the tub, replace the towels…",
     "assignees": "Assignees",
     "noMembers": "No household members yet.",
     "assignment": "Assignment",
@@ -91,6 +99,14 @@
     "tags": "Tags",
     "noTags": "No tags yet.",
     "submit": "Add chore"
+  },
+  "choreEdit": {
+    "title": "Edit chore",
+    "loadError": "Failed to load the chore",
+    "notFound": "This chore could not be found.",
+    "updated": "Chore updated",
+    "updateError": "Could not update the chore",
+    "submit": "Save changes"
   },
   "households": {
     "loadError": "Failed to load households",

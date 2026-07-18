@@ -3,33 +3,84 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import Chores from './Chores'
-import { jsonResponse, mockFetch, renderWithProviders } from '../test/utils'
-import { makeChore, makeTag, makeUser } from '../test/fixtures'
+import { renderWithProviders } from '../test/utils'
+import { makeChore, makeHousehold, makeTag, makeUser } from '../test/fixtures'
+import type { Chore, Household } from '../lib/types'
 
 const me = makeUser({ id: 1, first_name: 'Alex', last_name: 'Kim' })
 
+type FetchMock = ReturnType<typeof vi.fn>
+
+function jsonBody(data: unknown, status = 200): Response {
+  return {
+    ok: status < 400,
+    status,
+    statusText: `HTTP ${status}`,
+    json: async () => data,
+  } as Response
+}
+
+function stubFetch(opts: {
+  chores: Chore[]
+  households?: Household[]
+  mutate?: (method: string, url: string) => Response
+}): FetchMock {
+  const households = opts.households ?? [makeHousehold({ id: 1, name: 'Test Household' })]
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    const path = url.split('?')[0]
+    const method = (init?.method ?? 'GET').toUpperCase()
+    if (method === 'GET' && path.endsWith('/api/v1/households')) {
+      return jsonBody({ items: households, total: households.length, page: 1, page_size: 100 })
+    }
+    if (method === 'GET' && path.endsWith('/api/v1/chores')) {
+      return jsonBody({ items: opts.chores, total: opts.chores.length, page: 1, page_size: 20 })
+    }
+    if (method !== 'GET' && opts.mutate) return opts.mutate(method, url)
+    return jsonBody(undefined, 204)
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
+function lastChoresGet(fetchMock: FetchMock): string {
+  const calls = fetchMock.mock.calls.filter(
+    ([url, init]) =>
+      (init?.method ?? 'GET').toUpperCase() === 'GET' &&
+      String(url).split('?')[0].endsWith('/api/v1/chores'),
+  )
+  return String(calls.at(-1)?.[0] ?? '')
+}
+
 describe('Chores', () => {
-  it('lists chores with assignees, tags and labels', async () => {
+  it('lists chores with household, assignee count, tags and labels', async () => {
     const chore = makeChore({
       id: 7,
       title: 'Scrub the tub',
-      assignees: [makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' })],
+      household: { id: 4, name: 'Beach House' },
+      assignees: [
+        makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' }),
+        makeUser({ id: 3, first_name: 'Sam', last_name: 'Lee' }),
+      ],
       tags: [makeTag({ id: 3, name: 'deep-clean', color: '#0d9488' })],
       repeats: 'daily',
       assignment_type: 'least_done',
     })
-    mockFetch([{ path: '/api/v1/chores', method: 'GET', body: [chore] }])
+    stubFetch({ chores: [chore] })
     renderWithProviders(<Chores />, { authValue: { user: me } })
 
-    expect(await screen.findByText('Scrub the tub')).toBeInTheDocument()
-    expect(screen.getByText('Jo Ng')).toBeInTheDocument()
-    expect(screen.getByText('deep-clean')).toBeInTheDocument()
-    expect(screen.getByText('Daily')).toBeInTheDocument()
-    expect(screen.getByText('Least done')).toBeInTheDocument()
+    const row = (await screen.findByText('Scrub the tub')).closest('tr')!
+    expect(within(row).getByText('Beach House')).toBeInTheDocument()
+    // Assignees are shown as a count, not by name.
+    expect(within(row).getByText('2')).toBeInTheDocument()
+    expect(within(row).queryByText('Jo Ng')).not.toBeInTheDocument()
+    expect(within(row).getByText('deep-clean')).toBeInTheDocument()
+    expect(within(row).getByText('Daily')).toBeInTheDocument()
+    expect(within(row).getByText('Least done')).toBeInTheDocument()
   })
 
   it('shows placeholders for an unassigned, untagged chore', async () => {
-    mockFetch([{ path: '/api/v1/chores', method: 'GET', body: [makeChore({ title: 'Lonely' })] }])
+    stubFetch({ chores: [makeChore({ title: 'Lonely' })] })
     renderWithProviders(<Chores />, { authValue: { user: me } })
 
     expect(await screen.findByText('Lonely')).toBeInTheDocument()
@@ -38,68 +89,103 @@ describe('Chores', () => {
   })
 
   it('shows an empty state when there are no chores', async () => {
-    mockFetch([{ path: '/api/v1/chores', method: 'GET', body: [] }])
+    stubFetch({ chores: [] })
     renderWithProviders(<Chores />, { authValue: { user: me } })
 
     expect(await screen.findByText('No chores yet.')).toBeInTheDocument()
   })
 
-  it('deletes a chore after confirming in the dialog and reloads', async () => {
+  it('links each row to its edit page', async () => {
+    stubFetch({ chores: [makeChore({ id: 7, title: 'Scrub the tub' })] })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+
+    await screen.findByText('Scrub the tub')
+    expect(screen.getByRole('link', { name: 'Edit' })).toHaveAttribute('href', '/chores/7/edit')
+  })
+
+  it('shows a household filter and pushes the choice into the query', async () => {
+    const fetchMock = stubFetch({
+      chores: [makeChore({ id: 7, title: 'Scrub the tub' })],
+      households: [
+        makeHousehold({ id: 1, name: 'Flat 3B' }),
+        makeHousehold({ id: 2, name: 'Beach House' }),
+      ],
+    })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    await screen.findByText('Scrub the tub')
+    await user.click(await screen.findByRole('combobox', { name: 'Household' }))
+    await user.click(await screen.findByRole('option', { name: 'Beach House' }))
+
+    await waitFor(() => expect(lastChoresGet(fetchMock)).toContain('household_id=2'))
+  })
+
+  it('hides the household filter when the user has a single household', async () => {
+    stubFetch({
+      chores: [makeChore({ title: 'Scrub the tub' })],
+      households: [makeHousehold({ id: 1, name: 'Flat 3B' })],
+    })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+
+    await screen.findByText('Scrub the tub')
+    expect(screen.queryByRole('combobox', { name: 'Household' })).not.toBeInTheDocument()
+  })
+
+  it('soft-deletes a chore after confirming in the dialog and reloads', async () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     const toastSpy = vi.spyOn(toast, 'success')
-    let deleted = false
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = input.toString()
-      const method = (init?.method ?? 'GET').toUpperCase()
-      if (url.endsWith('/api/v1/chores/7') && method === 'DELETE') {
-        deleted = true
-        return jsonResponse(204, undefined)
-      }
-      return jsonResponse(200, deleted ? [] : [makeChore({ id: 7, title: 'Scrub the tub' })])
+    let deleted = ''
+    const fetchMock = stubFetch({
+      chores: [makeChore({ id: 7, title: 'Scrub the tub' })],
+      mutate: (method, url) => {
+        if (method === 'DELETE') deleted = url
+        return jsonBody(undefined, 204)
+      },
     })
-    vi.stubGlobal('fetch', fetchMock)
-
     renderWithProviders(<Chores />, { authValue: { user: me } })
-    await user.click(await screen.findByRole('button', { name: 'Delete' }))
+
+    const row = (await screen.findByText('Scrub the tub')).closest('tr')!
+    await user.click(within(row).getByRole('button', { name: 'Delete' }))
     await user.click(
       within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete chore' }),
     )
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/api/v1/chores/7',
-        expect.objectContaining({ method: 'DELETE' }),
-      ),
-    )
-    expect(await screen.findByText('No chores yet.')).toBeInTheDocument()
+    await waitFor(() => expect(deleted).toContain('/api/v1/chores/7'))
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(true)
     expect(toastSpy).toHaveBeenCalledWith('Chore deleted')
   })
 
   it('does not delete when the dialog is cancelled', async () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
-    const fetchMock = mockFetch([
-      {
-        path: '/api/v1/chores',
-        method: 'GET',
-        body: [makeChore({ id: 7, title: 'Scrub the tub' })],
-      },
-    ])
+    const fetchMock = stubFetch({ chores: [makeChore({ id: 7, title: 'Scrub the tub' })] })
     renderWithProviders(<Chores />, { authValue: { user: me } })
-    await user.click(await screen.findByRole('button', { name: 'Delete' }))
+
+    const row = (await screen.findByText('Scrub the tub')).closest('tr')!
+    await user.click(within(row).getByRole('button', { name: 'Delete' }))
     await user.click(
       within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Cancel' }),
     )
 
-    expect(fetchMock).not.toHaveBeenCalledWith(
-      '/api/v1/chores/7',
-      expect.objectContaining({ method: 'DELETE' }),
-    )
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false)
+  })
+
+  it('does not use the word "permanently" in the delete dialog', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    stubFetch({ chores: [makeChore({ id: 7, title: 'Scrub the tub' })] })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+
+    const row = (await screen.findByText('Scrub the tub')).closest('tr')!
+    await user.click(within(row).getByRole('button', { name: 'Delete' }))
+    const dialog = within(await screen.findByRole('alertdialog'))
+    expect(dialog.queryByText(/permanently/i)).not.toBeInTheDocument()
   })
 
   it('shows an error when loading fails', async () => {
-    mockFetch([{ path: '/api/v1/chores', method: 'GET', status: 500, body: { detail: 'boom' } }])
+    const fetchMock = vi.fn(async () => jsonBody({ detail: 'boom' }, 500))
+    vi.stubGlobal('fetch', fetchMock)
     renderWithProviders(<Chores />, { authValue: { user: me } })
 
-    expect(await screen.findByText('boom')).toBeInTheDocument()
+    expect(await screen.findByText('Failed to load chores')).toBeInTheDocument()
   })
 })

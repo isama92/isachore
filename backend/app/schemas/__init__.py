@@ -1,4 +1,4 @@
-from app.schemas.chore import ChoreCreate, ChoreRead
+from app.schemas.chore import ChoreCreate, ChoreRead, ChoreUpdate
 from app.schemas.household import (
     HouseholdCreate,
     HouseholdInvitationInfo,
@@ -24,6 +24,7 @@ from app.schemas.user import (
 __all__ = [
     "ChoreCreate",
     "ChoreRead",
+    "ChoreUpdate",
     "ConfirmRequest",
     "ConfirmTokenInfo",
     "HouseholdCreate",

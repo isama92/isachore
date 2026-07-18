@@ -39,10 +39,7 @@ describe('AppSidebar', () => {
     renderSidebar({ user: makeUser() })
     expect(screen.getByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('href', '/')
-    expect(screen.getByRole('link', { name: 'Chores Management' })).toHaveAttribute(
-      'href',
-      '/chores',
-    )
+    expect(screen.getByRole('link', { name: 'Chores' })).toHaveAttribute('href', '/chores')
     expect(screen.getByRole('link', { name: 'Profile' })).toHaveAttribute('href', '/profile')
   })
 
@@ -76,19 +73,13 @@ describe('AppSidebar', () => {
 
   it('marks the active section from the current route', () => {
     renderSidebar({ user: makeUser() }, '/chores')
-    expect(screen.getByRole('link', { name: 'Chores Management' })).toHaveAttribute(
-      'data-active',
-      'true',
-    )
+    expect(screen.getByRole('link', { name: 'Chores' })).toHaveAttribute('data-active', 'true')
     expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('data-active', 'false')
   })
 
   it('keeps the Chores section active on its nested routes', () => {
     renderSidebar({ user: makeUser() }, '/chores/new')
-    expect(screen.getByRole('link', { name: 'Chores Management' })).toHaveAttribute(
-      'data-active',
-      'true',
-    )
+    expect(screen.getByRole('link', { name: 'Chores' })).toHaveAttribute('data-active', 'true')
   })
 
   it('logs out when the Log out button is clicked', async () => {

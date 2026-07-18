@@ -8,6 +8,7 @@ import ServerSettings from './pages/admin/ServerSettings'
 import Users from './pages/admin/Users'
 import AcceptInvite from './pages/AcceptInvite'
 import ChoreCreate from './pages/ChoreCreate'
+import ChoreEdit from './pages/ChoreEdit'
 import Chores from './pages/Chores'
 import ConfirmAccount from './pages/ConfirmAccount'
 import Home from './pages/Home'
@@ -28,6 +29,7 @@ export default function App() {
         <Route path="/profile" element={<Profile />} />
         <Route path="/chores" element={<Chores />} />
         <Route path="/chores/new" element={<ChoreCreate />} />
+        <Route path="/chores/:id/edit" element={<ChoreEdit />} />
         <Route path="/households" element={<Households />} />
         <Route path="/households/new" element={<HouseholdCreate />} />
         <Route path="/households/:id/edit" element={<HouseholdEdit />} />

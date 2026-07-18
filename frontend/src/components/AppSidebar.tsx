@@ -57,7 +57,7 @@ export default function AppSidebar() {
   const adminActive = pathname.startsWith('/admin')
 
   // Home is exact; other sections also match their nested routes (e.g.
-  // /chores/new keeps "Chores Management" active).
+  // /chores/new keeps "Chores" active).
   const isActive = (to: string) =>
     to === '/' ? pathname === '/' : pathname === to || pathname.startsWith(`${to}/`)
 

@@ -59,6 +59,9 @@ class Chore(Base):
     assignment_type: Mapped[AssignmentType] = mapped_column(
         SAEnum(AssignmentType, name="assignment_type")
     )
+    # Soft delete: NULL means active, a timestamp means the chore is deleted and
+    # hidden from the list (mirrors households; recoverable only via the DB).
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

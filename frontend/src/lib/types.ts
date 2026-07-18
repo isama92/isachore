@@ -62,6 +62,9 @@ export type Chore = {
   repeats: RepeatPeriod
   assignment_type: AssignmentType
   created_at: string
+  // The household the chore belongs to (fixed at creation). Drives the list's
+  // household column/filter and the edit form's read-only household.
+  household: { id: number; name: string }
   assignees: User[]
   tags: Tag[]
 }

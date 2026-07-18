@@ -39,11 +39,11 @@ def member_count_column() -> ColumnElement[int]:
 
 
 def chore_count_column() -> ColumnElement[int]:
-    """Correlated subquery counting every chore in a household."""
+    """Correlated subquery counting a household's active (non-deleted) chores."""
     return (
         select(func.count())
         .select_from(Chore)
-        .where(Chore.household_id == Household.id)
+        .where(Chore.household_id == Household.id, Chore.deleted_at.is_(None))
         .correlate(Household)
         .scalar_subquery()
     )
@@ -54,6 +54,23 @@ def member_of(user_id: int) -> ColumnElement[bool]:
     return Household.id.in_(
         select(household_members.c.household_id).where(household_members.c.user_id == user_id)
     )
+
+
+async def get_member_household(
+    session: AsyncSession, user_id: int, household_id: int
+) -> Household | None:
+    """The active (non-deleted) household with this id that the user belongs to,
+    or None. Used to scope chore/tag operations to a household the caller chose."""
+    result = await session.execute(
+        select(Household)
+        .join(household_members, household_members.c.household_id == Household.id)
+        .where(
+            Household.id == household_id,
+            Household.deleted_at.is_(None),
+            household_members.c.user_id == user_id,
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 async def is_active_member(session: AsyncSession, household_id: int, user_id: int) -> bool:

@@ -27,7 +27,7 @@
     "nav": "Navigazione principale",
     "home": "Home",
     "households": "Nuclei domestici",
-    "chores": "Gestione faccende",
+    "chores": "Faccende",
     "profile": "Profilo",
     "admin": "Admin",
     "users": "Utenti",
@@ -53,6 +53,7 @@
   "chores": {
     "title": "Faccende",
     "new": "Nuova faccenda",
+    "edit": "Modifica",
     "loadError": "Impossibile caricare le faccende",
     "deleted": "Faccenda eliminata",
     "deleteError": "Eliminazione non riuscita",
@@ -62,27 +63,34 @@
     "noTags": "Nessuna",
     "delete": "Elimina",
     "deleteConfirm": "Eliminare “{{title}}”?",
-    "deleteConfirmBody": "Questa faccenda verrà rimossa definitivamente. L'operazione non può essere annullata.",
+    "deleteConfirmBody": "Questa faccenda verrà rimossa. L'operazione non può essere annullata.",
     "deleteConfirmAction": "Elimina faccenda",
     "headers": {
       "title": "Titolo",
+      "household": "Nucleo domestico",
       "assignees": "Assegnatari",
       "repeats": "Ripetizione",
       "assignment": "Assegnazione",
       "tags": "Etichette",
       "start": "Inizio",
       "actions": "Azioni"
+    },
+    "filters": {
+      "householdLabel": "Nucleo domestico",
+      "householdAll": "Tutti i nuclei domestici"
     }
   },
   "choreCreate": {
     "title": "Nuova faccenda",
     "loadError": "Impossibile caricare il modulo",
+    "noHouseholds": "Ti serve un nucleo domestico prima di poter aggiungere una faccenda.",
     "created": "Faccenda creata",
     "createError": "Impossibile creare la faccenda",
+    "household": "Nucleo domestico",
     "titleLabel": "Titolo",
     "titlePlaceholder": "Pulire il bagno",
-    "notes": "Note",
-    "notesPlaceholder": "Strofina la vasca, cambia gli asciugamani…",
+    "description": "Descrizione",
+    "descriptionPlaceholder": "Strofina la vasca, cambia gli asciugamani…",
     "assignees": "Assegnatari",
     "noMembers": "Ancora nessun membro del nucleo domestico.",
     "assignment": "Assegnazione",
@@ -91,6 +99,14 @@
     "tags": "Etichette",
     "noTags": "Ancora nessuna etichetta.",
     "submit": "Aggiungi faccenda"
+  },
+  "choreEdit": {
+    "title": "Modifica faccenda",
+    "loadError": "Impossibile caricare la faccenda",
+    "notFound": "Impossibile trovare questa faccenda.",
+    "updated": "Faccenda aggiornata",
+    "updateError": "Impossibile aggiornare la faccenda",
+    "submit": "Salva modifiche"
   },
   "households": {
     "loadError": "Impossibile caricare i nuclei domestici",

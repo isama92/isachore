@@ -63,6 +63,7 @@ export function makeChore(overrides: Partial<Chore> = {}): Chore {
     repeats: 'weekly',
     assignment_type: 'manual',
     created_at: '2026-07-01T00:00:00Z',
+    household: { id: 1, name: 'Test Household' },
     assignees: [],
     tags: [],
     ...overrides,
