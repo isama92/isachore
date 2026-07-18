@@ -9,7 +9,7 @@ from app.schemas.household import (
 )
 from app.schemas.pagination import Page
 from app.schemas.server_settings import ServerSettingsRead, ServerSettingsUpdate
-from app.schemas.tag import TagRead
+from app.schemas.tag import TagCreate, TagRead, TagUpdate
 from app.schemas.user import (
     ConfirmRequest,
     ConfirmTokenInfo,
@@ -39,7 +39,9 @@ __all__ = [
     "ProfileUpdate",
     "ServerSettingsRead",
     "ServerSettingsUpdate",
+    "TagCreate",
     "TagRead",
+    "TagUpdate",
     "UserCreate",
     "UserRead",
     "UserUpdate",

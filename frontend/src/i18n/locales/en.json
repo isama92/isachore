@@ -28,6 +28,7 @@
     "home": "Home",
     "households": "Households",
     "chores": "Chores",
+    "tags": "Tags",
     "profile": "Profile",
     "admin": "Admin",
     "users": "Users",
@@ -200,6 +201,47 @@
       "statusLabel": "Status",
       "statusAll": "All"
     }
+  },
+  "tags": {
+    "title": "Tags",
+    "new": "New tag",
+    "edit": "Edit",
+    "loadError": "Failed to load tags",
+    "deleted": "Tag deleted",
+    "deleteError": "Delete failed",
+    "empty": "No tags yet.",
+    "noHouseholds": "You need a household before you can add tags.",
+    "delete": "Delete",
+    "deleteConfirm": "Delete “{{name}}”?",
+    "deleteConfirmBody": "This tag will be removed and detached from any chores using it. This cannot be undone.",
+    "deleteConfirmAction": "Delete tag",
+    "headers": {
+      "name": "Name",
+      "actions": "Actions"
+    },
+    "filters": {
+      "householdLabel": "Household"
+    }
+  },
+  "tagCreate": {
+    "title": "New tag",
+    "loadError": "Failed to load the form",
+    "noHouseholds": "You need a household before you can add a tag.",
+    "created": "Tag created",
+    "createError": "Could not create the tag",
+    "household": "Household",
+    "nameLabel": "Name",
+    "namePlaceholder": "e.g. deep-clean",
+    "colorLabel": "Colour",
+    "submit": "Add tag"
+  },
+  "tagEdit": {
+    "title": "Edit tag",
+    "loadError": "Failed to load the tag",
+    "notFound": "This tag could not be found.",
+    "updated": "Tag updated",
+    "updateError": "Could not update the tag",
+    "submit": "Save changes"
   },
   "profile": {
     "heading": "Your profile",

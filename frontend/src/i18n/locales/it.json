@@ -28,6 +28,7 @@
     "home": "Home",
     "households": "Nuclei domestici",
     "chores": "Faccende",
+    "tags": "Etichette",
     "profile": "Profilo",
     "admin": "Admin",
     "users": "Utenti",
@@ -200,6 +201,47 @@
       "statusLabel": "Stato",
       "statusAll": "Tutte"
     }
+  },
+  "tags": {
+    "title": "Etichette",
+    "new": "Nuova etichetta",
+    "edit": "Modifica",
+    "loadError": "Impossibile caricare le etichette",
+    "deleted": "Etichetta eliminata",
+    "deleteError": "Eliminazione non riuscita",
+    "empty": "Ancora nessuna etichetta.",
+    "noHouseholds": "Ti serve un nucleo domestico prima di poter aggiungere etichette.",
+    "delete": "Elimina",
+    "deleteConfirm": "Eliminare “{{name}}”?",
+    "deleteConfirmBody": "Questa etichetta verrà rimossa e staccata da tutte le faccende che la usano. L'operazione non può essere annullata.",
+    "deleteConfirmAction": "Elimina etichetta",
+    "headers": {
+      "name": "Nome",
+      "actions": "Azioni"
+    },
+    "filters": {
+      "householdLabel": "Nucleo domestico"
+    }
+  },
+  "tagCreate": {
+    "title": "Nuova etichetta",
+    "loadError": "Impossibile caricare il modulo",
+    "noHouseholds": "Ti serve un nucleo domestico prima di poter aggiungere un'etichetta.",
+    "created": "Etichetta creata",
+    "createError": "Impossibile creare l'etichetta",
+    "household": "Nucleo domestico",
+    "nameLabel": "Nome",
+    "namePlaceholder": "es. pulizie-profonde",
+    "colorLabel": "Colore",
+    "submit": "Aggiungi etichetta"
+  },
+  "tagEdit": {
+    "title": "Modifica etichetta",
+    "loadError": "Impossibile caricare l'etichetta",
+    "notFound": "Impossibile trovare questa etichetta.",
+    "updated": "Etichetta aggiornata",
+    "updateError": "Impossibile aggiornare l'etichetta",
+    "submit": "Salva modifiche"
   },
   "profile": {
     "heading": "Il tuo profilo",

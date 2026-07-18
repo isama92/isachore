@@ -9,6 +9,7 @@ import {
   LogOut,
   Settings,
   Shield,
+  Tag as TagIcon,
   Users,
 } from 'lucide-react'
 import { useAuth } from '../auth/useAuth'
@@ -44,6 +45,7 @@ export default function AppSidebar() {
     { to: '/', icon: Home, label: t('sidebar.home') },
     { to: '/households', icon: House, label: t('sidebar.households') },
     { to: '/chores', icon: ClipboardList, label: t('sidebar.chores') },
+    { to: '/tags', icon: TagIcon, label: t('sidebar.tags') },
     { to: '/profile', icon: CircleUser, label: t('sidebar.profile') },
   ]
 

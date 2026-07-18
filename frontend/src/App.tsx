@@ -19,6 +19,9 @@ import HouseholdEdit from './pages/HouseholdEdit'
 import Households from './pages/Households'
 import Login from './pages/Login'
 import Profile from './pages/Profile'
+import TagCreate from './pages/TagCreate'
+import TagEdit from './pages/TagEdit'
+import Tags from './pages/Tags'
 
 export default function App() {
   return (
@@ -35,6 +38,9 @@ export default function App() {
         <Route path="/households" element={<Households />} />
         <Route path="/households/new" element={<HouseholdCreate />} />
         <Route path="/households/:id/edit" element={<HouseholdEdit />} />
+        <Route path="/tags" element={<Tags />} />
+        <Route path="/tags/new" element={<TagCreate />} />
+        <Route path="/tags/:id/edit" element={<TagEdit />} />
         <Route element={<RequireAdmin />}>
           <Route path="/admin/users" element={<Users />} />
           <Route path="/admin/users/new" element={<UserCreate />} />
