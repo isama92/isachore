@@ -217,114 +217,20 @@ describe('Users', () => {
     await waitFor(() => expect(lastUsersGet(fetchMock)).toContain('page=2'))
   })
 
-  it('creates a user with a password when confirmation is off', async () => {
-    const fetchMock = stubFetch({
-      users: [me],
-      settings: makeServerSettings({ require_confirmation: false }),
-      mutate: () => jsonBody(makeUser({ id: 3 }), 201),
-    })
-    const user = userEvent.setup({ pointerEventsCheck: 0 })
-    const toastSpy = vi.spyOn(toast, 'success')
-    renderWithProviders(<Users />, { authValue: { user: me } })
-    await screen.findByText('Admin User')
-
-    await user.click(screen.getByRole('button', { name: 'Add user' }))
-    await user.type(await screen.findByLabelText('First name'), 'New')
-    await user.type(screen.getByLabelText('Last name'), 'Person')
-    await user.type(screen.getByLabelText('Email'), 'new@example.com')
-    await user.type(screen.getByLabelText('Password'), 'password12345')
-    await user.click(screen.getByRole('button', { name: 'Save' }))
-
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/api/v1/users',
-        expect.objectContaining({ method: 'POST' }),
-      ),
-    )
-    expect(bodyOf(fetchMock, 'POST', '/api/v1/users')).toMatchObject({
-      email: 'new@example.com',
-      first_name: 'New',
-      last_name: 'Person',
-      password: 'password12345',
-    })
-    expect(toastSpy).toHaveBeenCalledWith('User created')
-  })
-
-  it('hides the password field and omits it when confirmation is on', async () => {
-    const fetchMock = stubFetch({
-      users: [me],
-      settings: makeServerSettings({ require_confirmation: true }),
-      mutate: () => jsonBody(makeUser({ id: 3, status: 'waiting_confirmation' }), 201),
-    })
-    const user = userEvent.setup({ pointerEventsCheck: 0 })
-    renderWithProviders(<Users />, { authValue: { user: me } })
-    await screen.findByText('Admin User')
-
-    await user.click(screen.getByRole('button', { name: 'Add user' }))
-    await user.type(await screen.findByLabelText('First name'), 'New')
-    await user.type(screen.getByLabelText('Last name'), 'Person')
-    await user.type(screen.getByLabelText('Email'), 'new@example.com')
-    // No password field is rendered.
-    expect(screen.queryByLabelText('Password')).not.toBeInTheDocument()
-    expect(
-      screen.getByText('The user will get an email to set their password.'),
-    ).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Save' }))
-
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/api/v1/users',
-        expect.objectContaining({ method: 'POST' }),
-      ),
-    )
-    expect(bodyOf(fetchMock, 'POST', '/api/v1/users')).not.toHaveProperty('password')
-  })
-
-  it('edits a user status via the select', async () => {
-    const fetchMock = stubFetch({
-      users: [me, member],
-      mutate: () => jsonBody({ ...member, status: 'disabled' }),
-    })
-    const user = userEvent.setup({ pointerEventsCheck: 0 })
+  it('links to the create and edit pages', async () => {
+    stubFetch({ users: [me, member] })
     renderWithProviders(<Users />, { authValue: { user: me } })
     await screen.findByText('Bob Member')
 
-    await user.click(screen.getAllByRole('button', { name: 'Edit' })[1])
-    const dialog = await screen.findByRole('dialog', { name: /Edit Bob Member/ })
-    // Scope to the dialog: the toolbar also has a "Status" combobox.
-    await user.click(within(dialog).getByRole('combobox', { name: 'Status' }))
-    await user.click(await screen.findByRole('option', { name: 'Disabled' }))
-    await user.click(screen.getByRole('button', { name: 'Save' }))
-
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/api/v1/users/2',
-        expect.objectContaining({ method: 'PATCH' }),
-      ),
+    expect(screen.getByRole('link', { name: 'Add user' })).toHaveAttribute(
+      'href',
+      '/admin/users/new',
     )
-    expect(bodyOf(fetchMock, 'PATCH', '/api/v1/users/2')).toMatchObject({ status: 'disabled' })
-  })
-
-  it('warns when forcing a never-confirmed user active while confirmation is on', async () => {
-    const waiting = makeUser({
-      id: 2,
-      first_name: 'Bob',
-      last_name: 'Member',
-      email: 'bob@example.com',
-      status: 'active',
-      confirmed_at: null,
-    })
-    stubFetch({
-      users: [me, waiting],
-      settings: makeServerSettings({ require_confirmation: true }),
-    })
-    const user = userEvent.setup({ pointerEventsCheck: 0 })
-    renderWithProviders(<Users />, { authValue: { user: me } })
-    await screen.findByText('Bob Member')
-
-    await user.click(screen.getAllByRole('button', { name: 'Edit' })[1])
-    const dialog = await screen.findByRole('dialog', { name: /Edit Bob Member/ })
-    expect(within(dialog).getByText(/hasn't confirmed their email/i)).toBeInTheDocument()
+    const memberRow = screen.getByText('Bob Member').closest('tr')!
+    expect(within(memberRow).getByRole('link', { name: 'Edit' })).toHaveAttribute(
+      'href',
+      '/admin/users/2/edit',
+    )
   })
 
   it('resends a confirmation for a waiting user', async () => {
@@ -502,22 +408,16 @@ describe('Users', () => {
     })
   })
 
-  it('protects the current user from self login-as, deactivate, and edits', async () => {
+  it('hides the self-only actions (login-as, deactivate) for the current user', async () => {
     stubFetch({ users: [me, member] })
-    const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderWithProviders(<Users />, { authValue: { user: me } })
     await screen.findByText('Admin User')
 
-    // Only the member row (not self) exposes these actions
+    // Only the member row (not self) exposes these actions.
     expect(screen.getAllByRole('button', { name: 'Login as' })).toHaveLength(1)
     expect(screen.getAllByRole('button', { name: 'Deactivate' })).toHaveLength(1)
-
-    // Editing yourself disables the Admin toggle and the Status select
-    await user.click(screen.getAllByRole('button', { name: 'Edit' })[0])
-    const dialog = await screen.findByRole('dialog', { name: /Edit Admin User/ })
-    expect(within(dialog).getByRole('checkbox', { name: 'Admin' })).toBeDisabled()
-    expect(within(dialog).getByRole('combobox', { name: 'Status' })).toHaveAttribute(
-      'data-disabled',
-    )
+    // Edit is available on every row (self-edit is allowed; the edit page guards
+    // the admin/status fields).
+    expect(screen.getAllByRole('link', { name: 'Edit' })).toHaveLength(2)
   })
 })

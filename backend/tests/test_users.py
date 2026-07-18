@@ -223,6 +223,47 @@ async def test_list_users_invalid_params_rejected(
         assert resp.status_code == 422, query
 
 
+# --- get one ------------------------------------------------------------
+
+
+async def test_get_user(make_user: Login, auth_client: AuthClient) -> None:
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    target = await make_user(email="member@example.com", first_name="Jo", last_name="Ng")
+    client = await auth_client(admin)
+
+    resp = await client.get(f"/api/v1/users/{target.id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["id"] == target.id
+    assert body["email"] == "member@example.com"
+    assert body["first_name"] == "Jo"
+    assert body["is_admin"] is False
+
+
+async def test_get_user_not_found(make_user: Login, auth_client: AuthClient) -> None:
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    client = await auth_client(admin)
+
+    resp = await client.get("/api/v1/users/999")
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "User not found"
+
+
+async def test_get_user_as_member_forbidden(make_user: Login, auth_client: AuthClient) -> None:
+    member = await make_user(email="member@example.com")
+    other = await make_user(email="other@example.com")
+    client = await auth_client(member)
+
+    resp = await client.get(f"/api/v1/users/{other.id}")
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Admin only"
+
+
+async def test_get_user_unauthenticated(client: AsyncClient) -> None:
+    resp = await client.get("/api/v1/users/1")
+    assert resp.status_code == 401
+
+
 # --- create -------------------------------------------------------------
 
 

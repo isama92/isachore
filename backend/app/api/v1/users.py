@@ -154,6 +154,11 @@ async def list_users(
     )
 
 
+@router.get("/{user_id}", response_model=UserRead)
+async def get_user(user_id: int, _: AdminUser, session: SessionDep) -> User:
+    return await _get_user_or_404(session, user_id)
+
+
 @router.post("", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 async def create_user(
     payload: UserCreate,

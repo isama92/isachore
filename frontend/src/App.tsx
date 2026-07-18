@@ -5,6 +5,8 @@ import AdminHouseholdCreate from './pages/admin/HouseholdCreate'
 import AdminHouseholdEdit from './pages/admin/HouseholdEdit'
 import AdminHouseholds from './pages/admin/Households'
 import ServerSettings from './pages/admin/ServerSettings'
+import UserCreate from './pages/admin/UserCreate'
+import UserEdit from './pages/admin/UserEdit'
 import Users from './pages/admin/Users'
 import AcceptInvite from './pages/AcceptInvite'
 import ChoreCreate from './pages/ChoreCreate'
@@ -35,6 +37,8 @@ export default function App() {
         <Route path="/households/:id/edit" element={<HouseholdEdit />} />
         <Route element={<RequireAdmin />}>
           <Route path="/admin/users" element={<Users />} />
+          <Route path="/admin/users/new" element={<UserCreate />} />
+          <Route path="/admin/users/:id/edit" element={<UserEdit />} />
           <Route path="/admin/households" element={<AdminHouseholds />} />
           <Route path="/admin/households/new" element={<AdminHouseholdCreate />} />
           <Route path="/admin/households/:id/edit" element={<AdminHouseholdEdit />} />
