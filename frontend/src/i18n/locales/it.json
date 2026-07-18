@@ -63,6 +63,7 @@
     "emptyHint": "Aggiungi la prima con Nuova faccenda qui sopra.",
     "unassigned": "Non assegnata",
     "noTags": "Nessuna",
+    "andMore": "e altre {{count}}",
     "delete": "Elimina",
     "deleteConfirm": "Eliminare “{{title}}”?",
     "deleteConfirmBody": "Questa faccenda verrà rimossa. L'operazione non può essere annullata.",

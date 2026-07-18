@@ -63,6 +63,7 @@
     "emptyHint": "Add the first one with New chore above.",
     "unassigned": "Unassigned",
     "noTags": "None",
+    "andMore": "and {{count}} more",
     "delete": "Delete",
     "deleteConfirm": "Delete “{{title}}”?",
     "deleteConfirmBody": "This chore will be removed. This cannot be undone.",

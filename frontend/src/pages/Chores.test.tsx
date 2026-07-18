@@ -79,6 +79,31 @@ describe('Chores', () => {
     expect(within(row).getByText('Least done')).toBeInTheDocument()
   })
 
+  it('collapses many tags to the first plus an "and N more" hover tooltip', async () => {
+    const chore = makeChore({
+      id: 8,
+      title: 'Big job',
+      tags: [
+        makeTag({ id: 3, name: 'deep-clean', color: '#0d9488' }),
+        makeTag({ id: 4, name: 'shared', color: '#7c6bf0' }),
+      ],
+    })
+    stubFetch({ chores: [chore] })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    const row = (await screen.findByText('Big job')).closest('tr')!
+    expect(within(row).getByText('deep-clean')).toBeInTheDocument()
+    expect(within(row).getByText('and 1 more')).toBeInTheDocument()
+    // The extra tag is hidden in the row until the field is hovered.
+    expect(within(row).queryByText('shared')).not.toBeInTheDocument()
+
+    await user.hover(within(row).getByText('and 1 more').closest('button')!)
+    const tooltip = await screen.findByRole('tooltip')
+    expect(within(tooltip).getByText('deep-clean')).toBeInTheDocument()
+    expect(within(tooltip).getByText('shared')).toBeInTheDocument()
+  })
+
   it('shows placeholders for an unassigned, untagged chore', async () => {
     stubFetch({ chores: [makeChore({ title: 'Lonely' })] })
     renderWithProviders(<Chores />, { authValue: { user: me } })

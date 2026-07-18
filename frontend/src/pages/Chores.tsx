@@ -130,6 +130,59 @@ export default function Chores() {
     )
   }
 
+  // Keep the tags column compact: show the first tag, then "and N more" with the
+  // full list in a tooltip, so a heavily-tagged chore doesn't blow up the row.
+  function tagsCell(tags: Chore['tags']): ReactNode {
+    if (tags.length === 0) {
+      return <span className="text-muted-foreground">{t('chores.noTags')}</span>
+    }
+    const first = tags[0]
+    const extra = tags.length - 1
+    if (extra === 0) {
+      return (
+        <span className="flex items-center gap-1.5 text-[13px] font-semibold">
+          <span
+            className="inline-block size-2.5 shrink-0 rounded-full"
+            style={{ backgroundColor: first.color }}
+          />
+          {first.name}
+        </span>
+      )
+    }
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="flex items-center gap-1.5 rounded-sm text-[13px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <span
+              className="inline-block size-2.5 shrink-0 rounded-full"
+              style={{ backgroundColor: first.color }}
+            />
+            {first.name}
+            <span className="font-medium text-muted-foreground">
+              {t('chores.andMore', { count: extra })}
+            </span>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>
+          <span className="flex flex-col gap-1.5">
+            {tags.map((tag) => (
+              <span key={tag.id} className="flex items-center gap-1.5 text-[13px] font-semibold">
+                <span
+                  className="inline-block size-2.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: tag.color }}
+                />
+                {tag.name}
+              </span>
+            ))}
+          </span>
+        </TooltipContent>
+      </Tooltip>
+    )
+  }
+
   const columns: ColumnDef<Chore>[] = [
     {
       accessorKey: 'title',
@@ -176,22 +229,7 @@ export default function Chores() {
       id: 'tags',
       header: t('chores.headers.tags'),
       enableSorting: false,
-      cell: ({ row }) =>
-        row.original.tags.length === 0 ? (
-          <span className="text-muted-foreground">{t('chores.noTags')}</span>
-        ) : (
-          <span className="flex flex-wrap items-center gap-2">
-            {row.original.tags.map((tag) => (
-              <span key={tag.id} className="flex items-center gap-1.5 text-[13px] font-semibold">
-                <span
-                  className="inline-block size-2.5 rounded-full"
-                  style={{ backgroundColor: tag.color }}
-                />
-                {tag.name}
-              </span>
-            ))}
-          </span>
-        ),
+      cell: ({ row }) => tagsCell(row.original.tags),
     },
     {
       accessorKey: 'start_date',
