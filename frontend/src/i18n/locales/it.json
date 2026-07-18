@@ -63,7 +63,8 @@
     },
     "emptyTitle": "Tutto in ordine",
     "emptyHint": "Niente in scadenza nei prossimi 7 giorni.",
-    "markDone": "Segna “{{title}}” come completata",
+    "markDone": "Fatto: “{{title}}”",
+    "done": "Fatto",
     "loadError": "Impossibile caricare le tue faccende in scadenza",
     "completeError": "Impossibile segnare la faccenda come completata"
   },

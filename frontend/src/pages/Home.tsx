@@ -1,17 +1,18 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
+import { CheckIcon } from 'lucide-react'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
 import { formatDateTime } from '../lib/format'
 import { dueDotClass, relativeDueLabel, sortByDue } from '../lib/home'
 import type { DueChore, HomeData } from '../lib/types'
-import { Checkbox } from '@/components/ui/checkbox'
+import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { cn } from '@/lib/utils'
 
-// One due chore: checkbox + title + a short due label / date / repeat + a
-// colour-coded status dot. Module-local (not exported) so Home.tsx keeps a
+// One due chore: a colour-coded status dot + title + a short due label / date /
+// repeat + a "Done" button. Module-local (not exported) so Home.tsx keeps a
 // single default export (react-refresh only-export-components).
 function DueRow({
   chore,
@@ -24,9 +25,9 @@ function DueRow({
 }) {
   return (
     <li className="flex items-center gap-3 rounded-xl border border-border bg-card p-3.5">
-      <Checkbox
-        aria-label={t('home.markDone', { title: chore.title })}
-        onCheckedChange={() => onComplete(chore)}
+      <span
+        className={cn('inline-block size-2.5 shrink-0 rounded-full', dueDotClass(chore.status))}
+        aria-hidden
       />
       <div className="min-w-0 flex-1">
         <p className="truncate font-semibold">{chore.title}</p>
@@ -38,10 +39,17 @@ function DueRow({
           {t(`options.repeat.${chore.repeats}`)}
         </p>
       </div>
-      <span
-        className={cn('inline-block size-2.5 shrink-0 rounded-full', dueDotClass(chore.status))}
-        aria-hidden
-      />
+      {/* Outline pill in the active accent (--primary) that fills on hover. */}
+      <Button
+        type="button"
+        variant="ghost"
+        aria-label={t('home.markDone', { title: chore.title })}
+        onClick={() => onComplete(chore)}
+        className="shrink-0 border-primary text-primary hover:bg-primary hover:text-primary-foreground hover:shadow-glow dark:hover:bg-primary"
+      >
+        <CheckIcon />
+        {t('home.done')}
+      </Button>
     </li>
   )
 }

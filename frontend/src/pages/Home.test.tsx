@@ -82,8 +82,8 @@ describe('Home', () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderWithProviders(<Home />, { authValue: { user: makeUser() } })
 
-    const checkbox = await screen.findByRole('checkbox', { name: /Do the dishes/ })
-    await user.click(checkbox)
+    const doneButton = await screen.findByRole('button', { name: /Do the dishes/ })
+    await user.click(doneButton)
 
     // Optimistic: the row is removed immediately on check.
     expect(screen.queryByText('Do the dishes')).not.toBeInTheDocument()
@@ -110,8 +110,8 @@ describe('Home', () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderWithProviders(<Home />, { authValue: { user: makeUser() } })
 
-    const checkbox = await screen.findByRole('checkbox', { name: /Water the plants/ })
-    await user.click(checkbox)
+    const doneButton = await screen.findByRole('button', { name: /Water the plants/ })
+    await user.click(doneButton)
 
     expect(screen.queryByText('Water the plants')).not.toBeInTheDocument()
     // A future ("soon") occurrence doesn't count toward today, so progress holds.
@@ -132,8 +132,8 @@ describe('Home', () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderWithProviders(<Home />, { authValue: { user: makeUser() } })
 
-    const checkbox = await screen.findByRole('checkbox', { name: /Do the dishes/ })
-    await user.click(checkbox)
+    const doneButton = await screen.findByRole('button', { name: /Do the dishes/ })
+    await user.click(doneButton)
 
     expect(await screen.findByText('server exploded')).toBeInTheDocument()
     expect(screen.getByText('Do the dishes')).toBeInTheDocument() // rolled back
