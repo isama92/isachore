@@ -7,7 +7,6 @@ import type { AssignmentType, RepeatPeriod } from './types'
 // with t(`options.repeat.${value}`) rather than a static label here.
 export const repeatOptions: readonly RepeatPeriod[] = [
   'manual',
-  'hourly',
   'daily',
   'weekly',
   'monthly',

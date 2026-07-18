@@ -2,14 +2,16 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import Select, func, select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import contains_eager, selectinload
 
 from app.api.deps import CurrentUser, SessionDep
 from app.api.v1.households import SortDir
-from app.core.households import get_member_household
-from app.models import Chore, Household, Tag, User, UserStatus, household_members
-from app.schemas import ChoreCreate, ChoreRead, ChoreUpdate, Page
+from app.core.chores import days_until_due, due_status, next_due
+from app.core.households import get_member_household, member_household_ids
+from app.models import Chore, CompletedChore, Household, Tag, User, UserStatus, household_members
+from app.schemas import ChoreCreate, ChoreRead, ChoreUpdate, CompletionRead, Page
 
 router = APIRouter()
 
@@ -25,15 +27,6 @@ CHORE_SORT_COLUMNS = {
     "created_at": (Chore.created_at,),
     "household": (Household.name,),
 }
-
-
-def _member_household_ids(user_id: int) -> Select[tuple[int]]:
-    """Subquery of the ids of the active (non-deleted) households a user belongs to."""
-    return (
-        select(household_members.c.household_id)
-        .join(Household, Household.id == household_members.c.household_id)
-        .where(household_members.c.user_id == user_id, Household.deleted_at.is_(None))
-    )
 
 
 async def _load_chore(session: SessionDep, chore_id: int) -> Chore:
@@ -153,7 +146,7 @@ async def list_chores(
 ) -> Page[ChoreRead]:
     # Scope to non-deleted chores in the user's active households; an optional
     # household_id narrows to one of them (a non-member id yields an empty page).
-    filters = [Chore.deleted_at.is_(None), Chore.household_id.in_(_member_household_ids(user.id))]
+    filters = [Chore.deleted_at.is_(None), Chore.household_id.in_(member_household_ids(user.id))]
     if household_id is not None:
         filters.append(Chore.household_id == household_id)
 
@@ -209,3 +202,55 @@ async def delete_chore(chore_id: int, user: CurrentUser, session: SessionDep) ->
     chore = await _get_user_chore_or_404(session, user, chore_id)
     chore.deleted_at = datetime.now(UTC)
     await session.commit()
+
+
+@router.post(
+    "/{chore_id}/complete", response_model=CompletionRead, status_code=status.HTTP_201_CREATED
+)
+async def complete_chore(chore_id: int, user: CurrentUser, session: SessionDep) -> CompletionRead:
+    """Mark a chore's current occurrence done. Any member of the chore's household
+    may complete it. Records a completion (with the occurrence's due datetime) and
+    advances the chore so its next occurrence is one interval away."""
+    chore = await _get_user_chore_or_404(session, user, chore_id)
+    # Capture the occurrence being completed BEFORE advancing last_completed_at,
+    # otherwise scheduled_for would be the *next* occurrence's due date.
+    scheduled_for = next_due(chore)
+    if scheduled_for is None:
+        # A one-off (manual) chore that has already been completed.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This chore has already been completed",
+        )
+    completion = CompletedChore(
+        chore_id=chore.id,
+        title=chore.title,
+        scheduled_for=scheduled_for,
+        completed_by_user_id=user.id,
+    )
+    chore.last_completed_at = datetime.now(UTC)
+    session.add(completion)
+    try:
+        await session.commit()
+    except IntegrityError:
+        # The (chore_id, scheduled_for) unique guard rejects a double-submit of
+        # the same occurrence (two near-simultaneous completions).
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This chore has already been completed",
+        ) from None
+    await session.refresh(completion)
+
+    upcoming = next_due(chore)
+    days = days_until_due(upcoming, datetime.now(UTC)) if upcoming is not None else None
+    return CompletionRead(
+        id=completion.id,
+        chore_id=completion.chore_id,
+        title=completion.title,
+        scheduled_for=completion.scheduled_for,
+        completed_by_user_id=completion.completed_by_user_id,
+        created_at=completion.created_at,
+        next_due=upcoming,
+        days_until_due=days,
+        status=due_status(days) if days is not None else None,
+    )

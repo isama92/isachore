@@ -29,7 +29,7 @@ describe('chore helpers', () => {
   })
 
   it('exposes the option values in display order', () => {
-    expect(repeatOptions).toEqual(['manual', 'hourly', 'daily', 'weekly', 'monthly', 'yearly'])
+    expect(repeatOptions).toEqual(['manual', 'daily', 'weekly', 'monthly', 'yearly'])
     expect(assignmentOptions).toEqual(['manual', 'alphabetical', 'random', 'least_done'])
   })
 })

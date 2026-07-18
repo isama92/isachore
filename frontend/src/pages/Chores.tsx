@@ -3,10 +3,10 @@ import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
 import type { ColumnDef } from '@tanstack/react-table'
-import { SquarePenIcon, Trash2Icon } from 'lucide-react'
+import { CopyPlusIcon, SquarePenIcon, Trash2Icon } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { formatDate } from '../lib/chores'
-import type { Chore, Household, Page } from '../lib/types'
+import type { Chore, ChoreCloneState, Household, Page } from '../lib/types'
 import { DataTable } from '@/components/data-table/DataTable'
 import { useServerTable } from '@/components/data-table/useServerTable'
 import { Button } from '@/components/ui/button'
@@ -111,8 +111,27 @@ export default function Chores() {
     )
   }
 
+  // Clone opens the create page prefilled from this chore, carried in router
+  // state. Assignees/tags that don't belong to the chosen household are dropped
+  // there (see ChoreCreate); nothing is dropped for a same-household clone.
+  function cloneState(chore: Chore): { clone: ChoreCloneState } {
+    return {
+      clone: {
+        household_id: chore.household.id,
+        title: chore.title,
+        description: chore.description ?? '',
+        start_date: chore.start_date,
+        repeats: chore.repeats,
+        assignment_type: chore.assignment_type,
+        assignee_ids: chore.assignees.map((a) => a.id),
+        tag_ids: chore.tags.map((tag) => tag.id),
+      },
+    }
+  }
+
   function rowActions(chore: Chore): ReactNode {
     const editLabel = t('chores.edit')
+    const cloneLabel = t('chores.clone')
     return (
       <div className="flex items-center justify-end gap-0.5">
         <Tooltip>
@@ -124,6 +143,16 @@ export default function Chores() {
             </Button>
           </TooltipTrigger>
           <TooltipContent>{editLabel}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button asChild variant="ghost" size="icon-sm" aria-label={cloneLabel}>
+              <Link to="/chores/new" state={cloneState(chore)}>
+                <CopyPlusIcon />
+              </Link>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{cloneLabel}</TooltipContent>
         </Tooltip>
         {deleteDialog(chore)}
       </div>

@@ -49,9 +49,7 @@ def upgrade() -> None:
         sa.Column("start_date", sa.Date(), nullable=False),
         sa.Column(
             "repeats",
-            sa.Enum(
-                "manual", "hourly", "daily", "weekly", "monthly", "yearly", name="repeat_period"
-            ),
+            sa.Enum("manual", "daily", "weekly", "monthly", "yearly", name="repeat_period"),
             nullable=False,
         ),
         sa.Column(

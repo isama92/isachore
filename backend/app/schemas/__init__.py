@@ -1,4 +1,5 @@
 from app.schemas.chore import ChoreCreate, ChoreRead, ChoreUpdate
+from app.schemas.home import CompletionRead, DueChoreRead, HomeRead, ProgressRead
 from app.schemas.household import (
     HouseholdCreate,
     HouseholdInvitationInfo,
@@ -25,8 +26,11 @@ __all__ = [
     "ChoreCreate",
     "ChoreRead",
     "ChoreUpdate",
+    "CompletionRead",
     "ConfirmRequest",
     "ConfirmTokenInfo",
+    "DueChoreRead",
+    "HomeRead",
     "HouseholdCreate",
     "HouseholdInvitationInfo",
     "HouseholdInvitationRead",
@@ -37,6 +41,7 @@ __all__ = [
     "MeRead",
     "Page",
     "ProfileUpdate",
+    "ProgressRead",
     "ServerSettingsRead",
     "ServerSettingsUpdate",
     "TagCreate",

@@ -24,6 +24,7 @@ from app.models import (
     AssignmentType,
     AuthToken,
     Chore,
+    CompletedChore,
     Household,
     RepeatPeriod,
     Tag,
@@ -265,6 +266,7 @@ def make_chore(db_session: AsyncSession) -> Callable[..., Awaitable[Chore]]:
         assignment_type: AssignmentType = AssignmentType.manual,
         assignees: list[User] | None = None,
         tags: list[Tag] | None = None,
+        last_completed_at: datetime | None = None,
     ) -> Chore:
         chore = Chore(
             household_id=household.id,
@@ -273,6 +275,7 @@ def make_chore(db_session: AsyncSession) -> Callable[..., Awaitable[Chore]]:
             start_date=start_date or date(2026, 7, 16),
             repeats=repeats,
             assignment_type=assignment_type,
+            last_completed_at=last_completed_at,
         )
         if assignees:
             chore.assignees.extend(assignees)
@@ -282,6 +285,33 @@ def make_chore(db_session: AsyncSession) -> Callable[..., Awaitable[Chore]]:
         await db_session.commit()
         await db_session.refresh(chore, attribute_names=["assignees", "tags"])
         return chore
+
+    return _make
+
+
+@pytest.fixture
+def make_completion(db_session: AsyncSession) -> Callable[..., Awaitable[CompletedChore]]:
+    async def _make(
+        *,
+        chore: Chore,
+        scheduled_for: datetime,
+        completed_by: User | None = None,
+        created_at: datetime | None = None,
+        title: str | None = None,
+    ) -> CompletedChore:
+        completion = CompletedChore(
+            chore_id=chore.id,
+            title=title if title is not None else chore.title,
+            scheduled_for=scheduled_for,
+            completed_by_user_id=completed_by.id if completed_by is not None else None,
+        )
+        # Let tests pin created_at (e.g. "completed yesterday") instead of now().
+        if created_at is not None:
+            completion.created_at = created_at
+        db_session.add(completion)
+        await db_session.commit()
+        await db_session.refresh(completion)
+        return completion
 
     return _make
 

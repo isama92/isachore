@@ -44,7 +44,7 @@ export type ServerSettings = {
   smtp_from: string | null
 }
 
-export type RepeatPeriod = 'manual' | 'hourly' | 'daily' | 'weekly' | 'monthly' | 'yearly'
+export type RepeatPeriod = 'manual' | 'daily' | 'weekly' | 'monthly' | 'yearly'
 
 export type AssignmentType = 'manual' | 'alphabetical' | 'random' | 'least_done'
 
@@ -67,6 +67,39 @@ export type Chore = {
   household: { id: number; name: string }
   assignees: User[]
   tags: Tag[]
+}
+
+export type DueStatus = 'overdue' | 'today' | 'soon'
+
+// A chore due within the Home window (overdue / today / next 7 days), with its
+// server-computed due state. days_until_due is negative when overdue, 0 today.
+export type DueChore = {
+  id: number
+  title: string
+  repeats: RepeatPeriod
+  next_due: string
+  days_until_due: number
+  status: DueStatus
+}
+
+// Payload of the Home due view: GET /api/v1/home.
+export type HomeData = {
+  progress: { done_today: number; total_today: number }
+  items: DueChore[]
+}
+
+// Prefill payload carried in router state when cloning a chore. Mirrors the
+// creation form's fields plus the source household, so ChoreCreate can seed the
+// form and default to the source household (see Chores' clone action).
+export type ChoreCloneState = {
+  household_id: number
+  title: string
+  description: string
+  start_date: string
+  repeats: RepeatPeriod
+  assignment_type: AssignmentType
+  assignee_ids: number[]
+  tag_ids: number[]
 }
 
 // The member list / assignee picker only needs a name (data minimisation).

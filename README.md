@@ -139,8 +139,10 @@ hook, Docker dev/prod, hello world at `/`, login page UI at `/login`, chores +
 users management UI, a shadcn/ui component kit with light/dark theming, a
 self-service profile page (name / password / avatar upload) reached from an
 avatar menu in the top bar, English/Italian UI translations (react-i18next)
-picked per user on the profile page, and email-based user confirmation with a
-server-settings page (SMTP, mailpit in dev) plus the one-time `init` bootstrap.
+picked per user on the profile page, email-based user confirmation with a
+server-settings page (SMTP, mailpit in dev) plus the one-time `init` bootstrap,
+and a Home due view (overdue / due today / due within a week) with one-tap chore
+completion and a daily progress bar.
 
 The app is organised into four areas (context for future work):
 
@@ -149,9 +151,10 @@ The app is organised into four areas (context for future work):
 - **Chores management**: manage the household's chores.
 - **Tags management**: create, edit and delete tags.
 
-- [ ] in the chores table add clone button, it will open the chores creation page prefilled
-- [ ] Due views: what is **overdue**, what has to be done **today**, what is due **in a few days**
-- [ ] Mark chore as done / completion history
+- [x] Due views: what is **overdue**, what has to be done **today**, what is due **in a few days**
+- [x] Mark chore as done
+- [ ] chores completion history (the `completed_chores` table exists; the history view + undo is still to build)
+- [ ] completion chart: add a way to show the completion chart of a chore: eg. for a weekly chore show a chart that shows each week, and for each week shows how many time it has been completed (so you can see how frequently it wasn't completed or how frequently it was done more time than necessary)
 - [ ] CI (lint + test on push)
 - [ ] Prod deploy hardening (TLS, real secrets management, DB backups)
 - [ ] API keys for mobile / 3rd-party clients (reuse `auth_tokens` via `Authorization: Bearer`)

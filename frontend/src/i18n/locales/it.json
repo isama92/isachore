@@ -49,13 +49,28 @@
   },
   "home": {
     "greeting": "Ciao {{name}}",
-    "placeholder": "La tua vista delle scadenze arriverà presto. Per ora, gestisci le faccende del nucleo domestico.",
-    "manageChores": "Gestisci le faccende"
+    "progress": {
+      "doneToday": "{{done}} di {{total}} fatte oggi",
+      "left": "{{count}} da fare"
+    },
+    "due": {
+      "overdue_one": "{{count}} giorno di ritardo",
+      "overdue_other": "{{count}} giorni di ritardo",
+      "today": "Scade oggi",
+      "soon_one": "tra {{count}} giorno",
+      "soon_other": "tra {{count}} giorni"
+    },
+    "emptyTitle": "Tutto in ordine",
+    "emptyHint": "Niente in scadenza nei prossimi 7 giorni.",
+    "markDone": "Segna “{{title}}” come completata",
+    "loadError": "Impossibile caricare le tue faccende in scadenza",
+    "completeError": "Impossibile segnare la faccenda come completata"
   },
   "chores": {
     "title": "Faccende",
     "new": "Nuova faccenda",
     "edit": "Modifica",
+    "clone": "Clona",
     "loadError": "Impossibile caricare le faccende",
     "deleted": "Faccenda eliminata",
     "deleteError": "Eliminazione non riuscita",
@@ -104,7 +119,11 @@
     "tagsPlaceholder": "Seleziona etichette",
     "tagsSearch": "Cerca etichette…",
     "tagsEmpty": "Nessuna etichetta trovata.",
-    "submit": "Aggiungi faccenda"
+    "submit": "Aggiungi faccenda",
+    "cloneDroppedAssignees_one": "{{count}} assegnatario non è stato aggiunto perché non appartiene a questo nucleo domestico.",
+    "cloneDroppedAssignees_other": "{{count}} assegnatari non sono stati aggiunti perché non appartengono a questo nucleo domestico.",
+    "cloneDroppedTags_one": "{{count}} etichetta non è stata aggiunta perché non appartiene a questo nucleo domestico.",
+    "cloneDroppedTags_other": "{{count}} etichette non sono state aggiunte perché non appartengono a questo nucleo domestico."
   },
   "choreEdit": {
     "title": "Modifica faccenda",
@@ -385,7 +404,6 @@
   "options": {
     "repeat": {
       "manual": "Manuale",
-      "hourly": "Ogni ora",
       "daily": "Ogni giorno",
       "weekly": "Ogni settimana",
       "monthly": "Ogni mese",
