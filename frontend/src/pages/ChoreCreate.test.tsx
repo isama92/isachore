@@ -62,8 +62,11 @@ describe('ChoreCreate', () => {
     renderWithProviders(<ChoreCreate />, { authValue: { user: me }, route: '/chores/new' })
 
     expect(await screen.findByRole('button', { name: 'Jo Ng' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'deep-clean' })).toBeInTheDocument()
     expect(screen.getByLabelText('Title')).toBeInTheDocument()
+    // Tags live behind a searchable multi-select; open it to see the options.
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    await user.click(screen.getByRole('button', { name: 'Tags' }))
+    expect(await screen.findByRole('option', { name: 'deep-clean' })).toBeInTheDocument()
   })
 
   it('labels the notes field as Description', async () => {
@@ -94,7 +97,10 @@ describe('ChoreCreate', () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     await user.type(await screen.findByLabelText('Title'), 'Scrub the tub')
     await user.click(screen.getByRole('button', { name: 'Jo Ng' }))
-    await user.click(screen.getByRole('button', { name: 'deep-clean' }))
+    // Pick the tag via the searchable multi-select, then close it.
+    await user.click(screen.getByRole('button', { name: 'Tags' }))
+    await user.click(await screen.findByRole('option', { name: 'deep-clean' }))
+    await user.keyboard('{Escape}')
     await user.click(screen.getByRole('combobox', { name: 'Repeats' }))
     await user.click(await screen.findByRole('option', { name: 'Daily' }))
     await user.click(screen.getByRole('combobox', { name: 'Assignment' }))

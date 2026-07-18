@@ -100,6 +100,9 @@
     "startDate": "Data di inizio",
     "tags": "Etichette",
     "noTags": "Ancora nessuna etichetta.",
+    "tagsPlaceholder": "Seleziona etichette",
+    "tagsSearch": "Cerca etichette…",
+    "tagsEmpty": "Nessuna etichetta trovata.",
     "submit": "Aggiungi faccenda"
   },
   "choreEdit": {

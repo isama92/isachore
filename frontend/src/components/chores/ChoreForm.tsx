@@ -21,6 +21,7 @@ import {
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { TagMultiSelect } from '@/components/chores/TagMultiSelect'
 
 export type ChoreFormValues = {
   title: string
@@ -239,23 +240,12 @@ export function ChoreForm({
         {tags.length === 0 ? (
           <p className="text-sm font-medium text-muted-foreground">{t('choreCreate.noTags')}</p>
         ) : (
-          <ToggleGroup
-            type="multiple"
-            aria-labelledby="tags-label"
-            value={selectedTags.map(String)}
-            onValueChange={(ids) => setValues((v) => ({ ...v, tag_ids: ids.map(Number) }))}
-            className="w-full flex-wrap"
-          >
-            {tags.map((tag) => (
-              <ToggleGroupItem key={tag.id} value={String(tag.id)} className={chipItemClass}>
-                <span
-                  className="inline-block size-2.5 rounded-full"
-                  style={{ backgroundColor: tag.color }}
-                />
-                {tag.name}
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
+          <TagMultiSelect
+            tags={tags}
+            value={selectedTags}
+            onChange={(ids) => setValues((v) => ({ ...v, tag_ids: ids }))}
+            labelledBy="tags-label"
+          />
         )}
       </div>
 
