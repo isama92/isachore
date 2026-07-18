@@ -6,19 +6,28 @@ import { makeDueChore } from '../test/fixtures'
 const t = i18n.getFixedT('en')
 
 describe('sortByDue', () => {
-  it('orders most overdue first', () => {
+  it('orders most overdue first (earliest next_due)', () => {
     const items = [
-      makeDueChore({ id: 1, days_until_due: 2 }),
-      makeDueChore({ id: 2, days_until_due: -3 }),
-      makeDueChore({ id: 3, days_until_due: 0 }),
+      makeDueChore({ id: 1, next_due: '2026-07-20T09:00:00Z', days_until_due: 2 }),
+      makeDueChore({ id: 2, next_due: '2026-07-15T09:00:00Z', days_until_due: -3 }),
+      makeDueChore({ id: 3, next_due: '2026-07-18T09:00:00Z', days_until_due: 0 }),
     ]
     expect(sortByDue(items).map((i) => i.id)).toEqual([2, 3, 1])
   })
 
+  it('breaks same-instant ties by id, ordering within a day by time', () => {
+    const items = [
+      makeDueChore({ id: 2, next_due: '2026-07-18T14:30:00Z', days_until_due: 0 }),
+      makeDueChore({ id: 1, next_due: '2026-07-18T09:00:00Z', days_until_due: 0 }),
+      makeDueChore({ id: 3, next_due: '2026-07-18T09:00:00Z', days_until_due: 0 }),
+    ]
+    expect(sortByDue(items).map((i) => i.id)).toEqual([1, 3, 2])
+  })
+
   it('does not mutate the input array', () => {
     const items = [
-      makeDueChore({ id: 1, days_until_due: 2 }),
-      makeDueChore({ id: 2, days_until_due: -1 }),
+      makeDueChore({ id: 1, next_due: '2026-07-20T09:00:00Z' }),
+      makeDueChore({ id: 2, next_due: '2026-07-15T09:00:00Z' }),
     ]
     sortByDue(items)
     expect(items.map((i) => i.id)).toEqual([1, 2])

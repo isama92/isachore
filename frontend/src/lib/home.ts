@@ -1,10 +1,13 @@
 import type { TFunction } from 'i18next'
 import type { DueChore, DueStatus } from './types'
 
-// Most-overdue-first. The server already sorts, but sort defensively so the UI
-// (and its tests) don't depend on server order.
+// Most-overdue-first, matching the server's (next_due, id) order so an
+// optimistically-removed row that has to be rolled back returns to its exact
+// slot (not just its day). The server already sorts; this is defensive.
 export function sortByDue(items: DueChore[]): DueChore[] {
-  return [...items].sort((a, b) => a.days_until_due - b.days_until_due)
+  return [...items].sort(
+    (a, b) => new Date(a.next_due).getTime() - new Date(b.next_due).getTime() || a.id - b.id,
+  )
 }
 
 // Tailwind v4's JIT only sees complete class literals, so map status -> a full

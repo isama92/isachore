@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
-import { formatDateTime, formatDateTimeFull } from '../lib/format'
+import { formatDateTime } from '../lib/format'
 import { dueDotClass, relativeDueLabel, sortByDue } from '../lib/home'
 import { fullName } from '../lib/user'
 import type { DueChore, HomeData } from '../lib/types'
@@ -34,7 +34,7 @@ function DueRow({
         <p className="mt-0.5 text-[13px] font-medium text-muted-foreground">
           {relativeDueLabel(t, chore)}
           {' · '}
-          <span title={formatDateTimeFull(chore.next_due)}>{formatDateTime(chore.next_due)}</span>
+          {formatDateTime(chore.next_due)}
           {' · '}
           {t(`options.repeat.${chore.repeats}`)}
         </p>
