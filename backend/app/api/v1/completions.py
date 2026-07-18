@@ -1,7 +1,8 @@
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
+from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, SessionDep
 from app.api.v1.households import SortDir
@@ -126,3 +127,41 @@ async def list_completions(
         for completion, household, completer in result.all()
     ]
     return Page[HistoryEntryRead](items=items, total=total, page=page, page_size=page_size)
+
+
+@router.delete("/{completion_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def undo_completion(completion_id: int, user: CurrentUser, session: SessionDep) -> None:
+    """Undo a completion: delete the record and roll the chore's schedule back.
+    Only the person who recorded the completion may undo it. Deleting the latest
+    completion reverts last_completed_at to the prior one (the chore becomes due
+    again); deleting an older one only edits history."""
+    # Scope to the user's active households (same scope as the list): a completion
+    # outside it, or a missing id, is a 404.
+    completion = (
+        await session.execute(
+            select(CompletedChore)
+            .join(Chore, Chore.id == CompletedChore.chore_id)
+            .options(selectinload(CompletedChore.chore))
+            .where(
+                CompletedChore.id == completion_id,
+                Chore.household_id.in_(member_household_ids(user.id)),
+            )
+        )
+    ).scalar_one_or_none()
+    if completion is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Completion not found")
+    if completion.completed_by_user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only undo your own completions",
+        )
+
+    chore = completion.chore
+    await session.delete(completion)
+    await session.flush()  # so the deleted row is excluded from the MAX below
+    # Re-anchor the denormalised last_completed_at to the latest remaining
+    # completion (NULL if none remain -> the chore reverts to never-completed).
+    chore.last_completed_at = await session.scalar(
+        select(func.max(CompletedChore.created_at)).where(CompletedChore.chore_id == chore.id)
+    )
+    await session.commit()

@@ -107,12 +107,19 @@
     "daysLate_one": "{{count}} giorno di ritardo",
     "daysLate_other": "{{count}} giorni di ritardo",
     "unknownUser": "Sconosciuto",
+    "undo": "Annulla",
+    "undone": "Completamento annullato",
+    "undoError": "Annullamento non riuscito",
+    "undoConfirm": "Annullare questo completamento?",
+    "undoConfirmBody": "Il completamento verrà rimosso e la faccenda potrebbe tornare da fare.",
+    "undoConfirmAction": "Annulla completamento",
     "headers": {
       "title": "Faccenda",
       "household": "Nucleo domestico",
       "completed": "Completata",
       "overdue": "Ritardo",
-      "completedBy": "Completata da"
+      "completedBy": "Completata da",
+      "actions": "Azioni"
     },
     "filters": {
       "userLabel": "Persona",

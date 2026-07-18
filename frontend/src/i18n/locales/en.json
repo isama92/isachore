@@ -107,12 +107,19 @@
     "daysLate_one": "{{count}} day late",
     "daysLate_other": "{{count}} days late",
     "unknownUser": "Unknown",
+    "undo": "Undo",
+    "undone": "Completion undone",
+    "undoError": "Undo failed",
+    "undoConfirm": "Undo this completion?",
+    "undoConfirmBody": "The completion will be removed and the chore may become due again.",
+    "undoConfirmAction": "Undo completion",
     "headers": {
       "title": "Chore",
       "household": "Household",
       "completed": "Completed",
       "overdue": "Overdue",
-      "completedBy": "Completed by"
+      "completedBy": "Completed by",
+      "actions": "Actions"
     },
     "filters": {
       "userLabel": "Person",

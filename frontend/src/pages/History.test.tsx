@@ -1,12 +1,21 @@
 import { describe, expect, it, vi } from 'vitest'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { toast } from 'sonner'
 import History from './History'
 import { renderWithProviders } from '../test/utils'
-import { makeHistoryEntry, makeHouseholdMember } from '../test/fixtures'
+import { makeHistoryEntry, makeHouseholdMember, makeUser } from '../test/fixtures'
 import type { HistoryEntry, HistoryFilterOptions } from '../lib/types'
 
 const me = makeHouseholdMember({ id: 1, first_name: 'Alex', last_name: 'Kim' })
+// The signed-in user for undo tests; id 1 matches `me`'s completions.
+const authUser = makeUser({ id: 1, first_name: 'Alex', last_name: 'Kim' })
+
+function deleteCalls(fetchMock: FetchMock): string[] {
+  return fetchMock.mock.calls
+    .filter(([, init]) => (init?.method ?? 'GET').toUpperCase() === 'DELETE')
+    .map(([url]) => String(url))
+}
 
 type FetchMock = ReturnType<typeof vi.fn>
 
@@ -162,5 +171,62 @@ describe('History', () => {
     renderWithProviders(<History />)
 
     expect(await screen.findByText('Failed to load history')).toBeInTheDocument()
+  })
+
+  it('shows an undo button only on the current user’s own completions', async () => {
+    stubFetch({
+      entries: [
+        makeHistoryEntry({ id: 7, title: 'Mine', completed_by: makeHouseholdMember({ id: 1 }) }),
+        makeHistoryEntry({ id: 8, title: 'Theirs', completed_by: makeHouseholdMember({ id: 2 }) }),
+      ],
+    })
+    renderWithProviders(<History />, { authValue: { user: authUser } })
+
+    const mineRow = (await screen.findByText('Mine')).closest('tr')!
+    const theirsRow = (await screen.findByText('Theirs')).closest('tr')!
+    expect(within(mineRow).getByRole('button', { name: 'Undo' })).toBeInTheDocument()
+    expect(within(theirsRow).queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument()
+  })
+
+  it('undoes a completion after confirming, calling DELETE and reloading', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    const toastSpy = vi.spyOn(toast, 'success')
+    const fetchMock = stubFetch({
+      entries: [
+        makeHistoryEntry({ id: 7, title: 'Mine', completed_by: makeHouseholdMember({ id: 1 }) }),
+      ],
+    })
+    renderWithProviders(<History />, { authValue: { user: authUser } })
+
+    const row = (await screen.findByText('Mine')).closest('tr')!
+    await user.click(within(row).getByRole('button', { name: 'Undo' }))
+    await user.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', {
+        name: 'Undo completion',
+      }),
+    )
+
+    await waitFor(() =>
+      expect(deleteCalls(fetchMock).some((u) => u.includes('/api/v1/completions/7'))).toBe(true),
+    )
+    expect(toastSpy).toHaveBeenCalledWith('Completion undone')
+  })
+
+  it('does not undo when the dialog is cancelled', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    const fetchMock = stubFetch({
+      entries: [
+        makeHistoryEntry({ id: 7, title: 'Mine', completed_by: makeHouseholdMember({ id: 1 }) }),
+      ],
+    })
+    renderWithProviders(<History />, { authValue: { user: authUser } })
+
+    const row = (await screen.findByText('Mine')).closest('tr')!
+    await user.click(within(row).getByRole('button', { name: 'Undo' }))
+    await user.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Cancel' }),
+    )
+
+    expect(deleteCalls(fetchMock)).toHaveLength(0)
   })
 })

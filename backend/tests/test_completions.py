@@ -2,9 +2,10 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Chore, CompletedChore, Household, User, UserStatus
+from app.models import Chore, CompletedChore, Household, RepeatPeriod, User, UserStatus
 
 MakeUser = Callable[..., Awaitable[User]]
 MakeHousehold = Callable[..., Awaitable[Household]]
@@ -372,3 +373,169 @@ async def test_completion_filters_excludes_disabled_members(
     resp = await client.get("/api/v1/completions/filters")
     assert resp.status_code == 200
     assert gone.id not in [m["id"] for m in resp.json()["members"]]
+
+
+# --- undo (DELETE /completions/{id}) --------------------------------------
+
+
+async def test_undo_latest_reverts_last_completed_at(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_completion: MakeCompletion,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    t1, t2 = DUE, DUE + timedelta(days=1)
+    chore = await make_chore(household=household, repeats=RepeatPeriod.daily, last_completed_at=t2)
+    await make_completion(chore=chore, scheduled_for=DUE, completed_by=user, created_at=t1)
+    latest = await make_completion(chore=chore, scheduled_for=t2, completed_by=user, created_at=t2)
+    client = await auth_client(user)
+
+    resp = await client.delete(f"/api/v1/completions/{latest.id}")
+    assert resp.status_code == 204
+
+    refreshed = (await db_session.execute(select(Chore).where(Chore.id == chore.id))).scalar_one()
+    # Rolled back to the previous completion's timestamp: the chore is due again.
+    assert refreshed.last_completed_at == t1
+    remaining = (await db_session.execute(select(CompletedChore.id))).scalars().all()
+    assert latest.id not in remaining
+
+
+async def test_undo_only_completion_clears_last_completed_at(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_completion: MakeCompletion,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, last_completed_at=DUE)
+    only = await make_completion(chore=chore, scheduled_for=DUE, completed_by=user, created_at=DUE)
+    client = await auth_client(user)
+
+    resp = await client.delete(f"/api/v1/completions/{only.id}")
+    assert resp.status_code == 204
+
+    refreshed = (await db_session.execute(select(Chore).where(Chore.id == chore.id))).scalar_one()
+    assert refreshed.last_completed_at is None
+
+
+async def test_undo_older_completion_leaves_schedule_unchanged(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_completion: MakeCompletion,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    t1, t2, t3 = DUE, DUE + timedelta(days=1), DUE + timedelta(days=2)
+    chore = await make_chore(household=household, repeats=RepeatPeriod.daily, last_completed_at=t3)
+    await make_completion(chore=chore, scheduled_for=DUE, completed_by=user, created_at=t1)
+    middle = await make_completion(chore=chore, scheduled_for=t2, completed_by=user, created_at=t2)
+    await make_completion(chore=chore, scheduled_for=t3, completed_by=user, created_at=t3)
+    client = await auth_client(user)
+
+    resp = await client.delete(f"/api/v1/completions/{middle.id}")
+    assert resp.status_code == 204
+
+    refreshed = (await db_session.execute(select(Chore).where(Chore.id == chore.id))).scalar_one()
+    # Deleting a non-latest completion is a history edit: MAX(created_at) is still t3.
+    assert refreshed.last_completed_at == t3
+
+
+async def test_undo_another_members_completion_403(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_completion: MakeCompletion,
+    auth_client: AuthClient,
+) -> None:
+    me = await make_user(email="me@example.com")
+    other = await make_user(email="other@example.com")
+    household = await make_household(members=[me, other])
+    chore = await make_chore(household=household)
+    completion = await make_completion(
+        chore=chore, scheduled_for=DUE, completed_by=other, created_at=DUE
+    )
+    client = await auth_client(me)
+
+    resp = await client.delete(f"/api/v1/completions/{completion.id}")
+    assert resp.status_code == 403
+
+
+async def test_undo_completion_in_other_household_404(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_completion: MakeCompletion,
+    auth_client: AuthClient,
+) -> None:
+    me = await make_user(email="me@example.com")
+    stranger = await make_user(email="stranger@example.com")
+    theirs = await make_household(members=[stranger], name="Theirs")
+    chore = await make_chore(household=theirs)
+    completion = await make_completion(
+        chore=chore, scheduled_for=DUE, completed_by=stranger, created_at=DUE
+    )
+    client = await auth_client(me)
+
+    resp = await client.delete(f"/api/v1/completions/{completion.id}")
+    assert resp.status_code == 404
+
+
+async def test_undo_missing_completion_404(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    auth_client: AuthClient,
+) -> None:
+    user = await make_user()
+    await make_household(members=[user])
+    client = await auth_client(user)
+    resp = await client.delete("/api/v1/completions/999999")
+    assert resp.status_code == 404
+
+
+async def test_undo_requires_auth(
+    client: AsyncClient,
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_completion: MakeCompletion,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household)
+    completion = await make_completion(
+        chore=chore, scheduled_for=DUE, completed_by=user, created_at=DUE
+    )
+    resp = await client.delete(f"/api/v1/completions/{completion.id}")
+    assert resp.status_code == 401
+
+
+async def test_occurrence_can_be_completed_again_after_undo(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # Full round-trip through the real complete endpoint: undo frees the
+    # (chore_id, scheduled_for) unique row so the occurrence is completable again.
+    user = await make_user()
+    household = await make_household(members=[user])
+    today = datetime.now(UTC).date()
+    chore = await make_chore(household=household, start_date=today, repeats=RepeatPeriod.daily)
+    client = await auth_client(user)
+
+    first = await client.post(f"/api/v1/chores/{chore.id}/complete")
+    assert first.status_code == 201
+    undo = await client.delete(f"/api/v1/completions/{first.json()['id']}")
+    assert undo.status_code == 204
+    again = await client.post(f"/api/v1/chores/{chore.id}/complete")
+    assert again.status_code == 201
