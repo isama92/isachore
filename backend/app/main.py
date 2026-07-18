@@ -34,9 +34,6 @@ app.include_router(api_router, prefix="/api/v1")
 # reaches them untouched. Mount the avatars folder specifically (not the whole
 # storage dir) so nothing else placed under storage/ is ever web-reachable.
 # avatars_dir() also ensures the folder exists before StaticFiles binds to it.
-# AVG note: avatars are personal data served without an auth check, protected
-# only by an unguessable 128-bit random filename (draft pending VCSW jurist
-# sign-off; revisit if avatars must sit inside the auth boundary).
 app.mount(
     "/api/v1/media/avatars",
     StaticFiles(directory=avatars_dir(), check_dir=False),

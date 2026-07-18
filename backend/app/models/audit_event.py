@@ -24,12 +24,7 @@ class AuditEvent(Base):
     """Append-only audit trail for authentication, impersonation and admin
     user-management actions (M3). Records who did what, to whom, from where and
     when; impersonator_user_id preserves accountability so an action taken while
-    impersonating always traces back to the real operator.
-
-    AVG note: this table accumulates personal data (IP addresses, attempted
-    emails) and currently has no retention limit or pruning. A bounded retention
-    period + periodic pruning is a follow-up, to be agreed with the VCSW
-    compliance officer (draft pending sign-off)."""
+    impersonating always traces back to the real operator."""
 
     __tablename__ = "audit_events"
 
