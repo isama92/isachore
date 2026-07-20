@@ -44,6 +44,20 @@ describe('AppSidebar', () => {
     expect(screen.getByRole('link', { name: 'Profile' })).toHaveAttribute('href', '/profile')
   })
 
+  it('renders the core nav items in order', () => {
+    renderSidebar({ user: makeUser() })
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' })
+    const labels = screen.getAllByRole('link').filter((el) => nav.contains(el))
+    expect(labels.map((el) => el.textContent)).toEqual([
+      'Home',
+      'History',
+      'Tags',
+      'Chores',
+      'Households',
+      'Profile',
+    ])
+  })
+
   it('shows the Admin group trigger only for an admin', () => {
     renderSidebar({ user: makeUser({ is_admin: true }) })
     expect(screen.getByRole('button', { name: 'Admin' })).toBeInTheDocument()

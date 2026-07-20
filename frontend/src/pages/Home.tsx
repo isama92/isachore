@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { CheckIcon } from 'lucide-react'
@@ -7,14 +7,39 @@ import { api, ApiError } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
 import { formatDateTime } from '../lib/format'
 import { dueDotClass, relativeDueLabel, sortByDue } from '../lib/home'
-import type { DueChore, HomeData } from '../lib/types'
+import { fullName } from '../lib/user'
+import type { DueChore, HistoryFilterOptions, HomeData } from '../lib/types'
+import { AssigneeMultiSelect } from '@/components/home/AssigneeMultiSelect'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 
 // How long the row's exit animation runs; the row is removed from the list once
 // it finishes. Kept in sync with the `duration-[..]` classes on DueRow.
 const EXIT_MS = 420
+
+// Radix Selects can't hold an empty value, so the "all" option uses a sentinel
+// that maps back to an omitted filter (same pattern as History).
+const ALL = 'all'
+
+const EMPTY_OPTIONS: HistoryFilterOptions = { households: [], members: [] }
 
 function prefersReducedMotion(): boolean {
   return (
@@ -25,8 +50,8 @@ function prefersReducedMotion(): boolean {
 }
 
 // One due chore: a colour-coded status dot + title + a short due label / date /
-// repeat + a "Done" button. On completion the row plays an exit animation
-// (fade + slide + height-collapse) driven by `exiting`, so the rows below glide
+// repeat, the assignee ("who is this for"), and a "Done" button. On completion
+// the row plays an exit animation driven by `exiting`, so the rows below glide
 // up. Module-local (not exported) so Home.tsx keeps a single default export
 // (react-refresh only-export-components).
 function DueRow({
@@ -40,6 +65,8 @@ function DueRow({
   exiting: boolean
   onComplete: (chore: DueChore) => void
 }) {
+  const assignee =
+    chore.assignees.length === 0 ? t('home.unassigned') : chore.assignees.map(fullName).join(', ')
   return (
     <li
       data-exiting={exiting || undefined}
@@ -64,6 +91,9 @@ function DueRow({
               {t(`options.repeat.${chore.repeats}`)}
             </p>
           </div>
+          <span className="hidden max-w-[9rem] shrink-0 truncate text-[13px] font-medium text-muted-foreground sm:inline">
+            {assignee}
+          </span>
           {/* Outline pill in the active accent (--primary) that fills on hover. */}
           <Button
             type="button"
@@ -90,17 +120,62 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null)
   // Ids of rows currently playing their exit animation.
   const [exiting, setExiting] = useState<Set<number>>(new Set())
-  // Monotonic request id so a slow refetch response can't overwrite a newer one
-  // when completions overlap; only the latest refetch is applied.
+  // The chore whose "who gets credit" dialog is open (null = closed). Only shown
+  // when completing a chore assigned to someone other than the current user.
+  const [creditFor, setCreditFor] = useState<DueChore | null>(null)
+
+  const [options, setOptions] = useState<HistoryFilterOptions>(EMPTY_OPTIONS)
+  const [householdId, setHouseholdId] = useState('')
+  // Default view: your chores + shared. Seed the assignee filter with yourself;
+  // adding members widens it, clearing it shows the whole household.
+  const [assigneeIds, setAssigneeIds] = useState<number[]>(() => (user ? [user.id] : []))
+
+  // Monotonic request id so a slow response (a filter change or a completion
+  // refetch) can't overwrite a newer one; only the latest applies.
   const reqRef = useRef(0)
 
-  const fetchHome = useCallback(() => api.get<HomeData>(endpoints.home), [])
+  // The household + member option lists for the filters (shared with History).
+  useEffect(() => {
+    let cancelled = false
+    api
+      .get<HistoryFilterOptions>(endpoints.completions.filters)
+      .then((opts) => {
+        if (!cancelled) setOptions(opts)
+      })
+      .catch(() => {
+        if (!cancelled) setOptions(EMPTY_OPTIONS)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // The current query URL: the filters are per-request state appended to the path.
+  const query = useMemo(() => {
+    const params = new URLSearchParams()
+    if (householdId) params.set('household_id', householdId)
+    for (const id of assigneeIds) params.append('assignee_id', String(id))
+    const qs = params.toString()
+    return qs ? `${endpoints.home}?${qs}` : endpoints.home
+  }, [householdId, assigneeIds])
+
+  const fetchHome = useCallback(() => api.get<HomeData>(query), [query])
+
+  // The post-completion refetch reads the latest fetch via this ref, so
+  // completing a chore and then changing a filter within the animation window
+  // still reconciles against the currently selected filters (not the ones
+  // captured at click time).
+  const fetchHomeRef = useRef(fetchHome)
+  useEffect(() => {
+    fetchHomeRef.current = fetchHome
+  }, [fetchHome])
 
   useEffect(() => {
     let cancelled = false
+    const req = ++reqRef.current
     fetchHome()
       .then((home) => {
-        if (!cancelled) setData(home)
+        if (!cancelled && req === reqRef.current) setData(home)
       })
       .catch(() => {
         if (!cancelled) setError(t('home.loadError'))
@@ -113,13 +188,12 @@ export default function Home() {
     }
   }, [fetchHome, t])
 
-  function handleComplete(chore: DueChore) {
+  function completeChore(chore: DueChore, completedByUserId?: number) {
     if (exiting.has(chore.id)) return // ignore repeat clicks while a row animates out
     setError(null)
     // Play the exit animation for responsiveness, then reconcile the whole view
     // from the server rather than guessing locally: a completed one-off
-    // disappears and a recurring chore reappears at its next occurrence, exactly
-    // as a fresh page load would.
+    // disappears and a recurring chore reappears at its next occurrence.
     setExiting((s) => new Set(s).add(chore.id))
 
     const stopExiting = () =>
@@ -128,44 +202,94 @@ export default function Home() {
         next.delete(chore.id)
         return next
       })
-    // Resolves once the exit animation has run, so the row finishes gliding away
-    // before the refetched list replaces it (even when the network is fast).
     const animated = new Promise<void>((resolve) => {
       window.setTimeout(resolve, prefersReducedMotion() ? 0 : EXIT_MS)
     })
 
-    // Sequence the refetch, not the click: the latest refetch to be *issued*
-    // (each after its completion has committed) wins, so overlapping completions
-    // converge on the freshest snapshot regardless of response order.
+    // Only send a body when crediting someone other than the current user; the
+    // default (no body) credits the caller.
+    const body =
+      completedByUserId === undefined ? undefined : { completed_by_user_id: completedByUserId }
     let req = 0
     api
-      .post(endpoints.chores.complete(chore.id))
+      .post(endpoints.chores.complete(chore.id), body)
       .then(() => {
         req = ++reqRef.current
-        return Promise.all([fetchHome(), animated])
+        return Promise.all([fetchHomeRef.current(), animated])
       })
       .then(([home]) => {
         if (req === reqRef.current) setData(home)
       })
       .catch((err: unknown) => {
-        // Leave `data` untouched so the row simply un-collapses back in place.
         setError(err instanceof ApiError ? err.message : t('home.completeError'))
       })
       .finally(stopExiting)
   }
 
-  const greeting = user ? t('home.greeting', { name: user.first_name }) : 'isachore'
+  // Clicking Done: an unassigned chore, or one I'm already an assignee of,
+  // completes straight away (credited to me). A chore assigned only to other
+  // members opens the credit dialog so I can choose who the History records.
+  function requestComplete(chore: DueChore) {
+    const mine = user ? chore.assignees.some((a) => a.id === user.id) : false
+    if (chore.assignees.length === 0 || mine) {
+      completeChore(chore)
+    } else {
+      setCreditFor(chore)
+    }
+  }
+
+  function creditAndComplete(completedByUserId?: number) {
+    const chore = creditFor
+    setCreditFor(null)
+    if (chore) completeChore(chore, completedByUserId)
+  }
+
+  const isPersonal = !!user && assigneeIds.length === 1 && assigneeIds[0] === user.id
+  const heading = isPersonal ? t('home.titleMine') : t('home.titleHousehold')
   const left = data ? data.progress.total_today - data.progress.done_today : 0
   const pct =
     data && data.progress.total_today > 0
       ? Math.min(100, Math.round((data.progress.done_today / data.progress.total_today) * 100))
       : 0
 
+  const showFilters = options.households.length > 1 || options.members.length > 1
+
   return (
     <main className="mx-auto w-full max-w-3xl px-5 py-8">
-      <h1 className="font-display text-2xl font-bold tracking-tight">{greeting}</h1>
+      <h1 className="font-display text-2xl font-bold tracking-tight">{heading}</h1>
 
       {error && <p className="mt-4 text-[13px] font-bold text-danger">{error}</p>}
+
+      {showFilters && (
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+          {options.households.length > 1 && (
+            <Select
+              value={householdId || ALL}
+              onValueChange={(v) => setHouseholdId(v === ALL ? '' : v)}
+            >
+              <SelectTrigger className="sm:w-56" aria-label={t('home.filters.householdLabel')}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>{t('home.filters.householdAll')}</SelectItem>
+                {options.households.map((h) => (
+                  <SelectItem key={h.id} value={String(h.id)}>
+                    {h.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          {options.members.length > 1 && (
+            <AssigneeMultiSelect
+              members={options.members}
+              value={assigneeIds}
+              onChange={setAssigneeIds}
+              label={t('home.filters.assigneeLabel')}
+            />
+          )}
+        </div>
+      )}
 
       {loading && !data && (
         <p className="mt-6 font-medium text-muted-foreground">{t('common.loading')}</p>
@@ -198,7 +322,7 @@ export default function Home() {
                   chore={chore}
                   t={t}
                   exiting={exiting.has(chore.id)}
-                  onComplete={handleComplete}
+                  onComplete={requestComplete}
                 />
               ))}
             </ul>
@@ -212,6 +336,32 @@ export default function Home() {
           )}
         </>
       )}
+
+      <AlertDialog open={creditFor !== null} onOpenChange={(open) => !open && setCreditFor(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t('home.credit.title', { title: creditFor?.title ?? '' })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('home.credit.body', {
+                names: creditFor ? creditFor.assignees.map(fullName).join(', ') : '',
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            {creditFor?.assignees.map((a) => (
+              <AlertDialogAction key={a.id} onClick={() => creditAndComplete(a.id)}>
+                {t('home.credit.doneAs', { name: fullName(a) })}
+              </AlertDialogAction>
+            ))}
+            <AlertDialogAction onClick={() => creditAndComplete()}>
+              {t('home.credit.doneAsMe')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
   )
 }

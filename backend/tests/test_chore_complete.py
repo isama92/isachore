@@ -161,6 +161,81 @@ async def test_complete_another_members_chore_allowed(
     assert resp.json()["completed_by_user_id"] == me.id
 
 
+async def test_complete_credits_named_assignee(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # I complete a chore assigned to Anna and credit the completion to her, so the
+    # History shows it under her name. The chore's assignees are unchanged.
+    me = await make_user(email="me@example.com")
+    anna = await make_user(email="anna@example.com")
+    household = await make_household(members=[me, anna])
+    today = datetime.now(UTC).date()
+    chore = await make_chore(
+        household=household, start_date=today, repeats=RepeatPeriod.manual, assignees=[anna]
+    )
+    client = await auth_client(me)
+
+    resp = await client.post(
+        f"/api/v1/chores/{chore.id}/complete", json={"completed_by_user_id": anna.id}
+    )
+    assert resp.status_code == 201
+    assert resp.json()["completed_by_user_id"] == anna.id
+    # The assignees were not touched by crediting the completion.
+    detail = (await client.get(f"/api/v1/chores/{chore.id}")).json()
+    assert [a["id"] for a in detail["assignees"]] == [anna.id]
+
+
+async def test_complete_credit_to_self_always_allowed(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # Crediting yourself is fine even when you are not an assignee (e.g. an
+    # unassigned chore, or the "Done as me" branch on someone else's chore).
+    me = await make_user(email="me@example.com")
+    anna = await make_user(email="anna@example.com")
+    household = await make_household(members=[me, anna])
+    today = datetime.now(UTC).date()
+    chore = await make_chore(
+        household=household, start_date=today, repeats=RepeatPeriod.manual, assignees=[anna]
+    )
+    client = await auth_client(me)
+
+    resp = await client.post(
+        f"/api/v1/chores/{chore.id}/complete", json={"completed_by_user_id": me.id}
+    )
+    assert resp.status_code == 201
+    assert resp.json()["completed_by_user_id"] == me.id
+
+
+async def test_complete_credit_to_non_assignee_rejected(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # A completion can only be credited to the current user or one of the chore's
+    # assignees, never to an arbitrary member.
+    me = await make_user(email="me@example.com")
+    anna = await make_user(email="anna@example.com")
+    bram = await make_user(email="bram@example.com")
+    household = await make_household(members=[me, anna, bram])
+    today = datetime.now(UTC).date()
+    chore = await make_chore(
+        household=household, start_date=today, repeats=RepeatPeriod.manual, assignees=[anna]
+    )
+    client = await auth_client(me)
+
+    resp = await client.post(
+        f"/api/v1/chores/{chore.id}/complete", json={"completed_by_user_id": bram.id}
+    )
+    assert resp.status_code == 400
+
+
 async def test_repeated_completion_marches_the_due_date_forward(
     make_user: MakeUser,
     make_household: MakeHousehold,

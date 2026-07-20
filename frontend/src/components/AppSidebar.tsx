@@ -45,10 +45,10 @@ export default function AppSidebar() {
 
   const items = [
     { to: routes.home, icon: Home, label: t('sidebar.home') },
-    { to: routes.households.list, icon: House, label: t('sidebar.households') },
-    { to: routes.chores.list, icon: ClipboardList, label: t('sidebar.chores') },
     { to: routes.history, icon: History, label: t('sidebar.history') },
     { to: routes.tags.list, icon: TagIcon, label: t('sidebar.tags') },
+    { to: routes.chores.list, icon: ClipboardList, label: t('sidebar.chores') },
+    { to: routes.households.list, icon: House, label: t('sidebar.households') },
     { to: routes.profile, icon: CircleUser, label: t('sidebar.profile') },
   ]
 

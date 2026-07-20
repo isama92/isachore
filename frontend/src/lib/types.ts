@@ -93,7 +93,9 @@ export type HistoryFilterOptions = {
 export type DueStatus = 'overdue' | 'today' | 'soon'
 
 // A chore due within the Home window (overdue / today / next 7 days), with its
-// server-computed due state. days_until_due is negative when overdue, 0 today.
+// server-computed due state plus the household it belongs to and its assignees,
+// so a row can show whose chore it is (data-minimised member shape, no email).
+// days_until_due is negative when overdue, 0 today.
 export type DueChore = {
   id: number
   title: string
@@ -101,9 +103,12 @@ export type DueChore = {
   next_due: string
   days_until_due: number
   status: DueStatus
+  household: { id: number; name: string }
+  assignees: HouseholdMember[]
 }
 
-// Payload of the Home due view: GET /api/v1/home.
+// Payload of the Home due view: GET /api/v1/home (progress across the filtered
+// scope + the due chores in it).
 export type HomeData = {
   progress: { done_today: number; total_today: number }
   items: DueChore[]

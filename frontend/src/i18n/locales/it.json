@@ -49,7 +49,9 @@
     "error": "Qualcosa è andato storto, riprova"
   },
   "home": {
-    "greeting": "Ciao, {{name}}",
+    "titleMine": "Le tue faccende",
+    "titleHousehold": "Faccende del nucleo domestico",
+    "unassigned": "Non assegnata",
     "progress": {
       "doneToday": "{{done}} di {{total}} fatte oggi",
       "left": "{{count}} da fare"
@@ -66,7 +68,21 @@
     "markDone": "Fatto: “{{title}}”",
     "done": "Fatto",
     "loadError": "Impossibile caricare le tue faccende in scadenza",
-    "completeError": "Impossibile segnare la faccenda come completata"
+    "completeError": "Impossibile segnare la faccenda come completata",
+    "filters": {
+      "householdLabel": "Nucleo domestico",
+      "householdAll": "Tutti i nuclei domestici",
+      "assigneeLabel": "Assegnatari",
+      "assigneeAll": "Tutti gli assegnatari",
+      "assigneeSearch": "Cerca membri…",
+      "assigneeEmpty": "Nessun membro trovato."
+    },
+    "credit": {
+      "title": "Completare “{{title}}”?",
+      "body": "Questa faccenda è assegnata a {{names}}. A chi va attribuito il completamento nella cronologia?",
+      "doneAsMe": "Fatto da me",
+      "doneAs": "Fatto da {{name}}"
+    }
   },
   "chores": {
     "title": "Faccende",

@@ -5,7 +5,7 @@ import type { DueChore, DueStatus } from './types'
 // keeps a stable, predictable order (e.g. a chore that reappears at its next
 // occurrence after completion lands in the right slot). The server already
 // sorts; this is defensive.
-export function sortByDue(items: DueChore[]): DueChore[] {
+export function sortByDue<T extends DueChore>(items: T[]): T[] {
   return [...items].sort(
     (a, b) => new Date(a.next_due).getTime() - new Date(b.next_due).getTime() || a.id - b.id,
   )

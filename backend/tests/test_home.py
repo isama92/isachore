@@ -59,12 +59,14 @@ async def test_home_lists_and_sorts_due_chores(
     }
 
 
-async def test_home_scopes_to_mine_and_unassigned(
+async def test_home_no_filter_shows_all_members_chores(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
     auth_client: AuthClient,
 ) -> None:
+    # With no assignee filter the view is the whole household: every member's
+    # chores plus unassigned/shared ones.
     me = await make_user(email="me@example.com")
     other = await make_user(email="other@example.com")
     household = await make_household(members=[me, other])
@@ -76,7 +78,101 @@ async def test_home_scopes_to_mine_and_unassigned(
     client = await auth_client(me)
 
     resp = await client.get("/api/v1/home")
+    assert {i["title"] for i in resp.json()["items"]} == {
+        "Unassigned",
+        "Mine",
+        "Both",
+        "Theirs",
+    }
+
+
+async def test_home_assignee_filter_keeps_mine_plus_unassigned(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # The frontend's default: seed the assignee filter with the current user, so
+    # the view is their chores plus shared/unassigned ones (another member's chore
+    # is excluded).
+    me = await make_user(email="me@example.com")
+    other = await make_user(email="other@example.com")
+    household = await make_household(members=[me, other])
+    today = datetime.now(UTC).date()
+    await make_chore(household=household, title="Unassigned", start_date=today)
+    await make_chore(household=household, title="Mine", start_date=today, assignees=[me])
+    await make_chore(household=household, title="Both", start_date=today, assignees=[me, other])
+    await make_chore(household=household, title="Theirs", start_date=today, assignees=[other])
+    client = await auth_client(me)
+
+    resp = await client.get("/api/v1/home", params={"assignee_id": me.id})
     assert {i["title"] for i in resp.json()["items"]} == {"Unassigned", "Mine", "Both"}
+
+
+async def test_home_assignee_filter_multiple_members(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    me = await make_user(email="me@example.com")
+    anna = await make_user(email="anna@example.com")
+    bram = await make_user(email="bram@example.com")
+    household = await make_household(members=[me, anna, bram])
+    today = datetime.now(UTC).date()
+    await make_chore(household=household, title="Unassigned", start_date=today)
+    await make_chore(household=household, title="AnnaTask", start_date=today, assignees=[anna])
+    await make_chore(household=household, title="BramTask", start_date=today, assignees=[bram])
+    client = await auth_client(me)
+
+    # Multiple assignee ids are OR-ed together; unassigned/shared stays visible.
+    resp = await client.get(
+        "/api/v1/home", params=[("assignee_id", anna.id), ("assignee_id", bram.id)]
+    )
+    assert {i["title"] for i in resp.json()["items"]} == {"Unassigned", "AnnaTask", "BramTask"}
+
+
+async def test_home_household_filter(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    user = await make_user()
+    a = await make_household(name="A", members=[user])
+    b = await make_household(name="B", members=[user])
+    today = datetime.now(UTC).date()
+    await make_chore(household=a, title="InA", start_date=today)
+    await make_chore(household=b, title="InB", start_date=today)
+    client = await auth_client(user)
+
+    resp = await client.get("/api/v1/home", params={"household_id": a.id})
+    assert {i["title"] for i in resp.json()["items"]} == {"InA"}
+    # A household the user can't see yields an empty scope, not an error.
+    foreign = await make_household(name="Foreign")
+    resp = await client.get("/api/v1/home", params={"household_id": foreign.id})
+    assert resp.status_code == 200
+    assert resp.json()["items"] == []
+
+
+async def test_home_items_carry_household_and_assignees(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    me = await make_user(email="me@example.com", first_name="Me", last_name="Myself")
+    anna = await make_user(email="anna@example.com", first_name="Anna", last_name="Aardvark")
+    household = await make_household(name="Home Base", members=[me, anna])
+    today = datetime.now(UTC).date()
+    await make_chore(household=household, title="Water plants", start_date=today, assignees=[anna])
+    client = await auth_client(me)
+
+    item = (await client.get("/api/v1/home")).json()["items"][0]
+    assert item["household"] == {"id": household.id, "name": "Home Base"}
+    assert item["assignees"] == [{"id": anna.id, "first_name": "Anna", "last_name": "Aardvark"}]
+    # Data minimisation: the member shape must not leak email.
+    assert "email" not in item["assignees"][0]
 
 
 async def test_home_excludes_foreign_deleted_and_dead_household(

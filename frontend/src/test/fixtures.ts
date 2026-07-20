@@ -136,6 +136,8 @@ export function makeDueChore(overrides: Partial<DueChore> = {}): DueChore {
     next_due: '2026-07-20T09:00:00Z',
     days_until_due: 2,
     status: 'soon',
+    household: { id: 1, name: 'Test Household' },
+    assignees: [],
     ...overrides,
   }
 }

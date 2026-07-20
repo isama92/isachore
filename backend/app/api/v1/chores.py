@@ -11,7 +11,14 @@ from app.api.v1.households import SortDir
 from app.core.chores import advance_anchor, days_until_due, due_status, next_due
 from app.core.households import get_member_household, member_household_ids
 from app.models import Chore, CompletedChore, Household, Tag, User, UserStatus, household_members
-from app.schemas import ChoreCreate, ChoreRead, ChoreUpdate, CompletionRead, Page
+from app.schemas import (
+    ChoreCreate,
+    ChoreRead,
+    ChoreUpdate,
+    CompleteChoreRequest,
+    CompletionRead,
+    Page,
+)
 
 router = APIRouter()
 
@@ -207,11 +214,33 @@ async def delete_chore(chore_id: int, user: CurrentUser, session: SessionDep) ->
 @router.post(
     "/{chore_id}/complete", response_model=CompletionRead, status_code=status.HTTP_201_CREATED
 )
-async def complete_chore(chore_id: int, user: CurrentUser, session: SessionDep) -> CompletionRead:
+async def complete_chore(
+    chore_id: int,
+    user: CurrentUser,
+    session: SessionDep,
+    payload: CompleteChoreRequest | None = None,
+) -> CompletionRead:
     """Mark a chore's current occurrence done. Any member of the chore's household
     may complete it. Records a completion (with the occurrence's due datetime) and
-    advances the chore so its next occurrence is one interval away."""
+    advances the chore so its next occurrence is one interval away.
+
+    By default the completion is credited to the caller. An optional
+    `completed_by_user_id` credits it to another member so the History shows it
+    under their name (used by the Home due view's credit dialog), but only if that
+    member is one of the chore's current assignees; the chore's assignees are
+    never modified."""
     chore = await _get_user_chore_or_404(session, user, chore_id)
+    # Who the History credits. The caller may hand a completion to one of the
+    # chore's assignees, but not to an arbitrary user (crediting yourself is
+    # always allowed, e.g. an unassigned chore or "Done as me").
+    completed_by_id = user.id
+    if payload is not None and payload.completed_by_user_id is not None:
+        completed_by_id = payload.completed_by_user_id
+        if completed_by_id != user.id and not any(a.id == completed_by_id for a in chore.assignees):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A completion can only be credited to the current user or an assignee",
+            )
     # Capture the occurrence being completed BEFORE advancing the schedule anchor,
     # otherwise scheduled_for would be the *next* occurrence's due date.
     scheduled_for = next_due(chore)
@@ -225,7 +254,7 @@ async def complete_chore(chore_id: int, user: CurrentUser, session: SessionDep) 
         chore_id=chore.id,
         title=chore.title,
         scheduled_for=scheduled_for,
-        completed_by_user_id=user.id,
+        completed_by_user_id=completed_by_id,
     )
     # Anchor the schedule to the occurrence just cleared, not to the wall-clock
     # completion time, so the next due date advances by one interval on the grid

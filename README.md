@@ -146,14 +146,15 @@ completion and a daily progress bar.
 
 The app is organised into four areas (context for future work):
 
-- **Homepage**: due views for the active user (what is overdue, due today, due soon).
+- **Homepage**: the due view (what is overdue, due today, due soon), filterable by
+  household and by assignees. It defaults to your own chores plus shared ones, and
+  widening the assignee filter shows the whole household's.
 - **Admin**: manage server settings, users, and anything else that comes up.
 - **Chores management**: manage the household's chores.
 - **Tags management**: create, edit and delete tags.
 
 - [ ] assignment options to alternate between the assignee . Option to alternate after each completion or intervals (e.g. every 3 completion, swap assigned person)
 - [ ] completion chart: add a way to show the completion chart of a chore: eg. for a weekly chore show a chart that shows each week, and for each week shows how many time it has been completed (so you can see how frequently it wasn't completed or how frequently it was done more time than necessary)
-- [ ] a page similar to the homepage but with all members tasks (so to have an overview)
 - [ ] if one persone mark a task as done, the other person see it live (websocket)
 - [ ] CI (lint + test on push)
 - [ ] Prod deploy hardening (TLS, real secrets management, DB backups)

@@ -49,7 +49,9 @@
     "error": "Something went wrong, please try again"
   },
   "home": {
-    "greeting": "Hi, {{name}}",
+    "titleMine": "Your chores",
+    "titleHousehold": "Household chores",
+    "unassigned": "Unassigned",
     "progress": {
       "doneToday": "{{done}} of {{total}} done today",
       "left": "{{count}} left"
@@ -66,7 +68,21 @@
     "markDone": "Done: “{{title}}”",
     "done": "Done",
     "loadError": "Failed to load your due chores",
-    "completeError": "Could not mark the chore done"
+    "completeError": "Could not mark the chore done",
+    "filters": {
+      "householdLabel": "Household",
+      "householdAll": "All households",
+      "assigneeLabel": "Assignees",
+      "assigneeAll": "All assignees",
+      "assigneeSearch": "Search members…",
+      "assigneeEmpty": "No members found."
+    },
+    "credit": {
+      "title": "Complete “{{title}}”?",
+      "body": "This chore is assigned to {{names}}. Who should the History credit for this completion?",
+      "doneAsMe": "Done as me",
+      "doneAs": "Done as {{name}}"
+    }
   },
   "chores": {
     "title": "Chores",
