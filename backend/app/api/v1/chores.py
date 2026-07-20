@@ -8,7 +8,7 @@ from sqlalchemy.orm import contains_eager, selectinload
 
 from app.api.deps import CurrentUser, SessionDep
 from app.api.v1.households import SortDir
-from app.core.chores import days_until_due, due_status, next_due
+from app.core.chores import advance_anchor, days_until_due, due_status, next_due
 from app.core.households import get_member_household, member_household_ids
 from app.models import Chore, CompletedChore, Household, Tag, User, UserStatus, household_members
 from app.schemas import ChoreCreate, ChoreRead, ChoreUpdate, CompletionRead, Page
@@ -212,7 +212,7 @@ async def complete_chore(chore_id: int, user: CurrentUser, session: SessionDep) 
     may complete it. Records a completion (with the occurrence's due datetime) and
     advances the chore so its next occurrence is one interval away."""
     chore = await _get_user_chore_or_404(session, user, chore_id)
-    # Capture the occurrence being completed BEFORE advancing last_completed_at,
+    # Capture the occurrence being completed BEFORE advancing the schedule anchor,
     # otherwise scheduled_for would be the *next* occurrence's due date.
     scheduled_for = next_due(chore)
     if scheduled_for is None:
@@ -227,7 +227,10 @@ async def complete_chore(chore_id: int, user: CurrentUser, session: SessionDep) 
         scheduled_for=scheduled_for,
         completed_by_user_id=user.id,
     )
-    chore.last_completed_at = datetime.now(UTC)
+    # Anchor the schedule to the occurrence just cleared, not to the wall-clock
+    # completion time, so the next due date advances by one interval on the grid
+    # (and an overdue chore skips its backlog to the next future slot).
+    chore.schedule_anchor = advance_anchor(scheduled_for, datetime.now(UTC), chore.repeats)
     session.add(completion)
     try:
         await session.commit()

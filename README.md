@@ -151,7 +151,6 @@ The app is organised into four areas (context for future work):
 - **Chores management**: manage the household's chores.
 - **Tags management**: create, edit and delete tags.
 
-- [ ] bug: if i have a daily chore due today (19/07), and i complete it and refresh the page, a new one will appear due in one day (20/07), if i also complete that one and refresh the page it will appear again as due in one day (20/07) but i would expect it to be due in two days (21/07), and if i complete it again it should become due in three days (22/07). I believe the cause is that the last_completed_at is today, maybe we should use the history table to calculate when a chore is due - any better ideas?
 - [ ] completion chart: add a way to show the completion chart of a chore: eg. for a weekly chore show a chart that shows each week, and for each week shows how many time it has been completed (so you can see how frequently it wasn't completed or how frequently it was done more time than necessary)
 - [ ] CI (lint + test on push)
 - [ ] Prod deploy hardening (TLS, real secrets management, DB backups)

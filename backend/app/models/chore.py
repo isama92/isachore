@@ -58,12 +58,11 @@ class Chore(Base):
     assignment_type: Mapped[AssignmentType] = mapped_column(
         SAEnum(AssignmentType, name="assignment_type")
     )
-    # When this chore was last checked off. NULL means never completed. Denormalised
-    # from completed_chores so the due-date computation (next_due = last_completed_at
-    # + interval) doesn't have to query the history table. Set on each completion.
-    last_completed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None
-    )
+    # The scheduled date of the last cleared occurrence (skip-missed applied); the
+    # anchor for the due-date computation (next_due = schedule_anchor + interval).
+    # NULL means never completed. Denormalised from completed_chores so next_due
+    # doesn't have to query the history table. Set on each completion.
+    schedule_anchor: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     # Soft delete: NULL means active, a timestamp means the chore is deleted and
     # hidden from the list (mirrors households; recoverable only via the DB).
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)

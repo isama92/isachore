@@ -6,7 +6,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, SessionDep
 from app.api.v1.households import SortDir
-from app.core.chores import days_late
+from app.core.chores import advance_anchor, days_late
 from app.core.households import member_household_ids
 from app.models import Chore, CompletedChore, Household, User, UserStatus, household_members
 from app.schemas import HistoryEntryRead, HistoryFilterOptions, Page
@@ -133,8 +133,8 @@ async def list_completions(
 async def undo_completion(completion_id: int, user: CurrentUser, session: SessionDep) -> None:
     """Undo a completion: delete the record and roll the chore's schedule back.
     Only the person who recorded the completion may undo it. Deleting the latest
-    completion reverts last_completed_at to the prior one (the chore becomes due
-    again); deleting an older one only edits history."""
+    completion re-derives the schedule anchor from the prior one (the chore becomes
+    due again); deleting an older one only edits history."""
     # Scope to the user's active households (same scope as the list): a completion
     # outside it, or a missing id, is a 404.
     completion = (
@@ -158,10 +158,22 @@ async def undo_completion(completion_id: int, user: CurrentUser, session: Sessio
 
     chore = completion.chore
     await session.delete(completion)
-    await session.flush()  # so the deleted row is excluded from the MAX below
-    # Re-anchor the denormalised last_completed_at to the latest remaining
-    # completion (NULL if none remain -> the chore reverts to never-completed).
-    chore.last_completed_at = await session.scalar(
-        select(func.max(CompletedChore.created_at)).where(CompletedChore.chore_id == chore.id)
+    await session.flush()  # so the deleted row is excluded from the lookup below
+    # Re-derive the schedule anchor from the latest remaining completion: the
+    # anchor is a pure function of that row's scheduled_for + the date of its
+    # created_at, so this reproduces the anchor stored when it was recorded. NULL
+    # if none remain -> the chore reverts to never-completed.
+    latest = (
+        await session.execute(
+            select(CompletedChore)
+            .where(CompletedChore.chore_id == chore.id)
+            .order_by(CompletedChore.created_at.desc(), CompletedChore.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    chore.schedule_anchor = (
+        advance_anchor(latest.scheduled_for, latest.created_at, chore.repeats)
+        if latest is not None
+        else None
     )
     await session.commit()

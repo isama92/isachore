@@ -55,7 +55,7 @@ async def test_complete_records_completion_and_advances(
     assert body["status"] == "soon"
 
     refreshed = (await db_session.execute(select(Chore).where(Chore.id == chore.id))).scalar_one()
-    assert refreshed.last_completed_at is not None
+    assert refreshed.schedule_anchor is not None
 
     completions = (
         (
@@ -161,21 +161,29 @@ async def test_complete_another_members_chore_allowed(
     assert resp.json()["completed_by_user_id"] == me.id
 
 
-async def test_second_completion_records_next_occurrence(
+async def test_repeated_completion_marches_the_due_date_forward(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
     auth_client: AuthClient,
 ) -> None:
+    # Regression for the schedule-anchoring bug: completing a daily chore several
+    # times in a row (same day) must advance the due date by one calendar day each
+    # time (in 1 day, then 2, then 3), not stay stuck at "due tomorrow" because the
+    # schedule was re-anchored to the wall-clock completion time.
     user = await make_user()
     household = await make_household(members=[user])
     today = datetime.now(UTC).date()
     chore = await make_chore(household=household, start_date=today, repeats=RepeatPeriod.daily)
     client = await auth_client(user)
 
-    first = await client.post(f"/api/v1/chores/{chore.id}/complete")
-    assert first.status_code == 201
-    second = await client.post(f"/api/v1/chores/{chore.id}/complete")
-    assert second.status_code == 201
-    # The second completion records a later occurrence, not the same one again.
-    assert second.json()["scheduled_for"] > first.json()["scheduled_for"]
+    scheduled_fors = []
+    for expected_days in (1, 2, 3):
+        resp = await client.post(f"/api/v1/chores/{chore.id}/complete")
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["days_until_due"] == expected_days
+        scheduled_fors.append(body["scheduled_for"])
+
+    # Each completion cleared the next occurrence, one calendar day later than the last.
+    assert scheduled_fors[0] < scheduled_fors[1] < scheduled_fors[2]

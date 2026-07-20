@@ -169,7 +169,7 @@ async def test_home_progress_ignores_completions_before_today(
         title="Old",
         start_date=(_midnight(-1)).date(),
         repeats=RepeatPeriod.daily,
-        last_completed_at=yesterday_noon,  # -> next_due is today, so it's pending
+        schedule_anchor=yesterday_noon,  # -> next_due is today, so it's pending
     )
     await make_completion(chore=chore, scheduled_for=_midnight(-1), created_at=yesterday_noon)
     client = await auth_client(user)

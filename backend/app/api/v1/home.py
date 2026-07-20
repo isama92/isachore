@@ -23,7 +23,7 @@ async def get_home(user: CurrentUser, session: SessionDep) -> HomeRead:
     nobody (chores assigned to other members are excluded)."""
     now = datetime.now(UTC)
 
-    # Scaling note: next_due is derived from start_date + repeats + last_completed_at
+    # Scaling note: next_due is derived from start_date + repeats + schedule_anchor
     # (with month/year clamping), so it can't be expressed in SQL and the due-window
     # filter runs in Python below. This loads every in-scope chore per request -
     # O(chores in the user's households), regardless of how few are actually due.

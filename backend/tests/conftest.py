@@ -266,7 +266,7 @@ def make_chore(db_session: AsyncSession) -> Callable[..., Awaitable[Chore]]:
         assignment_type: AssignmentType = AssignmentType.manual,
         assignees: list[User] | None = None,
         tags: list[Tag] | None = None,
-        last_completed_at: datetime | None = None,
+        schedule_anchor: datetime | None = None,
     ) -> Chore:
         chore = Chore(
             household_id=household.id,
@@ -275,7 +275,7 @@ def make_chore(db_session: AsyncSession) -> Callable[..., Awaitable[Chore]]:
             start_date=start_date or date(2026, 7, 16),
             repeats=repeats,
             assignment_type=assignment_type,
-            last_completed_at=last_completed_at,
+            schedule_anchor=schedule_anchor,
         )
         if assignees:
             chore.assignees.extend(assignees)

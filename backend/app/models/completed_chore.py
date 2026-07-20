@@ -25,8 +25,8 @@ class CompletedChore(Base):
     __tablename__ = "completed_chores"
     # A single occurrence (chore_id, scheduled_for) can only be completed once.
     # Legitimate consecutive occurrences always differ in scheduled_for (each is
-    # last_completed_at + interval), so this only rejects a double-submit of the
-    # same occurrence.
+    # one interval past the previous schedule_anchor), so this only rejects a
+    # double-submit of the same occurrence.
     __table_args__ = (UniqueConstraint("chore_id", "scheduled_for"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)

@@ -1,11 +1,14 @@
 """Pure, DB-free due-date logic for chores.
 
 Chores store only a `start_date` + a `repeats` period and a denormalised
-`last_completed_at`; there is no stored due date. The due date of the next
-occurrence is derived here (completion-anchored recurrence): a never-completed
-chore is first due on its start_date, and completing a chore schedules the next
-occurrence one interval after the completion time. `manual` chores are one-offs
-and have no next occurrence once completed.
+`schedule_anchor`; there is no stored due date. The due date of the next
+occurrence is derived here (schedule-anchored recurrence): a never-completed
+chore is first due on its start_date, and completing a chore anchors the schedule
+to the occurrence it cleared, so the next occurrence falls one interval after that
+scheduled date, not after the wall-clock completion time. Completing an overdue
+chore skips the missed occurrences and jumps to the next future slot; see
+`advance_anchor`. `manual` chores are one-offs and have no next occurrence once
+completed.
 
 All datetimes are handled in UTC. There is no per-user timezone today, so "today"
 is a UTC-day boundary for everyone (a per-user timezone is a future enhancement).
@@ -51,16 +54,40 @@ def _add_interval(dt: datetime, repeats: RepeatPeriod) -> datetime:
             raise ValueError(f"{repeats} has no recurrence interval")
 
 
+def advance_anchor(
+    scheduled_for: datetime, completed_at: datetime, repeats: RepeatPeriod
+) -> datetime:
+    """The new schedule anchor after completing the `scheduled_for` occurrence at
+    `completed_at`. `next_due` returns one interval past this anchor.
+
+    Rolls forward on the recurrence grid, skipping every occurrence whose date is
+    on or before the completion date: an early completion advances exactly one
+    interval (the occurrence stays ahead), while an overdue completion jumps
+    straight to the next strictly-future occurrence, so missed occurrences are not
+    backfilled. Walking the grid from `scheduled_for` preserves the weekday /
+    day-of-month / time-of-day."""
+    if repeats == RepeatPeriod.manual:
+        # A one-off has no interval; any non-null anchor marks it done and
+        # next_due returns None for it regardless.
+        return scheduled_for
+    completed_date = completed_at.astimezone(UTC).date()
+    anchor = scheduled_for
+    nxt = _add_interval(anchor, repeats)
+    while nxt.astimezone(UTC).date() <= completed_date:
+        anchor, nxt = nxt, _add_interval(nxt, repeats)
+    return anchor
+
+
 def next_due(chore: Chore) -> datetime | None:
     """The chore's next due datetime (UTC), or None if it has no next occurrence
     (a completed `manual` one-off)."""
-    if chore.last_completed_at is None:
-        # First occurrence: midnight UTC of the start date.
+    if chore.schedule_anchor is None:
+        # Never completed: first occurrence is midnight UTC of the start date.
         start = chore.start_date
         return datetime(start.year, start.month, start.day, tzinfo=UTC)
     if chore.repeats == RepeatPeriod.manual:
         return None
-    return _add_interval(chore.last_completed_at, chore.repeats)
+    return _add_interval(chore.schedule_anchor, chore.repeats)
 
 
 def days_until_due(due: datetime, now: datetime) -> int:

@@ -378,7 +378,7 @@ async def test_completion_filters_excludes_disabled_members(
 # --- undo (DELETE /completions/{id}) --------------------------------------
 
 
-async def test_undo_latest_reverts_last_completed_at(
+async def test_undo_latest_reverts_schedule_anchor(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
@@ -389,7 +389,7 @@ async def test_undo_latest_reverts_last_completed_at(
     user = await make_user()
     household = await make_household(members=[user])
     t1, t2 = DUE, DUE + timedelta(days=1)
-    chore = await make_chore(household=household, repeats=RepeatPeriod.daily, last_completed_at=t2)
+    chore = await make_chore(household=household, repeats=RepeatPeriod.daily, schedule_anchor=t2)
     await make_completion(chore=chore, scheduled_for=DUE, completed_by=user, created_at=t1)
     latest = await make_completion(chore=chore, scheduled_for=t2, completed_by=user, created_at=t2)
     client = await auth_client(user)
@@ -398,13 +398,13 @@ async def test_undo_latest_reverts_last_completed_at(
     assert resp.status_code == 204
 
     refreshed = (await db_session.execute(select(Chore).where(Chore.id == chore.id))).scalar_one()
-    # Rolled back to the previous completion's timestamp: the chore is due again.
-    assert refreshed.last_completed_at == t1
+    # Re-derived from the previous (on-time) completion: the chore is due again.
+    assert refreshed.schedule_anchor == t1
     remaining = (await db_session.execute(select(CompletedChore.id))).scalars().all()
     assert latest.id not in remaining
 
 
-async def test_undo_only_completion_clears_last_completed_at(
+async def test_undo_only_completion_clears_schedule_anchor(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
@@ -414,7 +414,7 @@ async def test_undo_only_completion_clears_last_completed_at(
 ) -> None:
     user = await make_user()
     household = await make_household(members=[user])
-    chore = await make_chore(household=household, last_completed_at=DUE)
+    chore = await make_chore(household=household, schedule_anchor=DUE)
     only = await make_completion(chore=chore, scheduled_for=DUE, completed_by=user, created_at=DUE)
     client = await auth_client(user)
 
@@ -422,7 +422,7 @@ async def test_undo_only_completion_clears_last_completed_at(
     assert resp.status_code == 204
 
     refreshed = (await db_session.execute(select(Chore).where(Chore.id == chore.id))).scalar_one()
-    assert refreshed.last_completed_at is None
+    assert refreshed.schedule_anchor is None
 
 
 async def test_undo_older_completion_leaves_schedule_unchanged(
@@ -436,7 +436,7 @@ async def test_undo_older_completion_leaves_schedule_unchanged(
     user = await make_user()
     household = await make_household(members=[user])
     t1, t2, t3 = DUE, DUE + timedelta(days=1), DUE + timedelta(days=2)
-    chore = await make_chore(household=household, repeats=RepeatPeriod.daily, last_completed_at=t3)
+    chore = await make_chore(household=household, repeats=RepeatPeriod.daily, schedule_anchor=t3)
     await make_completion(chore=chore, scheduled_for=DUE, completed_by=user, created_at=t1)
     middle = await make_completion(chore=chore, scheduled_for=t2, completed_by=user, created_at=t2)
     await make_completion(chore=chore, scheduled_for=t3, completed_by=user, created_at=t3)
@@ -446,8 +446,46 @@ async def test_undo_older_completion_leaves_schedule_unchanged(
     assert resp.status_code == 204
 
     refreshed = (await db_session.execute(select(Chore).where(Chore.id == chore.id))).scalar_one()
-    # Deleting a non-latest completion is a history edit: MAX(created_at) is still t3.
-    assert refreshed.last_completed_at == t3
+    # Deleting a non-latest completion is a history edit: the schedule is still
+    # re-derived from the latest remaining completion (t3).
+    assert refreshed.schedule_anchor == t3
+
+
+async def test_undo_re_anchors_to_the_grid_not_the_completion_timestamp(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_completion: MakeCompletion,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    # Undo re-derives the anchor from the latest remaining completion via
+    # advance_anchor, so a late completion re-anchors to its occurrence's grid slot
+    # (DUE's 08:00 time-of-day), NOT to the wall-clock completion timestamp (14:00).
+    user = await make_user()
+    household = await make_household(members=[user])
+    late_created = DUE + timedelta(days=3, hours=6)  # completed ~3 days late, at 14:00
+    chore = await make_chore(
+        household=household, repeats=RepeatPeriod.daily, schedule_anchor=DUE + timedelta(days=4)
+    )
+    await make_completion(
+        chore=chore, scheduled_for=DUE, completed_by=user, created_at=late_created
+    )
+    latest = await make_completion(
+        chore=chore,
+        scheduled_for=DUE + timedelta(days=4),
+        completed_by=user,
+        created_at=DUE + timedelta(days=4),
+    )
+    client = await auth_client(user)
+
+    resp = await client.delete(f"/api/v1/completions/{latest.id}")
+    assert resp.status_code == 204
+
+    refreshed = (await db_session.execute(select(Chore).where(Chore.id == chore.id))).scalar_one()
+    # The grid slot on DUE's time-of-day (08:00), not the 14:00 completion timestamp.
+    assert refreshed.schedule_anchor == DUE + timedelta(days=3)
+    assert refreshed.schedule_anchor != late_created
 
 
 async def test_undo_another_members_completion_403(
