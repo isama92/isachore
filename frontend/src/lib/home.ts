@@ -1,9 +1,10 @@
 import type { TFunction } from 'i18next'
 import type { DueChore, DueStatus } from './types'
 
-// Most-overdue-first, matching the server's (next_due, id) order so an
-// optimistically-removed row that has to be rolled back returns to its exact
-// slot (not just its day). The server already sorts; this is defensive.
+// Most-overdue-first, matching the server's (next_due, id) order so the list
+// keeps a stable, predictable order (e.g. a chore that reappears at its next
+// occurrence after completion lands in the right slot). The server already
+// sorts; this is defensive.
 export function sortByDue(items: DueChore[]): DueChore[] {
   return [...items].sort(
     (a, b) => new Date(a.next_due).getTime() - new Date(b.next_due).getTime() || a.id - b.id,

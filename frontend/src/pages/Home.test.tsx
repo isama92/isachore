@@ -68,14 +68,22 @@ describe('Home', () => {
     expect(soon.textContent).toContain('in 2 days')
   })
 
-  it('completes a chore: posts, removes the row, and advances progress', async () => {
+  it('completes a chore: posts, refetches, and the finished one-off disappears', async () => {
+    let homeCalls = 0
     const fetchMock = mockFetch([
       {
         path: '/api/v1/home',
         method: 'GET',
-        body: homeBody(0, 1, [
-          makeDueChore({ id: 7, title: 'Do the dishes', status: 'today', days_until_due: 0 }),
-        ]),
+        // Load lists the chore; the post-completion refetch no longer does (a
+        // completed one-off has no next occurrence).
+        body: () => {
+          homeCalls += 1
+          return homeCalls === 1
+            ? homeBody(0, 1, [
+                makeDueChore({ id: 7, title: 'Do the dishes', status: 'today', days_until_due: 0 }),
+              ])
+            : homeBody(1, 1, [])
+        },
       },
       { path: COMPLETE, method: 'POST', status: 201, body: {} },
     ])
@@ -90,20 +98,87 @@ describe('Home', () => {
       ([url, init]) => String(url).includes('/api/v1/chores/7/complete') && init?.method === 'POST',
     )
     expect(posted).toBe(true)
-    // The row plays its exit animation, then is removed and progress advances.
+    // The row plays its exit animation, then the refetched list drops it.
     await waitFor(() => expect(screen.queryByText('Do the dishes')).not.toBeInTheDocument())
     expect(screen.getByText('1 of 1 done today')).toBeInTheDocument()
+    // Completion triggers a second GET /api/v1/home (the refetch).
+    const homeGets = fetchMock.mock.calls.filter(
+      ([url, init]) => String(url).includes('/api/v1/home') && (init?.method ?? 'GET') === 'GET',
+    )
+    expect(homeGets.length).toBe(2)
   })
 
-  it('completing a not-yet-due chore removes it without advancing progress', async () => {
+  it('refetches after completion and shows a recurring chore at its next occurrence', async () => {
+    let homeCalls = 0
     mockFetch([
       {
         path: '/api/v1/home',
         method: 'GET',
-        body: homeBody(1, 2, [
-          makeDueChore({ id: 5, title: 'Water the plants', status: 'soon', days_until_due: 3 }),
-          makeDueChore({ id: 6, title: 'Do the dishes', status: 'today', days_until_due: 0 }),
-        ]),
+        // After completing today's occurrence the daily chore is due tomorrow, so
+        // the refetch lists it again as a "soon" row (matching a page reload).
+        body: () => {
+          homeCalls += 1
+          return homeCalls === 1
+            ? homeBody(0, 1, [
+                makeDueChore({
+                  id: 7,
+                  title: 'Do the dishes',
+                  repeats: 'daily',
+                  status: 'today',
+                  days_until_due: 0,
+                }),
+              ])
+            : homeBody(1, 1, [
+                makeDueChore({
+                  id: 7,
+                  title: 'Do the dishes',
+                  repeats: 'daily',
+                  status: 'soon',
+                  days_until_due: 1,
+                }),
+              ])
+        },
+      },
+      { path: COMPLETE, method: 'POST', status: 201, body: {} },
+    ])
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderWithProviders(<Home />, { authValue: { user: makeUser() } })
+
+    const doneButton = await screen.findByRole('button', { name: /Do the dishes/ })
+    await user.click(doneButton)
+
+    // The chore reappears as tomorrow's occurrence once the refetch lands.
+    await waitFor(() => {
+      const row = screen.getByText('Do the dishes').closest('li')!
+      expect(row.textContent).toContain('in 1 day')
+      expect(row.querySelector('.bg-due-soon')).toBeTruthy()
+    })
+    expect(screen.getByText('1 of 1 done today')).toBeInTheDocument()
+  })
+
+  it('shows the progress returned by the post-completion refetch, not a client guess', async () => {
+    let homeCalls = 0
+    mockFetch([
+      {
+        path: '/api/v1/home',
+        method: 'GET',
+        body: () => {
+          homeCalls += 1
+          return homeCalls === 1
+            ? homeBody(1, 2, [
+                makeDueChore({
+                  id: 5,
+                  title: 'Water the plants',
+                  status: 'soon',
+                  days_until_due: 3,
+                }),
+                makeDueChore({ id: 6, title: 'Do the dishes', status: 'today', days_until_due: 0 }),
+              ])
+            : // Server truth after completion (e.g. a housemate also finished one).
+              homeBody(2, 3, [
+                makeDueChore({ id: 6, title: 'Do the dishes', status: 'today', days_until_due: 0 }),
+              ])
+        },
       },
       { path: COMPLETE, method: 'POST', status: 201, body: {} },
     ])
@@ -113,14 +188,13 @@ describe('Home', () => {
     const doneButton = await screen.findByRole('button', { name: /Water the plants/ })
     await user.click(doneButton)
 
-    // The row animates out, then is removed.
     await waitFor(() => expect(screen.queryByText('Water the plants')).not.toBeInTheDocument())
-    // A future ("soon") occurrence doesn't count toward today, so progress holds.
-    expect(screen.getByText('1 of 2 done today')).toBeInTheDocument()
+    // Progress mirrors the refetch, not any optimistic client bump.
+    expect(screen.getByText('2 of 3 done today')).toBeInTheDocument()
   })
 
-  it('restores the row and shows an error when completion fails', async () => {
-    mockFetch([
+  it('shows an error and keeps the row (no refetch) when completion fails', async () => {
+    const fetchMock = mockFetch([
       {
         path: '/api/v1/home',
         method: 'GET',
@@ -137,17 +211,28 @@ describe('Home', () => {
     await user.click(doneButton)
 
     expect(await screen.findByText('server exploded')).toBeInTheDocument()
-    expect(screen.getByText('Do the dishes')).toBeInTheDocument() // rolled back
+    expect(screen.getByText('Do the dishes')).toBeInTheDocument() // row un-collapses in place
+    // A failed completion does not refetch.
+    const homeGets = fetchMock.mock.calls.filter(
+      ([url, init]) => String(url).includes('/api/v1/home') && (init?.method ?? 'GET') === 'GET',
+    )
+    expect(homeGets.length).toBe(1)
   })
 
   it('marks the row exiting and disables the button while it animates out', async () => {
+    let homeCalls = 0
     mockFetch([
       {
         path: '/api/v1/home',
         method: 'GET',
-        body: homeBody(0, 1, [
-          makeDueChore({ id: 7, title: 'Do the dishes', status: 'today', days_until_due: 0 }),
-        ]),
+        body: () => {
+          homeCalls += 1
+          return homeCalls === 1
+            ? homeBody(0, 1, [
+                makeDueChore({ id: 7, title: 'Do the dishes', status: 'today', days_until_due: 0 }),
+              ])
+            : homeBody(1, 1, [])
+        },
       },
       { path: COMPLETE, method: 'POST', status: 201, body: {} },
     ])
@@ -162,7 +247,7 @@ describe('Home', () => {
     // is disabled so it can't be double-completed mid-animation.
     expect(row).toHaveAttribute('data-exiting')
     expect(doneButton).toBeDisabled()
-    // ...then it's removed once the animation finishes.
+    // ...then it's gone once the animation finishes and the refetch lands.
     await waitFor(() => expect(screen.queryByText('Do the dishes')).not.toBeInTheDocument())
   })
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { CheckIcon } from 'lucide-react'
@@ -88,13 +88,17 @@ export default function Home() {
   const [data, setData] = useState<HomeData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  // Ids of rows currently playing their exit animation (before removal).
+  // Ids of rows currently playing their exit animation.
   const [exiting, setExiting] = useState<Set<number>>(new Set())
+  // Monotonic request id so a slow refetch response can't overwrite a newer one
+  // when completions overlap; only the latest refetch is applied.
+  const reqRef = useRef(0)
+
+  const fetchHome = useCallback(() => api.get<HomeData>(endpoints.home), [])
 
   useEffect(() => {
     let cancelled = false
-    api
-      .get<HomeData>(endpoints.home)
+    fetchHome()
       .then((home) => {
         if (!cancelled) setData(home)
       })
@@ -107,60 +111,47 @@ export default function Home() {
     return () => {
       cancelled = true
     }
-  }, [t])
+  }, [fetchHome, t])
 
   function handleComplete(chore: DueChore) {
     if (exiting.has(chore.id)) return // ignore repeat clicks while a row animates out
     setError(null)
-    // Start the exit animation now; drop the row (and bump today's progress) only
-    // once it finishes, so completion feels responsive but the row glides away.
-    // A "soon" chore completed early doesn't move today's progress, matching the
-    // server. We don't refetch: a repeating chore whose next occurrence lands in
-    // the window (daily -> tomorrow, weekly -> +7d) would otherwise bounce back.
+    // Play the exit animation for responsiveness, then reconcile the whole view
+    // from the server rather than guessing locally: a completed one-off
+    // disappears and a recurring chore reappears at its next occurrence, exactly
+    // as a fresh page load would.
     setExiting((s) => new Set(s).add(chore.id))
 
-    const bump = chore.days_until_due <= 0 ? 1 : 0
-    // Functional updates so overlapping completions compose (each only ever
-    // touches its own row).
-    const removeRow = () =>
-      setData((d) =>
-        d
-          ? {
-              progress: { ...d.progress, done_today: d.progress.done_today + bump },
-              items: d.items.filter((item) => item.id !== chore.id),
-            }
-          : d,
-      )
     const stopExiting = () =>
       setExiting((s) => {
         const next = new Set(s)
         next.delete(chore.id)
         return next
       })
-
-    const timer = window.setTimeout(
-      () => {
-        removeRow()
-        stopExiting()
-      },
-      prefersReducedMotion() ? 0 : EXIT_MS,
-    )
-
-    api.post(endpoints.chores.complete(chore.id)).catch((err: unknown) => {
-      window.clearTimeout(timer) // cancel the pending removal if it hasn't fired
-      // Roll back: re-add the row if it was already removed and undo its progress
-      // bump; render re-sorts, so its position is restored. If it hasn't been
-      // removed yet, just stop the animation (render re-sorts either way).
-      setData((d) => {
-        if (!d || d.items.some((item) => item.id === chore.id)) return d
-        return {
-          progress: { ...d.progress, done_today: d.progress.done_today - bump },
-          items: [...d.items, chore],
-        }
-      })
-      stopExiting()
-      setError(err instanceof ApiError ? err.message : t('home.completeError'))
+    // Resolves once the exit animation has run, so the row finishes gliding away
+    // before the refetched list replaces it (even when the network is fast).
+    const animated = new Promise<void>((resolve) => {
+      window.setTimeout(resolve, prefersReducedMotion() ? 0 : EXIT_MS)
     })
+
+    // Sequence the refetch, not the click: the latest refetch to be *issued*
+    // (each after its completion has committed) wins, so overlapping completions
+    // converge on the freshest snapshot regardless of response order.
+    let req = 0
+    api
+      .post(endpoints.chores.complete(chore.id))
+      .then(() => {
+        req = ++reqRef.current
+        return Promise.all([fetchHome(), animated])
+      })
+      .then(([home]) => {
+        if (req === reqRef.current) setData(home)
+      })
+      .catch((err: unknown) => {
+        // Leave `data` untouched so the row simply un-collapses back in place.
+        setError(err instanceof ApiError ? err.message : t('home.completeError'))
+      })
+      .finally(stopExiting)
   }
 
   const greeting = user ? t('home.greeting', { name: user.first_name }) : 'isachore'

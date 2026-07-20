@@ -53,7 +53,9 @@ type Route = {
   path: string | RegExp
   method?: string
   status?: number
-  body?: unknown
+  // A plain JSON body, or a factory called once per matching request so a test
+  // can return a different body on successive calls (e.g. a load then a refetch).
+  body?: unknown | (() => unknown)
 }
 
 export function mockFetch(routes: Route[]) {
@@ -66,7 +68,8 @@ export function mockFetch(routes: Route[]) {
         (r.method ?? 'GET').toUpperCase() === method,
     )
     if (!route) return jsonResponse(404, { detail: `no mock for ${method} ${url}` })
-    return jsonResponse(route.status ?? 200, route.body)
+    const body = typeof route.body === 'function' ? (route.body as () => unknown)() : route.body
+    return jsonResponse(route.status ?? 200, body)
   })
   vi.stubGlobal('fetch', fn)
   return fn
