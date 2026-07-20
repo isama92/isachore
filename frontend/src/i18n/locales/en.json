@@ -9,7 +9,10 @@
     "password": "Password",
     "firstName": "First name",
     "lastName": "Last name",
-    "passwordMin": "At least 8 characters"
+    "passwordMin": "At least 8 characters",
+    "selectAll": "Select all",
+    "clear": "Clear",
+    "remove": "Remove {{name}}"
   },
   "table": {
     "rowsPerPage": "Rows per page",
@@ -158,6 +161,9 @@
     "descriptionPlaceholder": "Scrub the tub, replace the towels…",
     "assignees": "Assignees",
     "noMembers": "No household members yet.",
+    "assigneesPlaceholder": "Select assignees",
+    "assigneesSearch": "Search members…",
+    "assigneesEmpty": "No members found.",
     "assignment": "Assignment",
     "repeats": "Repeats",
     "startDate": "Start date",

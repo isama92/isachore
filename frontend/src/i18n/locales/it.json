@@ -9,7 +9,10 @@
     "password": "Password",
     "firstName": "Nome",
     "lastName": "Cognome",
-    "passwordMin": "Almeno 8 caratteri"
+    "passwordMin": "Almeno 8 caratteri",
+    "selectAll": "Seleziona tutti",
+    "clear": "Deseleziona",
+    "remove": "Rimuovi {{name}}"
   },
   "table": {
     "rowsPerPage": "Righe per pagina",
@@ -158,6 +161,9 @@
     "descriptionPlaceholder": "Strofina la vasca, cambia gli asciugamani…",
     "assignees": "Assegnatari",
     "noMembers": "Ancora nessun membro del nucleo domestico.",
+    "assigneesPlaceholder": "Seleziona assegnatari",
+    "assigneesSearch": "Cerca membri…",
+    "assigneesEmpty": "Nessun membro trovato.",
     "assignment": "Assegnazione",
     "repeats": "Ripetizione",
     "startDate": "Data di inizio",

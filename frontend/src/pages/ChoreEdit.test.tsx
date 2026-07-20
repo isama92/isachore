@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { screen } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router'
 import ChoreEdit from './ChoreEdit'
@@ -68,8 +68,10 @@ describe('ChoreEdit', () => {
     // The household is shown but is not an editable control.
     expect(screen.getByText('Beach House')).toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: 'Household' })).not.toBeInTheDocument()
-    // Its assignee is pre-selected.
-    expect(screen.getByRole('button', { name: 'Jo Ng' })).toBeInTheDocument()
+    // Its assignee is pre-selected (shown as a badge on the picker trigger).
+    expect(
+      within(screen.getByRole('button', { name: 'Assignees' })).getByText('Jo Ng'),
+    ).toBeInTheDocument()
   })
 
   it('saves changes with a PATCH that omits the household, then navigates', async () => {

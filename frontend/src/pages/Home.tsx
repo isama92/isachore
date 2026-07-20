@@ -286,6 +286,10 @@ export default function Home() {
               value={assigneeIds}
               onChange={setAssigneeIds}
               label={t('home.filters.assigneeLabel')}
+              placeholder={t('home.filters.assigneeAll')}
+              searchPlaceholder={t('home.filters.assigneeSearch')}
+              emptyText={t('home.filters.assigneeEmpty')}
+              className="sm:w-56"
             />
           )}
         </div>

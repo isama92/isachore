@@ -5,7 +5,6 @@ import { format } from 'date-fns'
 import { CalendarIcon } from 'lucide-react'
 import { ApiError } from '@/lib/api'
 import { assignmentOptions, formatDate, repeatOptions } from '@/lib/chores'
-import { fullName } from '@/lib/user'
 import type { AssignmentType, HouseholdMember, RepeatPeriod, Tag } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -20,8 +19,8 @@ import {
 } from '@/components/ui/select'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { TagMultiSelect } from '@/components/chores/TagMultiSelect'
+import { AssigneeMultiSelect } from '@/components/home/AssigneeMultiSelect'
 
 export type ChoreFormValues = {
   title: string
@@ -62,11 +61,6 @@ type Props = {
   // error, so a successful submit is expected to unmount the form.
   onSubmit: (values: ChoreSubmit) => Promise<void>
 }
-
-// Brand pill styling for the assignee/tag ToggleGroupItems; the on/off look is
-// driven by data-[state=on] instead of a selected flag.
-const chipItemClass =
-  'flex h-auto items-center gap-2 rounded-full border-[1.5px] border-line bg-card px-3 py-1.5 text-sm font-bold text-muted-foreground hover:border-primary hover:bg-card hover:text-muted-foreground data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-primary-foreground'
 
 // Shared field set for creating and editing a chore (both dedicated pages).
 export function ChoreForm({
@@ -144,19 +138,15 @@ export function ChoreForm({
         {members.length === 0 ? (
           <p className="text-sm font-medium text-muted-foreground">{t('choreCreate.noMembers')}</p>
         ) : (
-          <ToggleGroup
-            type="multiple"
-            aria-labelledby="assignees-label"
-            value={selectedAssignees.map(String)}
-            onValueChange={(ids) => setValues((v) => ({ ...v, assignee_ids: ids.map(Number) }))}
-            className="w-full flex-wrap"
-          >
-            {members.map((m) => (
-              <ToggleGroupItem key={m.id} value={String(m.id)} className={chipItemClass}>
-                {fullName(m)}
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
+          <AssigneeMultiSelect
+            members={members}
+            value={selectedAssignees}
+            onChange={(ids) => setValues((v) => ({ ...v, assignee_ids: ids }))}
+            labelledBy="assignees-label"
+            placeholder={t('choreCreate.assigneesPlaceholder')}
+            searchPlaceholder={t('choreCreate.assigneesSearch')}
+            emptyText={t('choreCreate.assigneesEmpty')}
+          />
         )}
       </div>
 

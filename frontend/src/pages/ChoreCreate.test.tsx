@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { screen } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router'
 import ChoreCreate from './ChoreCreate'
@@ -78,10 +78,13 @@ describe('ChoreCreate', () => {
     singleHouseholdMocks()
     renderWithProviders(<ChoreCreate />, { authValue: { user: me }, route: '/chores/new' })
 
-    expect(await screen.findByRole('button', { name: 'Jo Ng' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Title')).toBeInTheDocument()
-    // Tags live behind a searchable multi-select; open it to see the options.
     const user = userEvent.setup({ pointerEventsCheck: 0 })
+    // Members and tags both live behind searchable multi-selects; open each to
+    // see their options.
+    await user.click(await screen.findByRole('button', { name: 'Assignees' }))
+    expect(await screen.findByRole('option', { name: 'Jo Ng' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    expect(screen.getByLabelText('Title')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Tags' }))
     expect(await screen.findByRole('option', { name: 'deep-clean' })).toBeInTheDocument()
   })
@@ -113,7 +116,10 @@ describe('ChoreCreate', () => {
 
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     await user.type(await screen.findByLabelText('Title'), 'Scrub the tub')
-    await user.click(screen.getByRole('button', { name: 'Jo Ng' }))
+    // Pick the assignee via the searchable multi-select, then close it.
+    await user.click(screen.getByRole('button', { name: 'Assignees' }))
+    await user.click(await screen.findByRole('option', { name: 'Jo Ng' }))
+    await user.keyboard('{Escape}')
     // Pick the tag via the searchable multi-select, then close it.
     await user.click(screen.getByRole('button', { name: 'Tags' }))
     await user.click(await screen.findByRole('option', { name: 'deep-clean' }))
@@ -164,15 +170,19 @@ describe('ChoreCreate', () => {
 
     // Defaults to the lowest-id household (Flat 3B) and its member.
     await user.type(await screen.findByLabelText('Title'), 'Scrub the tub')
-    await user.click(await screen.findByRole('button', { name: 'Jo Ng' }))
+    await user.click(await screen.findByRole('button', { name: 'Assignees' }))
+    await user.click(await screen.findByRole('option', { name: 'Jo Ng' }))
+    await user.keyboard('{Escape}')
 
-    // Switch to Beach House: its member appears, the previous one is gone.
+    // Switch to Beach House: its member appears in the picker, the previous one is gone.
     await user.click(screen.getByRole('combobox', { name: 'Household' }))
     await user.click(await screen.findByRole('option', { name: 'Beach House' }))
-    expect(await screen.findByRole('button', { name: 'Mia Fox' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Jo Ng' })).not.toBeInTheDocument()
+    await user.click(await screen.findByRole('button', { name: 'Assignees' }))
+    expect(await screen.findByRole('option', { name: 'Mia Fox' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Jo Ng' })).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Mia Fox' }))
+    await user.click(screen.getByRole('option', { name: 'Mia Fox' }))
+    await user.keyboard('{Escape}')
     await user.click(screen.getByRole('button', { name: 'Add chore' }))
 
     await screen.findByText('chores-list')
@@ -213,7 +223,8 @@ describe('ChoreCreate', () => {
     // Fields are seeded from the source chore, and its assignee is pre-selected.
     expect(await screen.findByLabelText('Title')).toHaveValue('Scrub the tub')
     expect(screen.getByLabelText('Description')).toHaveValue('Do it well')
-    expect(await screen.findByRole('button', { name: 'Jo Ng' })).toHaveAttribute('data-state', 'on')
+    const assigneeTrigger = await screen.findByRole('button', { name: 'Assignees' })
+    expect(within(assigneeTrigger).getByText('Jo Ng')).toBeInTheDocument()
     // Same household as the source, so nothing is dropped and no note shows.
     expect(screen.queryByText(/were not added/)).not.toBeInTheDocument()
 
@@ -265,17 +276,22 @@ describe('ChoreCreate', () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
 
     // Opens in the source household with its assignee prefilled and no note.
-    expect(await screen.findByRole('button', { name: 'Jo Ng' })).toBeInTheDocument()
+    const assigneeTrigger = await screen.findByRole('button', { name: 'Assignees' })
+    expect(within(assigneeTrigger).getByText('Jo Ng')).toBeInTheDocument()
     expect(screen.queryByText(/were not added/)).not.toBeInTheDocument()
 
     // Switch to Beach House: the source's assignee and tag don't belong there.
     await user.click(screen.getByRole('combobox', { name: 'Household' }))
     await user.click(await screen.findByRole('option', { name: 'Beach House' }))
 
-    expect(await screen.findByRole('button', { name: 'Mia Fox' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Jo Ng' })).not.toBeInTheDocument()
+    // The dropped-assignee/tag note appears once members/tags reload.
     expect(await screen.findByText(/1 assignee was not added/)).toBeInTheDocument()
     expect(screen.getByText(/1 tag was not added/)).toBeInTheDocument()
+    // The picker now offers Beach House's member, not the source's.
+    await user.click(screen.getByRole('button', { name: 'Assignees' }))
+    expect(await screen.findByRole('option', { name: 'Mia Fox' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Jo Ng' })).not.toBeInTheDocument()
+    await user.keyboard('{Escape}')
 
     await user.click(screen.getByRole('button', { name: 'Add chore' }))
 
