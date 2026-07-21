@@ -45,17 +45,21 @@ async def test_home_lists_and_sorts_due_chores(
     resp = await client.get("/api/v1/home")
     assert resp.status_code == 200
     body = resp.json()
-    # Most overdue first; the 30-days-out chore is outside the 7-day window.
-    assert [i["title"] for i in body["items"]] == ["Overdue", "Today", "Soon"]
+    # Most overdue first; there is no due-date cut-off, so the 30-days-out chore
+    # is included too, sorted last.
+    assert [i["title"] for i in body["items"]] == ["Overdue", "Today", "Soon", "Far"]
     assert {i["title"]: i["status"] for i in body["items"]} == {
         "Overdue": "overdue",
         "Today": "today",
         "Soon": "soon",
+        # Everything in the future is "soon"; the frontend greys the dot past a week.
+        "Far": "soon",
     }
     assert {i["title"]: i["days_until_due"] for i in body["items"]} == {
         "Overdue": -3,
         "Today": 0,
         "Soon": 2,
+        "Far": 30,
     }
 
 
@@ -322,7 +326,7 @@ async def test_home_empty_when_user_has_no_chores(
     assert resp.json() == {"progress": {"done_today": 0, "total_today": 0}, "items": []}
 
 
-async def test_home_window_includes_day_7_excludes_day_8(
+async def test_home_has_no_due_date_cutoff(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
@@ -333,11 +337,12 @@ async def test_home_window_includes_day_7_excludes_day_8(
     today = datetime.now(UTC).date()
     await make_chore(household=household, title="Day7", start_date=today + timedelta(days=7))
     await make_chore(household=household, title="Day8", start_date=today + timedelta(days=8))
+    await make_chore(household=household, title="Day90", start_date=today + timedelta(days=90))
     client = await auth_client(user)
 
     resp = await client.get("/api/v1/home")
-    # The 7-day window is inclusive of day 7 and excludes day 8.
-    assert {i["title"] for i in resp.json()["items"]} == {"Day7"}
+    # There is no window any more: chores due next week and months out all show.
+    assert {i["title"] for i in resp.json()["items"]} == {"Day7", "Day8", "Day90"}
 
 
 async def test_home_progress_counts_completion_by_another_member(

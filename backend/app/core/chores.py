@@ -115,8 +115,9 @@ def days_late(scheduled_for: datetime, completed_at: datetime) -> int:
 
 
 def due_status(days: int) -> DueStatus:
-    """Bucket a days-until-due value. `soon` covers everything in the future here;
-    the caller restricts the list to the next 7 days."""
+    """Bucket a days-until-due value: overdue (<0), today (0), soon (any future
+    day). There is no due-date cut-off; the Home view greys the dot for chores due
+    more than a week out, but that is a display choice, not a filter."""
     if days < 0:
         return DueStatus.overdue
     if days == 0:

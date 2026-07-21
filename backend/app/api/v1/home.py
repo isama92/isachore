@@ -15,9 +15,6 @@ from app.schemas.household import HouseholdMemberRead
 
 router = APIRouter()
 
-# Chores due within this many days ahead show on the Home due view.
-DUE_SOON_DAYS = 7
-
 
 @router.get("", response_model=HomeRead)
 async def get_home(
@@ -29,8 +26,9 @@ async def get_home(
     # simply filters to nothing anyway.
     assignee_id: Annotated[list[int] | None, Query()] = None,
 ) -> HomeRead:
-    """The due view: chores that are overdue, due today, or due within the next
-    week, plus today's completion progress, across the user's active households.
+    """The due view: chores that are overdue, due today, or upcoming (no cut-off,
+    so a chore due weeks out still shows), plus today's completion progress,
+    across the user's active households.
 
     Filters (both optional): `household_id` narrows to one of the user's
     households; `assignee_id` (repeatable) keeps chores assigned to any of those
@@ -44,10 +42,6 @@ async def get_home(
     # UTC day bounds (not a `::date` cast, which depends on the session TimeZone).
     today_start = datetime(now.year, now.month, now.day, tzinfo=UTC)
     tomorrow_start = today_start + timedelta(days=1)
-    # Overdue + due within the next week is a single range on the stored scheduled_for:
-    # everything before the horizon (day 7 inclusive, day 8 excluded). No more loading
-    # every chore and deriving due dates in Python - the occurrences table is queryable.
-    horizon = today_start + timedelta(days=DUE_SOON_DAYS + 1)
 
     scope = [
         Chore.deleted_at.is_(None),
@@ -67,7 +61,6 @@ async def get_home(
     open_filters = [
         *scope,
         ChoreOccurrence.status == OccurrenceStatus.open,
-        ChoreOccurrence.scheduled_for < horizon,
     ]
     if assignee_clause is not None:
         open_filters.append(assignee_clause)

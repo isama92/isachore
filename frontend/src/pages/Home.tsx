@@ -80,7 +80,7 @@ function DueRow({
       <div className="overflow-hidden">
         <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-3.5 transition-transform duration-[420ms] ease-out group-data-[exiting]:-translate-x-3 group-data-[exiting]:scale-[0.97] motion-reduce:transition-none">
           <span
-            className={cn('inline-block size-2.5 shrink-0 rounded-full', dueDotClass(chore.status))}
+            className={cn('inline-block size-2.5 shrink-0 rounded-full', dueDotClass(chore))}
             aria-hidden
           />
           <div className="min-w-0 flex-1">

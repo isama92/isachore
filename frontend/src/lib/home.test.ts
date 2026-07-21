@@ -36,9 +36,18 @@ describe('sortByDue', () => {
 
 describe('dueDotClass', () => {
   it('maps each status to a full static class', () => {
-    expect(dueDotClass('overdue')).toBe('bg-due-overdue')
-    expect(dueDotClass('today')).toBe('bg-due-today')
-    expect(dueDotClass('soon')).toBe('bg-due-soon')
+    expect(dueDotClass(makeDueChore({ status: 'overdue', days_until_due: -3 }))).toBe(
+      'bg-due-overdue',
+    )
+    expect(dueDotClass(makeDueChore({ status: 'today', days_until_due: 0 }))).toBe('bg-due-today')
+    expect(dueDotClass(makeDueChore({ status: 'soon', days_until_due: 2 }))).toBe('bg-due-soon')
+  })
+
+  it('greys the dot for chores due more than a week out', () => {
+    // Day 7 is still "soon" green; day 8 and beyond are de-emphasised grey.
+    expect(dueDotClass(makeDueChore({ status: 'soon', days_until_due: 7 }))).toBe('bg-due-soon')
+    expect(dueDotClass(makeDueChore({ status: 'soon', days_until_due: 8 }))).toBe('bg-due-later')
+    expect(dueDotClass(makeDueChore({ status: 'soon', days_until_due: 30 }))).toBe('bg-due-later')
   })
 })
 

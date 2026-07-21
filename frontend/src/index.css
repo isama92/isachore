@@ -114,6 +114,7 @@
   --color-due-overdue: var(--due-overdue);
   --color-due-today: var(--due-today);
   --color-due-soon: var(--due-soon);
+  --color-due-later: var(--due-later);
 
   /* Statistics chart palette + punctuality status colours (Statistics page). */
   --color-chart-1: var(--chart-1);
@@ -159,10 +160,13 @@
   --warning: var(--ctp-peach);
 
   /* Home due-view status colours: overdue (red), due today (yellow), due soon
-     (green). Track the active flavour's --ctp-* accents; resolve lazily. */
+     (green). Track the active flavour's --ctp-* accents; resolve lazily. --due-later
+     is the muted grey for chores due more than a week out (de-emphasised on Home);
+     it tracks the flavour's neutral overlay so it reads in light and dark. */
   --due-overdue: var(--ctp-red);
   --due-today: var(--ctp-yellow);
   --due-soon: var(--ctp-green);
+  --due-later: var(--placeholder);
 
   /* Statistics charts. Single-series bar charts (completions over time, per
      person) use --primary, so they track the user's chosen accent. --chart-1..5

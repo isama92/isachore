@@ -86,6 +86,30 @@ describe('Home', () => {
     expect(unassigned.textContent).toContain('Unassigned')
   })
 
+  it('greys the status dot for a chore due more than a week out', async () => {
+    mockFetch([
+      { path: FILTERS, method: 'GET', body: SOLO_OPTIONS },
+      {
+        path: HOME,
+        method: 'GET',
+        body: homeBody(0, 0, [
+          makeDueChore({
+            id: 1,
+            title: 'Descale the kettle',
+            status: 'soon',
+            days_until_due: 30,
+            next_due: '2026-08-20T00:00:00Z',
+          }),
+        ]),
+      },
+    ])
+    renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+    const row = (await screen.findByText('Descale the kettle')).closest('li')!
+    expect(row.querySelector('.bg-due-later')).toBeTruthy()
+    expect(row.querySelector('.bg-due-soon')).toBeNull()
+  })
+
   it('seeds the default query with the current user (your chores + shared)', async () => {
     const fetchMock = mockFetch([
       { path: FILTERS, method: 'GET', body: SOLO_OPTIONS },
