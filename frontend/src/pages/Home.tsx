@@ -57,11 +57,13 @@ function prefersReducedMotion(): boolean {
 function DueRow({
   chore,
   t,
+  showHousehold,
   exiting,
   onComplete,
 }: {
   chore: DueChore
   t: TFunction
+  showHousehold: boolean
   exiting: boolean
   onComplete: (chore: DueChore) => void
 }) {
@@ -90,10 +92,28 @@ function DueRow({
               {' · '}
               {t(`options.repeat.${chore.repeats}`)}
             </p>
+            {/* On mobile the right-hand column is too cramped, so the assignee
+                (and household, for multi-household users) stack here under the
+                due line. Hidden from sm up, where the right column takes over. */}
+            <p className="mt-0.5 truncate text-[13px] font-medium text-muted-foreground sm:hidden">
+              {assignee}
+              {showHousehold && (
+                <span className="text-muted-foreground/70"> · {chore.household.name}</span>
+              )}
+            </p>
           </div>
-          <span className="hidden max-w-[9rem] shrink-0 truncate text-[13px] font-medium text-muted-foreground sm:inline">
-            {assignee}
-          </span>
+          {/* From sm up: who this is for, and (for multi-household users) which
+              household, right-aligned in its own column. */}
+          <div className="hidden max-w-[9rem] shrink-0 flex-col items-end text-right sm:flex">
+            <span className="w-full truncate text-[13px] font-medium text-muted-foreground">
+              {assignee}
+            </span>
+            {showHousehold && (
+              <span className="w-full truncate text-[11px] font-medium text-muted-foreground/70">
+                {chore.household.name}
+              </span>
+            )}
+          </div>
           {/* Outline pill in the active accent (--primary) that fills on hover. */}
           <Button
             type="button"
@@ -253,6 +273,8 @@ export default function Home() {
       : 0
 
   const showFilters = options.households.length > 1 || options.members.length > 1
+  // Only label the household when the user actually spans more than one.
+  const multiHousehold = options.households.length > 1
 
   return (
     <main className="mx-auto w-full max-w-3xl px-5 py-8">
@@ -325,6 +347,7 @@ export default function Home() {
                   key={chore.id}
                   chore={chore}
                   t={t}
+                  showHousehold={multiHousehold}
                   exiting={exiting.has(chore.id)}
                   onComplete={requestComplete}
                 />

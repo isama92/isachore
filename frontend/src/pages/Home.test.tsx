@@ -382,4 +382,52 @@ describe('Home', () => {
     )!
     expect(post[1]?.body).toBeUndefined()
   })
+
+  it('labels each card with its household when the user spans multiple households', async () => {
+    mockFetch([
+      { path: FILTERS, method: 'GET', body: MULTI_OPTIONS },
+      {
+        path: HOME,
+        method: 'GET',
+        body: homeBody(0, 1, [
+          makeDueChore({
+            id: 1,
+            title: 'Clean the bathroom',
+            household: { id: 2, name: 'Flat B' },
+            assignees: [makeHouseholdMember({ id: 2, first_name: 'Anna', last_name: 'Aardvark' })],
+          }),
+        ]),
+      },
+    ])
+    renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+    // The assignee renders twice (mobile stacked line + desktop right column),
+    // so assert on the count rather than a single node.
+    const row = (await screen.findByText('Clean the bathroom')).closest('li')!
+    expect(within(row).getAllByText('Flat B').length).toBeGreaterThan(0)
+    expect(within(row).getAllByText('Anna Aardvark').length).toBeGreaterThan(0)
+  })
+
+  it('omits the household label for a single-household user but keeps the assignee', async () => {
+    mockFetch([
+      { path: FILTERS, method: 'GET', body: SOLO_OPTIONS },
+      {
+        path: HOME,
+        method: 'GET',
+        body: homeBody(0, 1, [
+          makeDueChore({
+            id: 1,
+            title: 'Clean the bathroom',
+            household: { id: 1, name: 'Test Household' },
+            assignees: [makeHouseholdMember({ id: 2, first_name: 'Anna', last_name: 'Aardvark' })],
+          }),
+        ]),
+      },
+    ])
+    renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+    const row = (await screen.findByText('Clean the bathroom')).closest('li')!
+    expect(within(row).getAllByText('Anna Aardvark').length).toBeGreaterThan(0)
+    expect(within(row).queryByText('Test Household')).not.toBeInTheDocument()
+  })
 })
