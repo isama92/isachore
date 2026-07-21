@@ -47,6 +47,17 @@ With a user id it clears only that user's per-email counter (a user maps to an
 email but never to an IP); with no argument it clears every counter, per-email
 and per-IP.
 
+To fill the app with a rich dataset for manual testing (five users, a solo
+household each plus one shared household, and many chores covering every option
+with completion history), run the seeder. It refuses to run outside a dev
+environment; `--fresh` wipes all app data first so it doubles as a reset.
+
+```bash
+docker compose exec backend python -m app.cli seed --fresh
+```
+
+Every seeded user's password is `password`; the admin is `admin@example.com`.
+
 | Service       | URL                                     |
 | ------------- | --------------------------------------- |
 | Frontend      | http://localhost:5173                   |
@@ -153,11 +164,6 @@ The app is organised into four areas (context for future work):
 - **Chores management**: manage the household's chores.
 - **Tags management**: create, edit and delete tags.
 
-- [x] assignment options to alternate between the assignees: chores are now a
-  materialised timeline of occurrences (open = the scheduler, done = history), so a
-  single current assignee rotates via the assignment strategy (alphabetical / random /
-  least-done; manual = a person you set), with a "take turns" turn length that hands
-  off every N completions instead of every one.
 - [ ] completion chart: add a way to show the completion chart of a chore: eg. for a weekly chore show a chart that shows each week, and for each week shows how many time it has been completed (so you can see how frequently it wasn't completed or how frequently it was done more time than necessary)
 - [ ] if one persone mark a task as done, the other person see it live (websocket)
 - [ ] CI (lint + test on push)

@@ -5,6 +5,9 @@ services:
       target: prod
     env_file: .env
     environment:
+      # Explicit so the prod stack is always marked prod regardless of .env (overrides
+      # env_file). Keeps the dev-only `python -m app.cli seed` guard fail-closed here.
+      ENVIRONMENT: prod
       TRUST_FORWARDED_FOR: "true"
     volumes:
       - ./volumes/storage:/app/storage

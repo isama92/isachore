@@ -14,13 +14,18 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.households import add_to_default_household
 from app.core.invitations import run_expire_invitations
 from app.core.rate_limit import clear_login_throttle
 from app.core.security import hash_password
 from app.db.redis import redis_client
+from app.db.seed import seed
 from app.db.session import async_session_factory
 from app.models import User, UserStatus
+
+# Seeding is destructive dev tooling; only run it where the deployment marker says dev.
+_DEV_ENVIRONMENTS = {"dev", "development", "local", "test", "testing"}
 
 
 async def init_admin(email: str, first_name: str, last_name: str, password: str) -> None:
@@ -87,6 +92,18 @@ async def _expire_invitations_main() -> None:
     print(f"expired {count} invitation{'' if count == 1 else 's'}")
 
 
+async def _seed_main(fresh: bool) -> None:
+    async with async_session_factory() as session:
+        summary = await seed(session, fresh=fresh)
+    print(str(summary))
+
+
+def _guard_dev_environment() -> None:
+    """Refuse to seed anywhere that isn't marked as a dev environment (fail-closed)."""
+    if settings.environment.lower() not in _DEV_ENVIRONMENTS:
+        sys.exit(f"refusing to seed: environment {settings.environment!r} is not a dev environment")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m app.cli")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -112,6 +129,14 @@ def main() -> None:
         help="mark stale pending household invitations as expired (the hourly job, run once)",
     )
 
+    seed_parser = subparsers.add_parser(
+        "seed",
+        help="populate a rich dev/test dataset (users, households, chores, history)",
+    )
+    seed_parser.add_argument(
+        "--fresh", action="store_true", help="wipe all app data first, then reseed"
+    )
+
     args = parser.parse_args()
     if args.command == "init":
         password = args.password or getpass.getpass("Password: ")
@@ -122,6 +147,12 @@ def main() -> None:
         asyncio.run(_clear_throttle_main(args.user_id))
     elif args.command == "expire-invitations":
         asyncio.run(_expire_invitations_main())
+    elif args.command == "seed":
+        _guard_dev_environment()
+        try:
+            asyncio.run(_seed_main(args.fresh))
+        except RuntimeError as exc:
+            sys.exit(f"error: {exc}")
 
 
 if __name__ == "__main__":

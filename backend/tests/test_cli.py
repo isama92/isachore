@@ -10,10 +10,13 @@ from collections.abc import Awaitable, Callable
 import pytest
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
+from sqlalchemy import distinct, func, select
 
-from app.cli import clear_throttle
+from app.cli import _guard_dev_environment, clear_throttle
 from app.core.rate_limit import clear_login_throttle
-from app.models import User
+from app.core.security import verify_password
+from app.db.seed import SEED_PASSWORD, seed
+from app.models import Chore, ChoreOccurrence, Household, OccurrenceStatus, User
 
 
 def _email_key(email: str) -> str:
@@ -128,3 +131,93 @@ async def test_clear_throttle_no_user_id_clears_all(
     await clear_throttle(db_session, fake_redis, None)
 
     assert [key async for key in fake_redis.scan_iter("login:fail:*")] == []
+
+
+# --- seed CLI worker ------------------------------------------------------
+
+
+async def test_seed_creates_expected_dataset(db_session) -> None:
+    summary = await seed(db_session)
+
+    assert summary.users == 5
+    assert summary.households == 6
+    assert await db_session.scalar(select(func.count()).select_from(User)) == 5
+    assert await db_session.scalar(select(func.count()).select_from(Household)) == 6
+
+    # The first user is a login-able admin.
+    admin = await db_session.scalar(select(User).where(User.email == "admin@example.com"))
+    assert admin is not None and admin.is_admin
+    assert verify_password(SEED_PASSWORD, admin.password_hash)
+
+    # There is completion history, and no chore has more than one open occurrence.
+    done_count = await db_session.scalar(
+        select(func.count())
+        .select_from(ChoreOccurrence)
+        .where(ChoreOccurrence.status == OccurrenceStatus.done)
+    )
+    assert done_count > 0
+    dupes = (
+        await db_session.execute(
+            select(ChoreOccurrence.chore_id)
+            .where(ChoreOccurrence.status == OccurrenceStatus.open)
+            .group_by(ChoreOccurrence.chore_id)
+            .having(func.count() > 1)
+        )
+    ).all()
+    assert dupes == []
+
+    # A completed one-off keeps its done row but has no open occurrence (gone from Home).
+    bookshelf = await db_session.scalar(
+        select(Chore).where(Chore.title == "Assemble the bookshelf")
+    )
+    open_for_bookshelf = await db_session.scalar(
+        select(func.count())
+        .select_from(ChoreOccurrence)
+        .where(
+            ChoreOccurrence.chore_id == bookshelf.id,
+            ChoreOccurrence.status == OccurrenceStatus.open,
+        )
+    )
+    assert open_for_bookshelf == 0
+
+    # An unassigned (shared) chore exists: its open occurrence has no assignee.
+    tidy = await db_session.scalar(select(Chore).where(Chore.title == "Tidy the shared shelf"))
+    tidy_open = await db_session.scalar(
+        select(ChoreOccurrence).where(
+            ChoreOccurrence.chore_id == tidy.id, ChoreOccurrence.status == OccurrenceStatus.open
+        )
+    )
+    assert tidy_open is not None and tidy_open.assignee_id is None
+
+    # A rotating chore actually rotated: its history credits more than one person.
+    plants = await db_session.scalar(select(Chore).where(Chore.title == "Water the plants"))
+    distinct_completers = await db_session.scalar(
+        select(func.count(distinct(ChoreOccurrence.completed_by_user_id))).where(
+            ChoreOccurrence.chore_id == plants.id,
+            ChoreOccurrence.status == OccurrenceStatus.done,
+        )
+    )
+    assert distinct_completers >= 2
+
+
+async def test_seed_fresh_is_rerunnable(db_session) -> None:
+    await seed(db_session, fresh=True)
+    await seed(db_session, fresh=True)  # wipes the first run, no duplicate-email clash
+    assert await db_session.scalar(select(func.count()).select_from(User)) == 5
+
+
+async def test_seed_refuses_on_nonempty_db_without_fresh(db_session) -> None:
+    await seed(db_session)
+    with pytest.raises(RuntimeError, match="pass --fresh"):
+        await seed(db_session)
+
+
+def test_seed_guard_refuses_non_dev_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.cli.settings.environment", "production")
+    with pytest.raises(SystemExit):
+        _guard_dev_environment()
+
+
+def test_seed_guard_allows_dev_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.cli.settings.environment", "dev")
+    _guard_dev_environment()  # no raise
