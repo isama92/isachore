@@ -12,7 +12,10 @@
     "passwordMin": "Almeno 8 caratteri",
     "selectAll": "Seleziona tutti",
     "clear": "Deseleziona",
-    "remove": "Rimuovi {{name}}"
+    "remove": "Rimuovi {{name}}",
+    "errorTitle": "Qualcosa è andato storto.",
+    "errorHint": "Impossibile caricare la pagina. Ricarica.",
+    "reload": "Ricarica"
   },
   "table": {
     "rowsPerPage": "Righe per pagina",

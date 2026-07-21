@@ -164,7 +164,6 @@ The app is organised into four areas (context for future work):
 - **Chores management**: manage the household's chores.
 - **Tags management**: create, edit and delete tags.
 
-- [ ] completion chart - Statistics page: add a way to show the completion chart of a chore: eg. for a weekly chore show a chart that shows each week, and for each week shows how many time it has been completed (so you can see how frequently it wasn't completed or how frequently it was done more time than necessary)
 - [ ] if one persone mark a task as done, the other person see it live (websocket)
 - [ ] CI (lint + test on push)
 - [ ] Prod deploy hardening (TLS, real secrets management, DB backups)
