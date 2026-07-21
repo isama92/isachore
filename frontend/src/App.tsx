@@ -1,5 +1,8 @@
+import { lazy, Suspense } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Route, Routes } from 'react-router'
 import { routes } from './lib/routes'
+import { Spinner } from '@/components/ui/spinner'
 import RequireAdmin from './components/RequireAdmin'
 import RequireAuth from './components/RequireAuth'
 import AdminHouseholdCreate from './pages/admin/HouseholdCreate'
@@ -21,10 +24,25 @@ import HouseholdEdit from './pages/HouseholdEdit'
 import Households from './pages/Households'
 import Login from './pages/Login'
 import Profile from './pages/Profile'
-import Statistics from './pages/Statistics'
 import TagCreate from './pages/TagCreate'
 import TagEdit from './pages/TagEdit'
 import Tags from './pages/Tags'
+
+// Recharts is heavy and only the Statistics page uses it, so that page is
+// code-split into its own chunk and loaded on demand (kept out of the initial
+// bundle). Every other page stays eagerly imported.
+const Statistics = lazy(() => import('./pages/Statistics'))
+
+// Shown briefly while the Statistics chunk downloads; the page then renders its
+// own skeletons.
+function RouteFallback() {
+  const { t } = useTranslation()
+  return (
+    <main className="mx-auto flex w-full max-w-5xl items-center justify-center px-5 py-24">
+      <Spinner size="lg" label={t('common.loading')} />
+    </main>
+  )
+}
 
 export default function App() {
   return (
@@ -39,7 +57,14 @@ export default function App() {
         <Route path={routes.chores.new} element={<ChoreCreate />} />
         <Route path={routes.chores.edit.pattern} element={<ChoreEdit />} />
         <Route path={routes.history} element={<History />} />
-        <Route path={routes.statistics} element={<Statistics />} />
+        <Route
+          path={routes.statistics}
+          element={
+            <Suspense fallback={<RouteFallback />}>
+              <Statistics />
+            </Suspense>
+          }
+        />
         <Route path={routes.households.list} element={<Households />} />
         <Route path={routes.households.new} element={<HouseholdCreate />} />
         <Route path={routes.households.edit.pattern} element={<HouseholdEdit />} />
