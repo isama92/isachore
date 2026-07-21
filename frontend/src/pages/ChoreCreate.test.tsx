@@ -141,6 +141,98 @@ describe('ChoreCreate', () => {
     })
   })
 
+  it('shows take turns only for auto strategies and the current-assignee picker only for manual', async () => {
+    singleHouseholdMocks()
+    withRoutes()
+
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    await screen.findByLabelText('Title')
+    // Manual is the default: no take-turns checkbox, and no current-assignee picker
+    // until the pool has a member.
+    expect(screen.queryByRole('checkbox', { name: 'Take turns' })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('combobox', { name: 'Currently assigned to' }),
+    ).not.toBeInTheDocument()
+
+    // Switching to an auto strategy reveals take turns and hides the current picker.
+    await user.click(screen.getByRole('combobox', { name: 'Assignment' }))
+    await user.click(await screen.findByRole('option', { name: 'Alphabetical' }))
+    expect(screen.getByRole('checkbox', { name: 'Take turns' })).toBeInTheDocument()
+    expect(
+      screen.queryByRole('combobox', { name: 'Currently assigned to' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('submits a turn length when take turns is enabled', async () => {
+    const fetchMock = singleHouseholdMocks()
+    withRoutes()
+
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    await user.type(await screen.findByLabelText('Title'), 'Water plants')
+    await user.click(screen.getByRole('combobox', { name: 'Assignment' }))
+    await user.click(await screen.findByRole('option', { name: 'Alphabetical' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Take turns' }))
+    // The turn-length field appears (defaulting to 2) once take turns is on, and
+    // accepts a multi-digit value (the field is string-backed, so it can be cleared).
+    const turnLength = screen.getByLabelText('Turn length')
+    expect(turnLength).toHaveValue(2)
+    await user.clear(turnLength)
+    await user.type(turnLength, '14')
+    await user.click(screen.getByRole('button', { name: 'Add chore' }))
+
+    await screen.findByText('chores-list')
+    expect(postBody(fetchMock)).toMatchObject({
+      assignment_type: 'alphabetical',
+      turn_length: 14,
+    })
+  })
+
+  it('resets the current assignee to shared when it is removed from the pool', async () => {
+    const fetchMock = singleHouseholdMocks()
+    withRoutes()
+
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    await user.type(await screen.findByLabelText('Title'), 'Dishes')
+    // Manual: add Jo and pick them as the current assignee.
+    await user.click(screen.getByRole('button', { name: 'Assignees' }))
+    await user.click(await screen.findByRole('option', { name: 'Jo Ng' }))
+    await user.keyboard('{Escape}')
+    await user.click(screen.getByRole('combobox', { name: 'Currently assigned to' }))
+    await user.click(await screen.findByRole('option', { name: 'Jo Ng' }))
+    // Remove Jo from the pool: the current-assignee picker disappears and submit
+    // sends current_assignee_id: null (shared) rather than a stale id.
+    await user.click(screen.getByRole('button', { name: 'Remove Jo Ng' }))
+    expect(
+      screen.queryByRole('combobox', { name: 'Currently assigned to' }),
+    ).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Add chore' }))
+
+    await screen.findByText('chores-list')
+    expect(postBody(fetchMock)).toMatchObject({ assignee_ids: [], current_assignee_id: null })
+  })
+
+  it('lets manual pick the current assignee and submits it', async () => {
+    const fetchMock = singleHouseholdMocks()
+    withRoutes()
+
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    await user.type(await screen.findByLabelText('Title'), 'Dishes')
+    // Manual (the default): pick a pool member, which reveals the current-assignee select.
+    await user.click(screen.getByRole('button', { name: 'Assignees' }))
+    await user.click(await screen.findByRole('option', { name: 'Jo Ng' }))
+    await user.keyboard('{Escape}')
+    await user.click(screen.getByRole('combobox', { name: 'Currently assigned to' }))
+    await user.click(await screen.findByRole('option', { name: 'Jo Ng' }))
+    await user.click(screen.getByRole('button', { name: 'Add chore' }))
+
+    await screen.findByText('chores-list')
+    expect(postBody(fetchMock)).toMatchObject({
+      assignment_type: 'manual',
+      current_assignee_id: 2,
+      turn_length: 1,
+    })
+  })
+
   it('lets a multi-household user pick the household and resets stale assignees', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)

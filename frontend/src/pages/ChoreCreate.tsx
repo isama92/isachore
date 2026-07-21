@@ -123,7 +123,10 @@ export default function ChoreCreate() {
     start_date: clone?.start_date ?? todayISO(),
     repeats: clone?.repeats ?? 'weekly',
     assignment_type: clone?.assignment_type ?? 'manual',
+    turn_length: clone?.turn_length ?? 1,
     assignee_ids: clone?.assignee_ids ?? [],
+    // A fresh chore derives its own starting assignee (manual lets you pick one).
+    current_assignee_id: null,
     tag_ids: clone?.tag_ids ?? [],
   }
 

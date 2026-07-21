@@ -153,7 +153,11 @@ The app is organised into four areas (context for future work):
 - **Chores management**: manage the household's chores.
 - **Tags management**: create, edit and delete tags.
 
-- [ ] assignment options to alternate between the assignee . Option to alternate after each completion or intervals (e.g. every 3 completion, swap assigned person)
+- [x] assignment options to alternate between the assignees: chores are now a
+  materialised timeline of occurrences (open = the scheduler, done = history), so a
+  single current assignee rotates via the assignment strategy (alphabetical / random /
+  least-done; manual = a person you set), with a "take turns" turn length that hands
+  off every N completions instead of every one.
 - [ ] completion chart: add a way to show the completion chart of a chore: eg. for a weekly chore show a chart that shows each week, and for each week shows how many time it has been completed (so you can see how frequently it wasn't completed or how frequently it was done more time than necessary)
 - [ ] if one persone mark a task as done, the other person see it live (websocket)
 - [ ] CI (lint + test on push)

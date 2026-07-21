@@ -74,6 +74,58 @@ describe('ChoreEdit', () => {
     ).toBeInTheDocument()
   })
 
+  it('pre-fills take turns and the turn length for an auto-rotating chore', async () => {
+    const rotating = makeChore({
+      id: 7,
+      title: 'Water plants',
+      assignment_type: 'alphabetical',
+      turn_length: 3,
+      household: { id: 4, name: 'Beach House' },
+      assignees: [makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' })],
+    })
+    mockFetch([
+      { path: '/api/v1/chores/7', method: 'GET', body: rotating },
+      {
+        path: MEMBERS,
+        method: 'GET',
+        body: page([makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })]),
+      },
+      { path: TAGS, method: 'GET', body: page([]) },
+    ])
+    renderEdit()
+
+    expect(await screen.findByDisplayValue('Water plants')).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'Take turns' })).toBeChecked()
+    expect(screen.getByLabelText('Turn length')).toHaveValue(3)
+  })
+
+  it('pre-fills the current assignee for a manual chore', async () => {
+    const jo = makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' })
+    const manual = makeChore({
+      id: 7,
+      title: 'Dishes',
+      assignment_type: 'manual',
+      household: { id: 4, name: 'Beach House' },
+      assignees: [jo],
+      current_assignee: jo,
+    })
+    mockFetch([
+      { path: '/api/v1/chores/7', method: 'GET', body: manual },
+      {
+        path: MEMBERS,
+        method: 'GET',
+        body: page([makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })]),
+      },
+      { path: TAGS, method: 'GET', body: page([]) },
+    ])
+    renderEdit()
+
+    await screen.findByDisplayValue('Dishes')
+    expect(
+      within(screen.getByRole('combobox', { name: 'Currently assigned to' })).getByText('Jo Ng'),
+    ).toBeInTheDocument()
+  })
+
   it('saves changes with a PATCH that omits the household, then navigates', async () => {
     const fetchMock = editMocks()
     renderEdit()

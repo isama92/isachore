@@ -77,7 +77,9 @@ export default function ChoreEdit() {
             start_date: chore.start_date,
             repeats: chore.repeats,
             assignment_type: chore.assignment_type,
+            turn_length: chore.turn_length,
             assignee_ids: chore.assignees.map((a) => a.id),
+            current_assignee_id: chore.current_assignee?.id ?? null,
             tag_ids: chore.tags.map((tag) => tag.id),
           }}
           submitLabel={t('choreEdit.submit')}

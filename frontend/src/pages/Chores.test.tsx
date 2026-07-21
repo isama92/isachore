@@ -86,6 +86,23 @@ describe('Chores', () => {
     expect(within(row).getByText('Least done')).toBeInTheDocument()
   })
 
+  it('shows the current assignee next to the assignment strategy', async () => {
+    const robin = makeUser({ id: 2, first_name: 'Robin', last_name: 'Doe' })
+    const chore = makeChore({
+      id: 8,
+      title: 'Water plants',
+      assignment_type: 'alphabetical',
+      assignees: [robin],
+      current_assignee: robin,
+    })
+    stubFetch({ chores: [chore] })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+
+    const row = (await screen.findByText('Water plants')).closest('tr')!
+    expect(row).toHaveTextContent('Alphabetical')
+    expect(row).toHaveTextContent('Robin')
+  })
+
   it('collapses many tags to the first plus an "and N more" hover tooltip', async () => {
     const chore = makeChore({
       id: 8,

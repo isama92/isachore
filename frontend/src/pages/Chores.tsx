@@ -125,6 +125,7 @@ export default function Chores() {
         start_date: chore.start_date,
         repeats: chore.repeats,
         assignment_type: chore.assignment_type,
+        turn_length: chore.turn_length,
         assignee_ids: chore.assignees.map((a) => a.id),
         tag_ids: chore.tags.map((tag) => tag.id),
       },
@@ -253,7 +254,15 @@ export default function Chores() {
       id: 'assignment',
       header: t('chores.headers.assignment'),
       enableSorting: false,
-      cell: ({ row }) => t(`options.assignment.${row.original.assignment_type}`),
+      cell: ({ row }) => {
+        const current = row.original.current_assignee
+        return (
+          <span>
+            {t(`options.assignment.${row.original.assignment_type}`)}
+            {current && <span className="text-foreground"> · {current.first_name}</span>}
+          </span>
+        )
+      },
       meta: { cellClassName: 'font-medium text-muted-foreground' },
     },
     {

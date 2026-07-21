@@ -61,11 +61,18 @@ export type Chore = {
   start_date: string
   repeats: RepeatPeriod
   assignment_type: AssignmentType
+  // Completions one assignee holds before the chore hands off (1 = every
+  // completion; "take turns" in the form sets a larger value).
+  turn_length: number
   created_at: string
   // The household the chore belongs to (fixed at creation). Drives the list's
   // household column/filter and the edit form's read-only household.
   household: { id: number; name: string }
+  // The full pool of people the chore rotates between.
   assignees: User[]
+  // Who is on the hook right now (the open occurrence's assignee); null when the
+  // chore is unassigned/shared or has no open occurrence (a completed one-off).
+  current_assignee: User | null
   tags: Tag[]
 }
 
@@ -124,6 +131,7 @@ export type ChoreCloneState = {
   start_date: string
   repeats: RepeatPeriod
   assignment_type: AssignmentType
+  turn_length: number
   assignee_ids: number[]
   tag_ids: number[]
 }

@@ -7,6 +7,7 @@ import { ApiError } from '@/lib/api'
 import { assignmentOptions, formatDate, repeatOptions } from '@/lib/chores'
 import type { AssignmentType, HouseholdMember, RepeatPeriod, Tag } from '@/lib/types'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -28,7 +29,12 @@ export type ChoreFormValues = {
   start_date: string
   repeats: RepeatPeriod
   assignment_type: AssignmentType
+  // Completions per assignee before a handoff (1 = every completion). "Take turns"
+  // is on when this is > 1.
+  turn_length: number
   assignee_ids: number[]
+  // Who starts on the hook. Only used for `manual`; the other strategies derive it.
+  current_assignee_id: number | null
   tag_ids: number[]
 }
 
@@ -40,7 +46,9 @@ export type ChoreSubmit = {
   start_date: string
   repeats: RepeatPeriod
   assignment_type: AssignmentType
+  turn_length: number
   assignee_ids: number[]
+  current_assignee_id: number | null
   tag_ids: number[]
 }
 
@@ -75,6 +83,13 @@ export function ChoreForm({
 }: Props) {
   const { t } = useTranslation()
   const [values, setValues] = useState<ChoreFormValues>(initial)
+  // "Take turns" is its own toggle (not derived from turn_length) so editing the
+  // number down to 1 doesn't make the field vanish; the input is string-backed so it
+  // can be cleared and multi-digit values typed, then parsed/clamped on submit.
+  const [takeTurns, setTakeTurns] = useState(() => initial.turn_length > 1)
+  const [turnLength, setTurnLength] = useState(() =>
+    String(initial.turn_length > 1 ? initial.turn_length : 2),
+  )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [dateOpen, setDateOpen] = useState(false)
@@ -87,6 +102,15 @@ export function ChoreForm({
   const selectedAssignees = values.assignee_ids.filter((id) => memberIds.has(id))
   const selectedTags = values.tag_ids.filter((id) => tagIds.has(id))
 
+  // "Take turns" only applies to the auto-rotating strategies; manual instead lets
+  // you pick the current person (from the selected pool). Derived so switching
+  // strategy or dropping the current assignee can't submit a stale value.
+  const isManual = values.assignment_type === 'manual'
+  const currentAssigneeId =
+    values.current_assignee_id !== null && selectedAssignees.includes(values.current_assignee_id)
+      ? values.current_assignee_id
+      : null
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setSaving(true)
@@ -98,7 +122,10 @@ export function ChoreForm({
         start_date: values.start_date,
         repeats: values.repeats,
         assignment_type: values.assignment_type,
+        // A whole number >= 2 when taking turns, otherwise 1 (hand off every completion).
+        turn_length: isManual || !takeTurns ? 1 : Math.max(2, Math.trunc(Number(turnLength)) || 2),
         assignee_ids: selectedAssignees,
+        current_assignee_id: isManual ? currentAssigneeId : null,
         tag_ids: selectedTags,
       })
     } catch (err) {
@@ -193,6 +220,69 @@ export function ChoreForm({
           </Select>
         </div>
       </div>
+
+      {/* Take turns: only for the auto-rotating strategies (manual never rotates). */}
+      {!isManual && (
+        <div className="flex flex-col gap-3">
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <Checkbox
+              checked={takeTurns}
+              onCheckedChange={(checked) => setTakeTurns(checked === true)}
+            />
+            {t('choreCreate.takeTurns')}
+          </label>
+          {takeTurns && (
+            <div className="flex flex-col gap-1.5">
+              <Label id="turn-length-label" htmlFor="turn-length">
+                {t('choreCreate.turnLength')}
+              </Label>
+              <Input
+                id="turn-length"
+                aria-labelledby="turn-length-label"
+                type="number"
+                min={2}
+                step={1}
+                value={turnLength}
+                onChange={(e) => setTurnLength(e.target.value)}
+              />
+              <p className="text-[13px] font-medium text-muted-foreground">
+                {t('choreCreate.turnLengthHint')}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Manual: pick who is currently on the hook (from the selected pool). */}
+      {isManual && selectedAssignees.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <Label id="current-assignee-label" htmlFor="current-assignee">
+            {t('choreCreate.currentAssignee')}
+          </Label>
+          <Select
+            value={currentAssigneeId !== null ? String(currentAssigneeId) : undefined}
+            onValueChange={(v) => setValues({ ...values, current_assignee_id: Number(v) })}
+          >
+            <SelectTrigger
+              id="current-assignee"
+              aria-labelledby="current-assignee-label"
+              className="w-full"
+            >
+              <SelectValue placeholder={t('choreCreate.currentAssigneePlaceholder')} />
+            </SelectTrigger>
+            <SelectContent>
+              {selectedAssignees.map((id) => {
+                const member = members.find((m) => m.id === id)
+                return (
+                  <SelectItem key={id} value={String(id)}>
+                    {member ? `${member.first_name} ${member.last_name}` : String(id)}
+                  </SelectItem>
+                )
+              })}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
 
       <div className="flex flex-col gap-1.5">
         <Label id="start-date-label" htmlFor="start-date">
