@@ -404,6 +404,56 @@ async def test_list_chores_household_filter(
     assert [c["title"] for c in resp.json()["items"]] == ["Second chore"]
 
 
+async def test_list_chores_title_filter(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    outside = await make_household(name="Outside")
+    await make_chore(household=household, title="Clean the kitchen")
+    await make_chore(household=household, title="Clean the bathroom")
+    await make_chore(household=household, title="Water the plants")
+    # A matching title in a household the user does not belong to must stay hidden.
+    await make_chore(household=outside, title="Clean the garage")
+    client = await auth_client(user)
+
+    # Case-insensitive substring match, still scoped to my households.
+    resp = await client.get("/api/v1/chores?title=CLEAN&sort_by=title&sort_dir=asc")
+    assert resp.status_code == 200
+    assert [c["title"] for c in resp.json()["items"]] == [
+        "Clean the bathroom",
+        "Clean the kitchen",
+    ]
+
+    # A non-matching term yields an empty page.
+    empty = await client.get("/api/v1/chores?title=zzz")
+    assert empty.json() == {"items": [], "total": 0, "page": 1, "page_size": 20}
+
+    # A whitespace-only title is a no-op: the whole (in-household) list is returned.
+    blank = await client.get("/api/v1/chores?title=%20%20")
+    assert blank.json()["total"] == 3
+
+
+async def test_list_chores_title_filter_escapes_wildcards(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    await make_chore(household=household, title="50% off day")
+    await make_chore(household=household, title="Full clean")
+    client = await auth_client(user)
+
+    # "%" is escaped, so it matches a literal percent sign, not every row.
+    resp = await client.get("/api/v1/chores?title=%25")  # %25 = URL-encoded "%"
+    assert [c["title"] for c in resp.json()["items"]] == ["50% off day"]
+
+
 async def test_list_chores_excludes_soft_deleted(
     make_user: MakeUser,
     make_household: MakeHousehold,

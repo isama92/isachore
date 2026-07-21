@@ -222,6 +222,40 @@ describe('Chores', () => {
     expect(screen.queryByRole('combobox', { name: 'Household' })).not.toBeInTheDocument()
   })
 
+  it('filters by title (debounced) and pushes the term into the query', async () => {
+    const fetchMock = stubFetch({
+      chores: [makeChore({ id: 7, title: 'Scrub the tub' })],
+    })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    await screen.findByText('Scrub the tub')
+    await user.type(screen.getByLabelText('Filter by title'), 'tub')
+
+    await waitFor(() => expect(lastChoresGet(fetchMock)).toContain('title=tub'), { timeout: 2000 })
+  })
+
+  it('shows the title filter even when the user has a single household', async () => {
+    stubFetch({
+      chores: [makeChore({ title: 'Scrub the tub' })],
+      households: [makeHousehold({ id: 1, name: 'Flat 3B' })],
+    })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+
+    await screen.findByText('Scrub the tub')
+    expect(screen.getByLabelText('Filter by title')).toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'Household' })).not.toBeInTheDocument()
+  })
+
+  it('pins the actions column to the right edge', async () => {
+    stubFetch({ chores: [makeChore({ title: 'Scrub the tub' })] })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+
+    await screen.findByText('Scrub the tub')
+    // .pinned-col is what keeps the buttons visible while the row scrolls.
+    expect(screen.getByRole('columnheader', { name: 'Actions' }).className).toContain('pinned-col')
+  })
+
   it('soft-deletes a chore after confirming in the dialog and reloads', async () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     const toastSpy = vi.spyOn(toast, 'success')

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
@@ -13,6 +13,7 @@ import { DataTable } from '@/components/data-table/DataTable'
 import { useServerTable } from '@/components/data-table/useServerTable'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -33,7 +34,7 @@ import {
 } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 
-type ChoreFilters = { household_id: string }
+type ChoreFilters = { household_id: string; title: string }
 
 // Radix Selects can't hold an empty value, so "All households" uses a sentinel
 // that maps back to an omitted household_id filter.
@@ -44,11 +45,32 @@ export default function Chores() {
 
   const table = useServerTable<Chore, ChoreFilters>({
     endpoint: endpoints.chores.root,
-    initial: { sortBy: 'start_date', sortDir: 'asc', pageSize: 10, filters: { household_id: '' } },
+    initial: {
+      sortBy: 'start_date',
+      sortDir: 'asc',
+      pageSize: 10,
+      filters: { household_id: '', title: '' },
+    },
   })
 
   const [households, setHouseholds] = useState<Household[]>([])
   const [error, setError] = useState<string | null>(null)
+
+  // Local text-filter state for instant typing feedback; pushed to the table
+  // (which refetches server-side) after a short debounce.
+  const [titleInput, setTitleInput] = useState(table.filters.title)
+
+  // Keep a latest-value ref to the (per-render) setFilter so the debounce effect
+  // doesn't need it as a dependency (which would reset the timer every render).
+  const setFilterRef = useRef(table.setFilter)
+  useEffect(() => {
+    setFilterRef.current = table.setFilter
+  })
+
+  useEffect(() => {
+    const id = setTimeout(() => setFilterRef.current('title', titleInput.trim()), 300)
+    return () => clearTimeout(id)
+  }, [titleInput])
 
   // The household filter options (and whether to show the filter at all).
   useEffect(() => {
@@ -282,7 +304,13 @@ export default function Chores() {
       header: t('chores.headers.actions'),
       enableSorting: false,
       cell: ({ row }) => rowActions(row.original),
-      meta: { headClassName: 'text-right', cellClassName: 'text-right' },
+      // Pinned to the right edge (`.pinned-col`) so the buttons stay visible
+      // while the other columns scroll under it; the class handles the sticky
+      // positioning, opaque background, and the overflow-only left shadow.
+      meta: {
+        headClassName: 'text-right pinned-col',
+        cellClassName: 'text-right pinned-col',
+      },
     },
   ]
 
@@ -300,8 +328,15 @@ export default function Chores() {
           <p className="mb-4 text-[13px] font-bold text-danger">{error ?? t('chores.loadError')}</p>
         )}
 
-        {households.length > 1 && (
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+          <Input
+            className="sm:w-56"
+            placeholder={t('chores.filters.titlePlaceholder')}
+            aria-label={t('chores.filters.titlePlaceholder')}
+            value={titleInput}
+            onChange={(e) => setTitleInput(e.target.value)}
+          />
+          {households.length > 1 && (
             <Select
               value={table.filters.household_id || ALL}
               onValueChange={(v) => table.setFilter('household_id', v === ALL ? '' : v)}
@@ -318,8 +353,8 @@ export default function Chores() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
-        )}
+          )}
+        </div>
 
         <DataTable
           columns={columns}

@@ -10,7 +10,7 @@ from app.api.deps import CurrentUser, SessionDep
 from app.api.v1.households import SortDir
 from app.core.assignment import initial_assignee, next_assignee, should_reassign
 from app.core.chores import days_until_due, due_status, first_occurrence, next_occurrence_after
-from app.core.households import get_member_household, member_household_ids
+from app.core.households import escape_like, get_member_household, member_household_ids
 from app.models import (
     AssignmentType,
     Chore,
@@ -341,12 +341,16 @@ async def list_chores(
     sort_by: ChoreSortBy = "start_date",
     sort_dir: SortDir = "asc",
     household_id: Annotated[int | None, Query(ge=1)] = None,
+    title: Annotated[str | None, Query(max_length=255)] = None,
 ) -> Page[ChoreRead]:
     # Scope to non-deleted chores in the user's active households; an optional
-    # household_id narrows to one of them (a non-member id yields an empty page).
+    # household_id narrows to one of them (a non-member id yields an empty page),
+    # and an optional title does a case-insensitive substring match.
     filters = [Chore.deleted_at.is_(None), Chore.household_id.in_(member_household_ids(user.id))]
     if household_id is not None:
         filters.append(Chore.household_id == household_id)
+    if title and title.strip():
+        filters.append(Chore.title.ilike(f"%{escape_like(title.strip())}%"))
 
     total = await session.scalar(select(func.count()).select_from(Chore).where(*filters)) or 0
 

@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import {
   flexRender,
   getCoreRowModel,
@@ -97,9 +98,33 @@ export function DataTable<Row, Filters extends FilterSet>({
   const rows = table.getRowModel().rows
   const colCount = columns.length
 
+  // Track whether the table overflows its scroll container horizontally, so a
+  // pinned column can show a shadow only while there is content under it. The
+  // ResizeObserver delivers an initial measurement asynchronously after
+  // observe(), so setState never runs synchronously in the effect body.
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [overflowing, setOverflowing] = useState(false)
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const update = () => setOverflowing(el.scrollWidth > el.clientWidth)
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    // Also watch the inner table: its width can change (e.g. unusually long
+    // content) without the container resizing, which would otherwise leave the
+    // shadow stale.
+    const inner = el.querySelector('table')
+    if (inner) observer.observe(inner)
+    return () => observer.disconnect()
+  }, [])
+
   return (
     <div className="overflow-hidden rounded-2xl border border-line bg-card">
-      <Table className={minWidthClassName}>
+      <Table
+        className={minWidthClassName}
+        containerRef={containerRef}
+        data-overflowing={overflowing}
+      >
         <TableHeader>
           {table.getHeaderGroups().map((headerGroup) => (
             <TableRow key={headerGroup.id} className="hover:bg-transparent">

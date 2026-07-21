@@ -116,7 +116,8 @@
     },
     "filters": {
       "householdLabel": "Nucleo domestico",
-      "householdAll": "Tutti i nuclei domestici"
+      "householdAll": "Tutti i nuclei domestici",
+      "titlePlaceholder": "Filtra per titolo"
     }
   },
   "history": {

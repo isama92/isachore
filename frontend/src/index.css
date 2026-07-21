@@ -28,6 +28,35 @@
   }
 }
 
+@layer components {
+  /* Right-pinned table column: stays at the right edge while the rest of the
+     row scrolls under it. The separating shadow is drawn with a pseudo-element
+     gradient rather than a box-shadow on the <td> — border-collapse tables
+     (Tailwind's default) render cell box-shadows inconsistently across browsers.
+     It only shows while the table overflows (data-overflowing is set on the
+     <table> by DataTable). Neutral colour (tracks --foreground) reads in both
+     themes. */
+  .pinned-col {
+    position: sticky;
+    right: 0;
+    z-index: 1;
+    background-color: var(--card);
+  }
+  [data-overflowing='true'] .pinned-col::before {
+    content: '';
+    position: absolute;
+    inset-block: 0;
+    right: 100%;
+    width: 16px;
+    pointer-events: none;
+    background: linear-gradient(
+      to left,
+      color-mix(in oklab, var(--foreground) 15%, transparent),
+      transparent
+    );
+  }
+}
+
 @theme inline {
   /* shadcn heading utility -> isachore display font */
   --font-heading: var(--font-display);

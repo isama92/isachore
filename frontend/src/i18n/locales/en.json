@@ -116,7 +116,8 @@
     },
     "filters": {
       "householdLabel": "Household",
-      "householdAll": "All households"
+      "householdAll": "All households",
+      "titlePlaceholder": "Filter by title"
     }
   },
   "history": {
