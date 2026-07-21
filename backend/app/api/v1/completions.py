@@ -2,13 +2,20 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
-from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, SessionDep
 from app.api.v1.households import SortDir
-from app.core.chores import advance_anchor, days_late
+from app.core.chores import days_late
 from app.core.households import member_household_ids
-from app.models import Chore, CompletedChore, Household, User, UserStatus, household_members
+from app.models import (
+    Chore,
+    ChoreOccurrence,
+    Household,
+    OccurrenceStatus,
+    User,
+    UserStatus,
+    household_members,
+)
 from app.schemas import HistoryEntryRead, HistoryFilterOptions, Page
 from app.schemas.chore import ChoreHouseholdRead
 from app.schemas.household import HouseholdMemberRead
@@ -17,12 +24,13 @@ router = APIRouter()
 
 # Whitelisted sort keys -> the column(s) to order by. Only these values reach the
 # handler (the Literal makes anything else a 422), so the map can never KeyError.
-# History defaults to the completion time, most recent first.
+# History defaults to the completion time, most recent first. The API key stays
+# "created_at" for stability; it orders by the occurrence's completion timestamp.
 CompletionSortBy = Literal["created_at", "title"]
 
 COMPLETION_SORT_COLUMNS = {
-    "created_at": (CompletedChore.created_at,),
-    "title": (CompletedChore.title,),
+    "created_at": (ChoreOccurrence.completed_at,),
+    "title": (ChoreOccurrence.title,),
 }
 
 
@@ -77,24 +85,27 @@ async def list_completions(
     household_id: Annotated[int | None, Query(ge=1)] = None,
 ) -> Page[HistoryEntryRead]:
     """Completed-chore history across the user's active households (so housemates'
-    completions show too). Optional user_id / household_id narrow the list; a
-    non-member household or a stranger's id yields an empty page. Completions of
-    soft-deleted chores are kept (the title is snapshotted for exactly this and
-    the chore row still resolves the household join)."""
-    # completed_chores has no household_id of its own, so scope by joining to the
-    # chore and filtering on its household. No Chore.deleted_at filter: history
-    # outlives a soft-deleted chore.
-    filters = [Chore.household_id.in_(member_household_ids(user.id))]
+    completions show too). Reads the `done` occurrences of the merged occurrences
+    table. Optional user_id / household_id narrow the list; a non-member household or a
+    stranger's id yields an empty page. History of soft-deleted chores is kept (the
+    title is snapshotted for exactly this and the chore row still resolves the join)."""
+    # An occurrence has no household_id of its own, so scope by joining to the chore
+    # and filtering on its household. No Chore.deleted_at filter: history outlives a
+    # soft-deleted chore.
+    filters = [
+        ChoreOccurrence.status == OccurrenceStatus.done,
+        Chore.household_id.in_(member_household_ids(user.id)),
+    ]
     if household_id is not None:
         filters.append(Chore.household_id == household_id)
     if user_id is not None:
-        filters.append(CompletedChore.completed_by_user_id == user_id)
+        filters.append(ChoreOccurrence.completed_by_user_id == user_id)
 
     total = (
         await session.scalar(
             select(func.count())
-            .select_from(CompletedChore)
-            .join(Chore, Chore.id == CompletedChore.chore_id)
+            .select_from(ChoreOccurrence)
+            .join(Chore, Chore.id == ChoreOccurrence.chore_id)
             .where(*filters)
         )
         or 0
@@ -102,13 +113,13 @@ async def list_completions(
 
     descending = sort_dir == "desc"
     order_by = [col.desc() if descending else col.asc() for col in COMPLETION_SORT_COLUMNS[sort_by]]
-    order_by.append(CompletedChore.id.desc() if descending else CompletedChore.id.asc())
+    order_by.append(ChoreOccurrence.id.desc() if descending else ChoreOccurrence.id.asc())
 
     result = await session.execute(
-        select(CompletedChore, Household, User)
-        .join(Chore, Chore.id == CompletedChore.chore_id)  # to-one: no row multiplication
+        select(ChoreOccurrence, Household, User)
+        .join(Chore, Chore.id == ChoreOccurrence.chore_id)  # to-one: no row multiplication
         .join(Household, Household.id == Chore.household_id)
-        .outerjoin(User, User.id == CompletedChore.completed_by_user_id)  # completer may be NULL
+        .outerjoin(User, User.id == ChoreOccurrence.completed_by_user_id)  # completer may be NULL
         .where(*filters)
         .order_by(*order_by)
         .limit(page_size)
@@ -116,64 +127,72 @@ async def list_completions(
     )
     items = [
         HistoryEntryRead(
-            id=completion.id,
-            title=completion.title,
-            scheduled_for=completion.scheduled_for,
-            completed_at=completion.created_at,
-            days_late=days_late(completion.scheduled_for, completion.created_at),
+            id=occ.id,
+            title=occ.title,
+            scheduled_for=occ.scheduled_for,
+            completed_at=occ.completed_at,
+            days_late=days_late(occ.scheduled_for, occ.completed_at),
             completed_by=HouseholdMemberRead.model_validate(completer) if completer else None,
             household=ChoreHouseholdRead.model_validate(household),
         )
-        for completion, household, completer in result.all()
+        for occ, household, completer in result.all()
     ]
     return Page[HistoryEntryRead](items=items, total=total, page=page, page_size=page_size)
 
 
 @router.delete("/{completion_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def undo_completion(completion_id: int, user: CurrentUser, session: SessionDep) -> None:
-    """Undo a completion: delete the record and roll the chore's schedule back.
-    Only the person who recorded the completion may undo it. Deleting the latest
-    completion re-derives the schedule anchor from the prior one (the chore becomes
-    due again); deleting an older one only edits history."""
-    # Scope to the user's active households (same scope as the list): a completion
+    """Undo a completion (identified by its done-occurrence id). Only the person who
+    recorded it may undo. Undoing the chore's latest completion reopens that occurrence
+    (deleting the successor open occurrence first) so the chore is due again with its
+    original assignee; undoing an older one just removes that history row."""
+    # Scope to the user's active households (same scope as the list): a done occurrence
     # outside it, or a missing id, is a 404.
-    completion = (
+    occ = (
         await session.execute(
-            select(CompletedChore)
-            .join(Chore, Chore.id == CompletedChore.chore_id)
-            .options(selectinload(CompletedChore.chore))
+            select(ChoreOccurrence)
+            .join(Chore, Chore.id == ChoreOccurrence.chore_id)
             .where(
-                CompletedChore.id == completion_id,
+                ChoreOccurrence.id == completion_id,
+                ChoreOccurrence.status == OccurrenceStatus.done,
                 Chore.household_id.in_(member_household_ids(user.id)),
             )
         )
     ).scalar_one_or_none()
-    if completion is None:
+    if occ is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Completion not found")
-    if completion.completed_by_user_id != user.id:
+    if occ.completed_by_user_id != user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only undo your own completions",
         )
 
-    chore = completion.chore
-    await session.delete(completion)
-    await session.flush()  # so the deleted row is excluded from the lookup below
-    # Re-derive the schedule anchor from the latest remaining completion: the
-    # anchor is a pure function of that row's scheduled_for + the date of its
-    # created_at, so this reproduces the anchor stored when it was recorded. NULL
-    # if none remain -> the chore reverts to never-completed.
-    latest = (
-        await session.execute(
-            select(CompletedChore)
-            .where(CompletedChore.chore_id == chore.id)
-            .order_by(CompletedChore.created_at.desc(), CompletedChore.id.desc())
-            .limit(1)
+    # Is this the chore's most recent completion? (scheduled_for is unique per chore.)
+    latest_done = await session.scalar(
+        select(func.max(ChoreOccurrence.scheduled_for)).where(
+            ChoreOccurrence.chore_id == occ.chore_id,
+            ChoreOccurrence.status == OccurrenceStatus.done,
         )
-    ).scalar_one_or_none()
-    chore.schedule_anchor = (
-        advance_anchor(latest.scheduled_for, latest.created_at, chore.repeats)
-        if latest is not None
-        else None
     )
+    if occ.scheduled_for == latest_done:
+        # Reopen it: delete the successor open occurrence first (freeing the
+        # one-open-per-chore slot), then flip this row back to open with its assignee.
+        successor = (
+            await session.execute(
+                select(ChoreOccurrence).where(
+                    ChoreOccurrence.chore_id == occ.chore_id,
+                    ChoreOccurrence.status == OccurrenceStatus.open,
+                )
+            )
+        ).scalar_one_or_none()
+        if successor is not None:
+            await session.delete(successor)
+            await session.flush()
+        occ.status = OccurrenceStatus.open
+        occ.completed_by_user_id = None
+        occ.completed_at = None
+        occ.title = None
+    else:
+        # An older completion: a history edit, the current open occurrence stands.
+        await session.delete(occ)
     await session.commit()

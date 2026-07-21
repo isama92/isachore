@@ -90,7 +90,7 @@ async def test_chore_occurrence_round_trips_open_and_done(
 ) -> None:
     alice = await make_user(email="alice@example.com")
     household = await make_household(members=[alice])
-    chore = await make_chore(household=household, assignees=[alice])
+    chore = await make_chore(household=household, assignees=[alice], with_occurrence=False)
     assert chore.turn_length == 1  # column default
 
     db_session.add_all(
@@ -134,7 +134,7 @@ async def test_chore_occurrence_rejects_duplicate_slot(
 ) -> None:
     # (chore_id, scheduled_for) is unique: an occurrence slot can exist only once.
     household = await make_household()
-    chore = await make_chore(household=household)
+    chore = await make_chore(household=household, with_occurrence=False)
     slot = datetime(2026, 7, 20, tzinfo=UTC)
     db_session.add(
         ChoreOccurrence(
@@ -152,7 +152,7 @@ async def test_chore_occurrence_allows_only_one_open_per_chore(
 ) -> None:
     # The partial unique index permits at most one open occurrence per chore.
     household = await make_household()
-    chore = await make_chore(household=household)
+    chore = await make_chore(household=household, with_occurrence=False)
     db_session.add(
         ChoreOccurrence(chore_id=chore.id, scheduled_for=datetime(2026, 7, 20, tzinfo=UTC))
     )

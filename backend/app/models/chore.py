@@ -63,11 +63,6 @@ class Chore(Base):
     # person (the strategy picks who). 1 = hand off every completion; "take turns" in
     # the UI sets a larger value. Only meaningful for the auto-rotating strategies.
     turn_length: Mapped[int] = mapped_column(default=1, server_default="1")
-    # The scheduled date of the last cleared occurrence (skip-missed applied); the
-    # anchor for the due-date computation (next_due = schedule_anchor + interval).
-    # NULL means never completed. Denormalised from completed_chores so next_due
-    # doesn't have to query the history table. Set on each completion.
-    schedule_anchor: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     # Soft delete: NULL means active, a timestamp means the chore is deleted and
     # hidden from the list (mirrors households; recoverable only via the DB).
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)

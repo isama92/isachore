@@ -6,9 +6,9 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, SessionDep
-from app.core.chores import days_until_due, due_status, next_due
+from app.core.chores import days_until_due, due_status
 from app.core.households import member_household_ids
-from app.models import Chore, CompletedChore, User
+from app.models import Chore, ChoreOccurrence, OccurrenceStatus
 from app.schemas import DueChoreRead, HomeRead, ProgressRead
 from app.schemas.chore import ChoreHouseholdRead
 from app.schemas.household import HouseholdMemberRead
@@ -41,72 +41,89 @@ async def get_home(
     filtered scope. A household or member id the user can't see just yields an
     empty scope, like the chores list."""
     now = datetime.now(UTC)
+    # UTC day bounds (not a `::date` cast, which depends on the session TimeZone).
+    today_start = datetime(now.year, now.month, now.day, tzinfo=UTC)
+    tomorrow_start = today_start + timedelta(days=1)
+    # Overdue + due within the next week is a single range on the stored scheduled_for:
+    # everything before the horizon (day 7 inclusive, day 8 excluded). No more loading
+    # every chore and deriving due dates in Python - the occurrences table is queryable.
+    horizon = today_start + timedelta(days=DUE_SOON_DAYS + 1)
 
-    # Scaling note: next_due is derived from start_date + repeats + schedule_anchor
-    # (with month/year clamping), so it can't be expressed in SQL and the due-window
-    # filter runs in Python below. This loads every in-scope chore per request -
-    # O(chores in scope), regardless of how few are actually due. Fine for a
-    # household-sized app; revisit (e.g. a stored/materialised next_due) if a
-    # household ever holds a large number of chores.
-    filters = [
+    scope = [
         Chore.deleted_at.is_(None),
         Chore.household_id.in_(member_household_ids(user.id)),
     ]
     if household_id is not None:
-        filters.append(Chore.household_id == household_id)
-    if assignee_id:
-        # The selected members' chores, plus unassigned/shared chores (everyone's).
-        filters.append(or_(~Chore.assignees.any(), Chore.assignees.any(User.id.in_(assignee_id))))
+        scope.append(Chore.household_id == household_id)
+    # The selected members' occurrences, plus unassigned/shared ones (everyone's). The
+    # current assignee alone decides visibility, so a rotating chore leaves your list
+    # the moment it hands off.
+    assignee_clause = (
+        or_(ChoreOccurrence.assignee_id.is_(None), ChoreOccurrence.assignee_id.in_(assignee_id))
+        if assignee_id
+        else None
+    )
+
+    open_filters = [
+        *scope,
+        ChoreOccurrence.status == OccurrenceStatus.open,
+        ChoreOccurrence.scheduled_for < horizon,
+    ]
+    if assignee_clause is not None:
+        open_filters.append(assignee_clause)
 
     result = await session.execute(
-        select(Chore)
-        .options(selectinload(Chore.assignees), selectinload(Chore.household))
-        .where(*filters)
+        select(ChoreOccurrence)
+        .join(Chore, Chore.id == ChoreOccurrence.chore_id)
+        .options(
+            selectinload(ChoreOccurrence.assignee),
+            selectinload(ChoreOccurrence.chore).selectinload(Chore.household),
+        )
+        .where(*open_filters)
     )
-    chores = result.scalars().all()
+    occurrences = result.scalars().all()
 
-    scoped_ids = {chore.id for chore in chores}
     items: list[DueChoreRead] = []
     pending_ids: set[int] = set()  # overdue or due today, still not done
-    for chore in chores:
-        due = next_due(chore)
-        if due is None:  # a completed one-off has no next occurrence
-            continue
-        days = days_until_due(due, now)
+    for occ in occurrences:
+        days = days_until_due(occ.scheduled_for, now)
         if days <= 0:
-            pending_ids.add(chore.id)
-        if days <= DUE_SOON_DAYS:
-            items.append(
-                DueChoreRead(
-                    id=chore.id,
-                    title=chore.title,
-                    repeats=chore.repeats,
-                    next_due=due,
-                    days_until_due=days,
-                    status=due_status(days),
-                    household=ChoreHouseholdRead.model_validate(chore.household),
-                    assignees=[HouseholdMemberRead.model_validate(a) for a in chore.assignees],
-                )
+            pending_ids.add(occ.chore_id)
+        items.append(
+            DueChoreRead(
+                id=occ.chore_id,
+                title=occ.chore.title,
+                repeats=occ.chore.repeats,
+                next_due=occ.scheduled_for,
+                days_until_due=days,
+                status=due_status(days),
+                household=ChoreHouseholdRead.model_validate(occ.chore.household),
+                # Only the current assignee shows on Home (the pool lives on the chore).
+                assignees=(
+                    [HouseholdMemberRead.model_validate(occ.assignee)] if occ.assignee else []
+                ),
             )
+        )
     items.sort(key=lambda item: (item.next_due, item.id))  # most overdue first
 
-    # Today's progress over the filtered scope; completions by ANY member count.
-    # UTC day bounds (not a `::date` cast, which depends on the session TimeZone).
-    today_start = datetime(now.year, now.month, now.day, tzinfo=UTC)
-    tomorrow_start = today_start + timedelta(days=1)
-    done_ids: set[int] = set()
-    if scoped_ids:
-        done_result = await session.execute(
-            select(CompletedChore.chore_id)
-            .where(
-                CompletedChore.chore_id.in_(scoped_ids),
-                CompletedChore.created_at >= today_start,
-                CompletedChore.created_at < tomorrow_start,
-                CompletedChore.scheduled_for < tomorrow_start,
-            )
-            .distinct()
-        )
-        done_ids = set(done_result.scalars().all())
+    # Today's progress over the same scope: an occurrence completed today (whose slot
+    # was due today or earlier) counts as done; overdue/due-today open ones are pending.
+    done_filters = [
+        *scope,
+        ChoreOccurrence.status == OccurrenceStatus.done,
+        ChoreOccurrence.completed_at >= today_start,
+        ChoreOccurrence.completed_at < tomorrow_start,
+        ChoreOccurrence.scheduled_for < tomorrow_start,
+    ]
+    if assignee_clause is not None:
+        done_filters.append(assignee_clause)
+    done_result = await session.execute(
+        select(ChoreOccurrence.chore_id)
+        .join(Chore, Chore.id == ChoreOccurrence.chore_id)
+        .where(*done_filters)
+        .distinct()
+    )
+    done_ids = set(done_result.scalars().all())
 
     progress = ProgressRead(done_today=len(done_ids), total_today=len(pending_ids | done_ids))
     return HomeRead(progress=progress, items=items)

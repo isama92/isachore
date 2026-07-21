@@ -3,18 +3,18 @@ from datetime import UTC, datetime, timedelta
 
 from httpx import AsyncClient
 
-from app.models import Chore, CompletedChore, Household, RepeatPeriod, User
+from app.models import Chore, ChoreOccurrence, Household, OccurrenceStatus, RepeatPeriod, User
 
 MakeUser = Callable[..., Awaitable[User]]
 MakeHousehold = Callable[..., Awaitable[Household]]
 MakeChore = Callable[..., Awaitable[Chore]]
-MakeCompletion = Callable[..., Awaitable[CompletedChore]]
+MakeOccurrence = Callable[..., Awaitable[ChoreOccurrence]]
 AuthClient = Callable[[User], Awaitable[AsyncClient]]
 
 
 def _midnight(days_from_today: int = 0) -> datetime:
-    """UTC midnight `days_from_today` days from today (matches next_due for a
-    never-completed chore whose start_date is that day)."""
+    """UTC midnight `days_from_today` days from today (the scheduled_for of an occurrence
+    whose start day is that day)."""
     day = datetime.now(UTC).date() + timedelta(days=days_from_today)
     return datetime(day.year, day.month, day.day, tzinfo=UTC)
 
@@ -254,7 +254,7 @@ async def test_home_progress_ignores_completions_before_today(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
-    make_completion: MakeCompletion,
+    make_occurrence: MakeOccurrence,
     auth_client: AuthClient,
 ) -> None:
     user = await make_user()
@@ -265,9 +265,17 @@ async def test_home_progress_ignores_completions_before_today(
         title="Old",
         start_date=(_midnight(-1)).date(),
         repeats=RepeatPeriod.daily,
-        schedule_anchor=yesterday_noon,  # -> next_due is today, so it's pending
+        with_occurrence=False,
     )
-    await make_completion(chore=chore, scheduled_for=_midnight(-1), created_at=yesterday_noon)
+    # Completed yesterday, with today's occurrence still open (pending).
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=_midnight(-1),
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=yesterday_noon,
+    )
+    await make_occurrence(chore=chore, scheduled_for=_midnight(0), status=OccurrenceStatus.open)
     client = await auth_client(user)
 
     resp = await client.get("/api/v1/home")

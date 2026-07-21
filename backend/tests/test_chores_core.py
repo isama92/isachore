@@ -9,22 +9,9 @@ from app.core.chores import (
     days_until_due,
     due_status,
     first_occurrence,
-    next_due,
     next_occurrence_after,
 )
-from app.models import Chore, RepeatPeriod
-
-
-def _chore(*, start_date: date, repeats: RepeatPeriod, schedule_anchor: datetime | None) -> Chore:
-    # An unpersisted Chore is enough to exercise the pure due-date logic.
-    return Chore(
-        household_id=1,
-        title="t",
-        start_date=start_date,
-        repeats=repeats,
-        assignment_type="manual",
-        schedule_anchor=schedule_anchor,
-    )
+from app.models import RepeatPeriod
 
 
 def test_add_interval_daily_weekly_preserve_time() -> None:
@@ -54,35 +41,6 @@ def test_add_interval_yearly_clamps_leap_day() -> None:
 def test_add_interval_manual_raises() -> None:
     with pytest.raises(ValueError, match="no recurrence interval"):
         _add_interval(datetime(2026, 7, 18, tzinfo=UTC), RepeatPeriod.manual)
-
-
-def test_next_due_never_completed_is_start_date_midnight() -> None:
-    chore = _chore(start_date=date(2026, 7, 10), repeats=RepeatPeriod.weekly, schedule_anchor=None)
-    assert next_due(chore) == datetime(2026, 7, 10, tzinfo=UTC)
-
-
-def test_next_due_is_one_interval_past_the_anchor() -> None:
-    # next_due is a pure derivation from the anchor; time-of-day is preserved.
-    chore = _chore(
-        start_date=date(2026, 7, 10),
-        repeats=RepeatPeriod.daily,
-        schedule_anchor=datetime(2026, 7, 18, 14, 0, tzinfo=UTC),
-    )
-    assert next_due(chore) == datetime(2026, 7, 19, 14, 0, tzinfo=UTC)
-
-
-def test_next_due_manual_completed_is_none() -> None:
-    chore = _chore(
-        start_date=date(2026, 7, 10),
-        repeats=RepeatPeriod.manual,
-        schedule_anchor=datetime(2026, 7, 15, tzinfo=UTC),
-    )
-    assert next_due(chore) is None
-
-
-def test_next_due_manual_never_completed_is_start_date() -> None:
-    chore = _chore(start_date=date(2026, 7, 10), repeats=RepeatPeriod.manual, schedule_anchor=None)
-    assert next_due(chore) == datetime(2026, 7, 10, tzinfo=UTC)
 
 
 def test_days_until_due_is_date_based_and_normalises_tz() -> None:

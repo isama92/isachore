@@ -5,16 +5,41 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Chore, CompletedChore, Household, RepeatPeriod, User, UserStatus
+from app.models import (
+    AssignmentType,
+    Chore,
+    ChoreOccurrence,
+    Household,
+    OccurrenceStatus,
+    RepeatPeriod,
+    User,
+    UserStatus,
+)
 
 MakeUser = Callable[..., Awaitable[User]]
 MakeHousehold = Callable[..., Awaitable[Household]]
 MakeChore = Callable[..., Awaitable[Chore]]
-MakeCompletion = Callable[..., Awaitable[CompletedChore]]
+MakeOccurrence = Callable[..., Awaitable[ChoreOccurrence]]
 AuthClient = Callable[[User], Awaitable[AsyncClient]]
 
 # A fixed reference day so date arithmetic in assertions is unambiguous.
 DUE = datetime(2026, 7, 10, 8, 0, tzinfo=UTC)
+
+
+async def _slots(db_session: AsyncSession, chore_id: int) -> list[tuple[datetime, str]]:
+    """The chore's occurrences as (scheduled_for, status), earliest first."""
+    rows = (
+        (
+            await db_session.execute(
+                select(ChoreOccurrence)
+                .where(ChoreOccurrence.chore_id == chore_id)
+                .order_by(ChoreOccurrence.scheduled_for)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [(o.scheduled_for, o.status) for o in rows]
 
 
 async def test_completions_requires_auth(client: AsyncClient) -> None:
@@ -26,31 +51,21 @@ async def test_completions_lists_most_recent_first(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
-    make_completion: MakeCompletion,
+    make_occurrence: MakeOccurrence,
     auth_client: AuthClient,
 ) -> None:
     user = await make_user()
     household = await make_household(members=[user])
-    chore = await make_chore(household=household, title="Dishes")
-    # created_at pinned (func.now() is constant within the test transaction, so
-    # unpinned rows would tie and only the id tiebreaker would order them).
-    await make_completion(
-        chore=chore, scheduled_for=DUE, completed_by=user, created_at=DUE, title="oldest"
-    )
-    await make_completion(
-        chore=chore,
-        scheduled_for=DUE + timedelta(days=1),
-        completed_by=user,
-        created_at=DUE + timedelta(days=1),
-        title="middle",
-    )
-    await make_completion(
-        chore=chore,
-        scheduled_for=DUE + timedelta(days=2),
-        completed_by=user,
-        created_at=DUE + timedelta(days=2),
-        title="newest",
-    )
+    chore = await make_chore(household=household, title="Dishes", with_occurrence=False)
+    for offset, title in enumerate(["oldest", "middle", "newest"]):
+        await make_occurrence(
+            chore=chore,
+            scheduled_for=DUE + timedelta(days=offset),
+            status=OccurrenceStatus.done,
+            completed_by=user,
+            completed_at=DUE + timedelta(days=offset),
+            title=title,
+        )
     client = await auth_client(user)
 
     resp = await client.get("/api/v1/completions")
@@ -71,29 +86,35 @@ async def test_completions_days_late_late_on_time_and_early(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
-    make_completion: MakeCompletion,
+    make_occurrence: MakeOccurrence,
     auth_client: AuthClient,
 ) -> None:
     user = await make_user()
     household = await make_household(members=[user])
-    chore = await make_chore(household=household)
+    chore = await make_chore(household=household, with_occurrence=False)
     # Late by 3 days.
-    await make_completion(
-        chore=chore, scheduled_for=DUE, completed_by=user, created_at=DUE + timedelta(days=3)
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=DUE,
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=DUE + timedelta(days=3),
     )
     # On time: same date, later in the day.
-    await make_completion(
+    await make_occurrence(
         chore=chore,
         scheduled_for=DUE + timedelta(days=10),
+        status=OccurrenceStatus.done,
         completed_by=user,
-        created_at=DUE + timedelta(days=10, hours=6),
+        completed_at=DUE + timedelta(days=10, hours=6),
     )
     # Early: completed the day before it was due.
-    await make_completion(
+    await make_occurrence(
         chore=chore,
         scheduled_for=DUE + timedelta(days=20),
+        status=OccurrenceStatus.done,
         completed_by=user,
-        created_at=DUE + timedelta(days=19),
+        completed_at=DUE + timedelta(days=19),
     )
     client = await auth_client(user)
 
@@ -106,14 +127,20 @@ async def test_completions_includes_other_members(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
-    make_completion: MakeCompletion,
+    make_occurrence: MakeOccurrence,
     auth_client: AuthClient,
 ) -> None:
     me = await make_user(email="me@example.com", first_name="Me")
     other = await make_user(email="other@example.com", first_name="Otto", last_name="Ther")
     household = await make_household(members=[me, other])
-    chore = await make_chore(household=household)
-    await make_completion(chore=chore, scheduled_for=DUE, completed_by=other, created_at=DUE)
+    chore = await make_chore(household=household, with_occurrence=False)
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=DUE,
+        status=OccurrenceStatus.done,
+        completed_by=other,
+        completed_at=DUE,
+    )
     client = await auth_client(me)
 
     resp = await client.get("/api/v1/completions")
@@ -127,41 +154,62 @@ async def test_completions_excludes_other_households(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
-    make_completion: MakeCompletion,
+    make_occurrence: MakeOccurrence,
     auth_client: AuthClient,
 ) -> None:
     me = await make_user(email="me@example.com")
     stranger = await make_user(email="stranger@example.com")
     mine = await make_household(members=[me], name="Mine")
     theirs = await make_household(members=[stranger], name="Theirs")
-    my_chore = await make_chore(household=mine, title="Mine")
-    their_chore = await make_chore(household=theirs, title="Theirs")
-    await make_completion(chore=my_chore, scheduled_for=DUE, completed_by=me, created_at=DUE)
-    await make_completion(
-        chore=their_chore, scheduled_for=DUE, completed_by=stranger, created_at=DUE
+    my_chore = await make_chore(household=mine, title="Mine", with_occurrence=False)
+    their_chore = await make_chore(household=theirs, title="Theirs", with_occurrence=False)
+    await make_occurrence(
+        chore=my_chore,
+        scheduled_for=DUE,
+        status=OccurrenceStatus.done,
+        completed_by=me,
+        completed_at=DUE,
+    )
+    await make_occurrence(
+        chore=their_chore,
+        scheduled_for=DUE,
+        status=OccurrenceStatus.done,
+        completed_by=stranger,
+        completed_at=DUE,
     )
     client = await auth_client(me)
 
     resp = await client.get("/api/v1/completions")
     assert resp.status_code == 200
-    items = resp.json()["items"]
-    assert [item["title"] for item in items] == ["Mine"]
+    assert [item["title"] for item in resp.json()["items"]] == ["Mine"]
 
 
 async def test_completions_filter_by_household(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
-    make_completion: MakeCompletion,
+    make_occurrence: MakeOccurrence,
     auth_client: AuthClient,
 ) -> None:
     user = await make_user()
     h1 = await make_household(members=[user], name="One")
     h2 = await make_household(members=[user], name="Two")
-    c1 = await make_chore(household=h1, title="In one")
-    c2 = await make_chore(household=h2, title="In two")
-    await make_completion(chore=c1, scheduled_for=DUE, completed_by=user, created_at=DUE)
-    await make_completion(chore=c2, scheduled_for=DUE, completed_by=user, created_at=DUE)
+    c1 = await make_chore(household=h1, title="In one", with_occurrence=False)
+    c2 = await make_chore(household=h2, title="In two", with_occurrence=False)
+    await make_occurrence(
+        chore=c1,
+        scheduled_for=DUE,
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=DUE,
+    )
+    await make_occurrence(
+        chore=c2,
+        scheduled_for=DUE,
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=DUE,
+    )
     client = await auth_client(user)
 
     resp = await client.get(f"/api/v1/completions?household_id={h2.id}")
@@ -173,21 +221,27 @@ async def test_completions_filter_by_user(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
-    make_completion: MakeCompletion,
+    make_occurrence: MakeOccurrence,
     auth_client: AuthClient,
 ) -> None:
     me = await make_user(email="me@example.com")
     other = await make_user(email="other@example.com")
     household = await make_household(members=[me, other])
-    chore = await make_chore(household=household)
-    await make_completion(
-        chore=chore, scheduled_for=DUE, completed_by=me, created_at=DUE, title="by me"
+    chore = await make_chore(household=household, with_occurrence=False)
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=DUE,
+        status=OccurrenceStatus.done,
+        completed_by=me,
+        completed_at=DUE,
+        title="by me",
     )
-    await make_completion(
+    await make_occurrence(
         chore=chore,
         scheduled_for=DUE + timedelta(days=1),
+        status=OccurrenceStatus.done,
         completed_by=other,
-        created_at=DUE + timedelta(days=1),
+        completed_at=DUE + timedelta(days=1),
         title="by other",
     )
     client = await auth_client(me)
@@ -201,18 +255,19 @@ async def test_completions_pagination(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
-    make_completion: MakeCompletion,
+    make_occurrence: MakeOccurrence,
     auth_client: AuthClient,
 ) -> None:
     user = await make_user()
     household = await make_household(members=[user])
-    chore = await make_chore(household=household)
+    chore = await make_chore(household=household, with_occurrence=False)
     for offset in range(3):
-        await make_completion(
+        await make_occurrence(
             chore=chore,
             scheduled_for=DUE + timedelta(days=offset),
+            status=OccurrenceStatus.done,
             completed_by=user,
-            created_at=DUE + timedelta(days=offset),
+            completed_at=DUE + timedelta(days=offset),
         )
     client = await auth_client(user)
 
@@ -228,16 +283,21 @@ async def test_completions_includes_soft_deleted_chore(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
-    make_completion: MakeCompletion,
+    make_occurrence: MakeOccurrence,
     auth_client: AuthClient,
     db_session: AsyncSession,
 ) -> None:
     user = await make_user()
     household = await make_household(members=[user])
-    chore = await make_chore(household=household, title="Original title")
+    chore = await make_chore(household=household, title="Original title", with_occurrence=False)
     # Title is snapshotted at completion; a later soft delete must not hide history.
-    await make_completion(
-        chore=chore, scheduled_for=DUE, completed_by=user, created_at=DUE, title="Snapshot"
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=DUE,
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=DUE,
+        title="Snapshot",
     )
     chore.deleted_at = datetime.now(UTC)
     await db_session.commit()
@@ -245,22 +305,27 @@ async def test_completions_includes_soft_deleted_chore(
 
     resp = await client.get("/api/v1/completions")
     assert resp.status_code == 200
-    items = resp.json()["items"]
-    assert [item["title"] for item in items] == ["Snapshot"]
+    assert [item["title"] for item in resp.json()["items"]] == ["Snapshot"]
 
 
 async def test_completions_completed_by_null(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
-    make_completion: MakeCompletion,
+    make_occurrence: MakeOccurrence,
     auth_client: AuthClient,
 ) -> None:
     user = await make_user()
     household = await make_household(members=[user])
-    chore = await make_chore(household=household)
+    chore = await make_chore(household=household, with_occurrence=False)
     # completed_by omitted -> completed_by_user_id is NULL (a hard-deleted user).
-    await make_completion(chore=chore, scheduled_for=DUE, completed_by=None, created_at=DUE)
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=DUE,
+        status=OccurrenceStatus.done,
+        completed_by=None,
+        completed_at=DUE,
+    )
     client = await auth_client(user)
 
     resp = await client.get("/api/v1/completions")
@@ -272,19 +337,20 @@ async def test_completions_sort_by_title(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
-    make_completion: MakeCompletion,
+    make_occurrence: MakeOccurrence,
     auth_client: AuthClient,
 ) -> None:
     user = await make_user()
     household = await make_household(members=[user])
-    chore = await make_chore(household=household)
+    chore = await make_chore(household=household, with_occurrence=False)
     # Distinct scheduled_for keeps the (chore_id, scheduled_for) unique guard happy.
     for offset, title in enumerate(["Cherry", "Apple", "Banana"]):
-        await make_completion(
+        await make_occurrence(
             chore=chore,
             scheduled_for=DUE + timedelta(days=offset),
+            status=OccurrenceStatus.done,
             completed_by=user,
-            created_at=DUE + timedelta(days=offset),
+            completed_at=DUE + timedelta(days=offset),
             title=title,
         )
     client = await auth_client(user)
@@ -298,7 +364,7 @@ async def test_completions_excludes_soft_deleted_household(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
-    make_completion: MakeCompletion,
+    make_occurrence: MakeOccurrence,
     auth_client: AuthClient,
     db_session: AsyncSession,
 ) -> None:
@@ -306,8 +372,14 @@ async def test_completions_excludes_soft_deleted_household(
     # member_household_ids only returns active households.
     user = await make_user()
     household = await make_household(members=[user])
-    chore = await make_chore(household=household)
-    await make_completion(chore=chore, scheduled_for=DUE, completed_by=user, created_at=DUE)
+    chore = await make_chore(household=household, with_occurrence=False)
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=DUE,
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=DUE,
+    )
     household.deleted_at = datetime.now(UTC)
     await db_session.commit()
     client = await auth_client(user)
@@ -378,133 +450,179 @@ async def test_completion_filters_excludes_disabled_members(
 # --- undo (DELETE /completions/{id}) --------------------------------------
 
 
-async def test_undo_latest_reverts_schedule_anchor(
+async def test_undo_latest_reopens_the_occurrence(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
-    make_completion: MakeCompletion,
-    auth_client: AuthClient,
-    db_session: AsyncSession,
-) -> None:
-    user = await make_user()
-    household = await make_household(members=[user])
-    t1, t2 = DUE, DUE + timedelta(days=1)
-    chore = await make_chore(household=household, repeats=RepeatPeriod.daily, schedule_anchor=t2)
-    await make_completion(chore=chore, scheduled_for=DUE, completed_by=user, created_at=t1)
-    latest = await make_completion(chore=chore, scheduled_for=t2, completed_by=user, created_at=t2)
-    client = await auth_client(user)
-
-    resp = await client.delete(f"/api/v1/completions/{latest.id}")
-    assert resp.status_code == 204
-
-    refreshed = (await db_session.execute(select(Chore).where(Chore.id == chore.id))).scalar_one()
-    # Re-derived from the previous (on-time) completion: the chore is due again.
-    assert refreshed.schedule_anchor == t1
-    remaining = (await db_session.execute(select(CompletedChore.id))).scalars().all()
-    assert latest.id not in remaining
-
-
-async def test_undo_only_completion_clears_schedule_anchor(
-    make_user: MakeUser,
-    make_household: MakeHousehold,
-    make_chore: MakeChore,
-    make_completion: MakeCompletion,
-    auth_client: AuthClient,
-    db_session: AsyncSession,
-) -> None:
-    user = await make_user()
-    household = await make_household(members=[user])
-    chore = await make_chore(household=household, schedule_anchor=DUE)
-    only = await make_completion(chore=chore, scheduled_for=DUE, completed_by=user, created_at=DUE)
-    client = await auth_client(user)
-
-    resp = await client.delete(f"/api/v1/completions/{only.id}")
-    assert resp.status_code == 204
-
-    refreshed = (await db_session.execute(select(Chore).where(Chore.id == chore.id))).scalar_one()
-    assert refreshed.schedule_anchor is None
-
-
-async def test_undo_older_completion_leaves_schedule_unchanged(
-    make_user: MakeUser,
-    make_household: MakeHousehold,
-    make_chore: MakeChore,
-    make_completion: MakeCompletion,
+    make_occurrence: MakeOccurrence,
     auth_client: AuthClient,
     db_session: AsyncSession,
 ) -> None:
     user = await make_user()
     household = await make_household(members=[user])
     t1, t2, t3 = DUE, DUE + timedelta(days=1), DUE + timedelta(days=2)
-    chore = await make_chore(household=household, repeats=RepeatPeriod.daily, schedule_anchor=t3)
-    await make_completion(chore=chore, scheduled_for=DUE, completed_by=user, created_at=t1)
-    middle = await make_completion(chore=chore, scheduled_for=t2, completed_by=user, created_at=t2)
-    await make_completion(chore=chore, scheduled_for=t3, completed_by=user, created_at=t3)
-    client = await auth_client(user)
-
-    resp = await client.delete(f"/api/v1/completions/{middle.id}")
-    assert resp.status_code == 204
-
-    refreshed = (await db_session.execute(select(Chore).where(Chore.id == chore.id))).scalar_one()
-    # Deleting a non-latest completion is a history edit: the schedule is still
-    # re-derived from the latest remaining completion (t3).
-    assert refreshed.schedule_anchor == t3
-
-
-async def test_undo_re_anchors_to_the_grid_not_the_completion_timestamp(
-    make_user: MakeUser,
-    make_household: MakeHousehold,
-    make_chore: MakeChore,
-    make_completion: MakeCompletion,
-    auth_client: AuthClient,
-    db_session: AsyncSession,
-) -> None:
-    # Undo re-derives the anchor from the latest remaining completion via
-    # advance_anchor, so a late completion re-anchors to its occurrence's grid slot
-    # (DUE's 08:00 time-of-day), NOT to the wall-clock completion timestamp (14:00).
-    user = await make_user()
-    household = await make_household(members=[user])
-    late_created = DUE + timedelta(days=3, hours=6)  # completed ~3 days late, at 14:00
-    chore = await make_chore(
-        household=household, repeats=RepeatPeriod.daily, schedule_anchor=DUE + timedelta(days=4)
-    )
-    await make_completion(
-        chore=chore, scheduled_for=DUE, completed_by=user, created_at=late_created
-    )
-    latest = await make_completion(
+    chore = await make_chore(household=household, repeats=RepeatPeriod.daily, with_occurrence=False)
+    await make_occurrence(
         chore=chore,
-        scheduled_for=DUE + timedelta(days=4),
+        scheduled_for=t1,
+        status=OccurrenceStatus.done,
         completed_by=user,
-        created_at=DUE + timedelta(days=4),
+        completed_at=t1,
     )
+    latest = await make_occurrence(
+        chore=chore,
+        scheduled_for=t2,
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=t2,
+    )
+    await make_occurrence(chore=chore, scheduled_for=t3, status=OccurrenceStatus.open)
     client = await auth_client(user)
 
     resp = await client.delete(f"/api/v1/completions/{latest.id}")
     assert resp.status_code == 204
 
-    refreshed = (await db_session.execute(select(Chore).where(Chore.id == chore.id))).scalar_one()
-    # The grid slot on DUE's time-of-day (08:00), not the 14:00 completion timestamp.
-    assert refreshed.schedule_anchor == DUE + timedelta(days=3)
-    assert refreshed.schedule_anchor != late_created
+    # The latest completion is reopened (due again) and its successor is gone.
+    assert await _slots(db_session, chore.id) == [
+        (t1, OccurrenceStatus.done),
+        (t2, OccurrenceStatus.open),
+    ]
+
+
+async def test_undo_only_completion_leaves_a_fresh_open_occurrence(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    t1, t2 = DUE, DUE + timedelta(days=1)
+    chore = await make_chore(household=household, repeats=RepeatPeriod.daily, with_occurrence=False)
+    only = await make_occurrence(
+        chore=chore,
+        scheduled_for=t1,
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=t1,
+    )
+    await make_occurrence(chore=chore, scheduled_for=t2, status=OccurrenceStatus.open)
+    client = await auth_client(user)
+
+    resp = await client.delete(f"/api/v1/completions/{only.id}")
+    assert resp.status_code == 204
+
+    # Reopened to its original slot; the successor is gone (chore is due again).
+    assert await _slots(db_session, chore.id) == [(t1, OccurrenceStatus.open)]
+
+
+async def test_undo_older_completion_leaves_current_open_untouched(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    t1, t2, t3, t4 = (DUE + timedelta(days=n) for n in range(4))
+    chore = await make_chore(household=household, repeats=RepeatPeriod.daily, with_occurrence=False)
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=t1,
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=t1,
+    )
+    middle = await make_occurrence(
+        chore=chore,
+        scheduled_for=t2,
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=t2,
+    )
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=t3,
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=t3,
+    )
+    await make_occurrence(chore=chore, scheduled_for=t4, status=OccurrenceStatus.open)
+    client = await auth_client(user)
+
+    resp = await client.delete(f"/api/v1/completions/{middle.id}")
+    assert resp.status_code == 204
+
+    # Deleting a non-latest completion is a history edit: the current open occurrence
+    # stands and the middle row is simply gone.
+    assert await _slots(db_session, chore.id) == [
+        (t1, OccurrenceStatus.done),
+        (t3, OccurrenceStatus.done),
+        (t4, OccurrenceStatus.open),
+    ]
+
+
+async def test_undo_restores_the_previous_assignee(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # A rotating chore hands off on completion; undoing that completion rolls the turn
+    # back to the person who was on the hook (the stored assignee, so random survives).
+    anna = await make_user(email="anna@example.com", first_name="Anna")
+    bob = await make_user(email="bob@example.com", first_name="Bob")
+    household = await make_household(members=[anna, bob])
+    today = datetime.now(UTC).date()
+    chore = await make_chore(
+        household=household,
+        start_date=today,
+        repeats=RepeatPeriod.daily,
+        assignment_type=AssignmentType.alphabetical,
+        assignees=[anna, bob],
+    )
+    client = await auth_client(anna)
+
+    detail = (await client.get(f"/api/v1/chores/{chore.id}")).json()
+    assert detail["current_assignee"]["id"] == anna.id
+    completion = await client.post(f"/api/v1/chores/{chore.id}/complete")
+    assert (await client.get(f"/api/v1/chores/{chore.id}")).json()["current_assignee"][
+        "id"
+    ] == bob.id
+
+    resp = await client.delete(f"/api/v1/completions/{completion.json()['id']}")
+    assert resp.status_code == 204
+    # Back to Anna's turn.
+    assert (await client.get(f"/api/v1/chores/{chore.id}")).json()["current_assignee"][
+        "id"
+    ] == anna.id
 
 
 async def test_undo_another_members_completion_403(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
-    make_completion: MakeCompletion,
+    make_occurrence: MakeOccurrence,
     auth_client: AuthClient,
 ) -> None:
     me = await make_user(email="me@example.com")
     other = await make_user(email="other@example.com")
     household = await make_household(members=[me, other])
-    chore = await make_chore(household=household)
-    completion = await make_completion(
-        chore=chore, scheduled_for=DUE, completed_by=other, created_at=DUE
+    chore = await make_chore(household=household, with_occurrence=False)
+    occ = await make_occurrence(
+        chore=chore,
+        scheduled_for=DUE,
+        status=OccurrenceStatus.done,
+        completed_by=other,
+        completed_at=DUE,
     )
     client = await auth_client(me)
 
-    resp = await client.delete(f"/api/v1/completions/{completion.id}")
+    resp = await client.delete(f"/api/v1/completions/{occ.id}")
     assert resp.status_code == 403
 
 
@@ -512,19 +630,23 @@ async def test_undo_completion_in_other_household_404(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
-    make_completion: MakeCompletion,
+    make_occurrence: MakeOccurrence,
     auth_client: AuthClient,
 ) -> None:
     me = await make_user(email="me@example.com")
     stranger = await make_user(email="stranger@example.com")
     theirs = await make_household(members=[stranger], name="Theirs")
-    chore = await make_chore(household=theirs)
-    completion = await make_completion(
-        chore=chore, scheduled_for=DUE, completed_by=stranger, created_at=DUE
+    chore = await make_chore(household=theirs, with_occurrence=False)
+    occ = await make_occurrence(
+        chore=chore,
+        scheduled_for=DUE,
+        status=OccurrenceStatus.done,
+        completed_by=stranger,
+        completed_at=DUE,
     )
     client = await auth_client(me)
 
-    resp = await client.delete(f"/api/v1/completions/{completion.id}")
+    resp = await client.delete(f"/api/v1/completions/{occ.id}")
     assert resp.status_code == 404
 
 
@@ -540,20 +662,46 @@ async def test_undo_missing_completion_404(
     assert resp.status_code == 404
 
 
+async def test_undo_open_occurrence_is_not_a_completion_404(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    # The auto-created open occurrence is not a completion, so it cannot be undone.
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household)
+    client = await auth_client(user)
+    open_occ = (
+        await db_session.execute(
+            select(ChoreOccurrence).where(ChoreOccurrence.chore_id == chore.id)
+        )
+    ).scalar_one()
+
+    resp = await client.delete(f"/api/v1/completions/{open_occ.id}")
+    assert resp.status_code == 404
+
+
 async def test_undo_requires_auth(
     client: AsyncClient,
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
-    make_completion: MakeCompletion,
+    make_occurrence: MakeOccurrence,
 ) -> None:
     user = await make_user()
     household = await make_household(members=[user])
-    chore = await make_chore(household=household)
-    completion = await make_completion(
-        chore=chore, scheduled_for=DUE, completed_by=user, created_at=DUE
+    chore = await make_chore(household=household, with_occurrence=False)
+    occ = await make_occurrence(
+        chore=chore,
+        scheduled_for=DUE,
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=DUE,
     )
-    resp = await client.delete(f"/api/v1/completions/{completion.id}")
+    resp = await client.delete(f"/api/v1/completions/{occ.id}")
     assert resp.status_code == 401
 
 
@@ -563,8 +711,8 @@ async def test_occurrence_can_be_completed_again_after_undo(
     make_chore: MakeChore,
     auth_client: AuthClient,
 ) -> None:
-    # Full round-trip through the real complete endpoint: undo frees the
-    # (chore_id, scheduled_for) unique row so the occurrence is completable again.
+    # Full round-trip through the real endpoints: undo reopens the occurrence so it is
+    # completable again.
     user = await make_user()
     household = await make_household(members=[user])
     today = datetime.now(UTC).date()

@@ -1,11 +1,21 @@
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Chore, Household, Tag, User, UserStatus
+from app.models import (
+    AssignmentType,
+    Chore,
+    ChoreOccurrence,
+    Household,
+    OccurrenceStatus,
+    RepeatPeriod,
+    Tag,
+    User,
+    UserStatus,
+)
 
 MakeUser = Callable[..., Awaitable[User]]
 MakeHousehold = Callable[..., Awaitable[Household]]
@@ -78,6 +88,93 @@ async def test_create_chore_minimal(
     assert body["assignees"] == []
     assert body["tags"] == []
     assert body["description"] is None
+
+
+async def test_create_chore_sets_initial_current_assignee_and_turn_length(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    # alphabetical picks the first assignee by name as the starting current assignee.
+    anna = await make_user(email="anna@example.com", first_name="Anna")
+    bob = await make_user(email="bob@example.com", first_name="Bob")
+    household = await make_household(members=[anna, bob])
+    client = await auth_client(anna)
+
+    resp = await client.post(
+        "/api/v1/chores",
+        json=_payload(
+            household_id=household.id,
+            assignment_type="alphabetical",
+            assignee_ids=[bob.id, anna.id],
+            turn_length=3,
+        ),
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["turn_length"] == 3
+    assert body["current_assignee"]["id"] == anna.id
+
+
+async def test_create_chore_defaults_turn_length_to_one_and_no_current_when_empty(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    client = await auth_client(user)
+
+    body = (await client.post("/api/v1/chores", json=_payload(household_id=household.id))).json()
+    assert body["turn_length"] == 1
+    assert body["current_assignee"] is None  # no assignees -> shared/unassigned
+
+
+async def test_create_chore_manual_honours_explicit_current_assignee(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    anna = await make_user(email="anna@example.com", first_name="Anna")
+    bob = await make_user(email="bob@example.com", first_name="Bob")
+    household = await make_household(members=[anna, bob])
+    client = await auth_client(anna)
+
+    resp = await client.post(
+        "/api/v1/chores",
+        json=_payload(
+            household_id=household.id,
+            assignment_type="manual",
+            assignee_ids=[anna.id, bob.id],
+            current_assignee_id=bob.id,
+        ),
+    )
+    assert resp.status_code == 201
+    assert resp.json()["current_assignee"]["id"] == bob.id
+
+
+async def test_create_chore_current_assignee_outside_pool_rejected(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    anna = await make_user(email="anna@example.com")
+    outsider = await make_user(email="outsider@example.com")
+    household = await make_household(members=[anna, outsider])
+    client = await auth_client(anna)
+
+    resp = await client.post(
+        "/api/v1/chores",
+        json=_payload(
+            household_id=household.id, assignee_ids=[anna.id], current_assignee_id=outsider.id
+        ),
+    )
+    assert resp.status_code == 400
+
+
+async def test_create_chore_turn_length_below_one_rejected(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    client = await auth_client(user)
+
+    resp = await client.post(
+        "/api/v1/chores", json=_payload(household_id=household.id, turn_length=0)
+    )
+    assert resp.status_code == 422
 
 
 async def test_create_chore_in_chosen_household(
@@ -516,6 +613,89 @@ async def test_update_chore(
     assert [t["name"] for t in body["tags"]] == ["urgent"]
     # The household is unchanged and not part of the update payload.
     assert body["household"] == {"id": household.id, "name": household.name}
+
+
+async def test_update_chore_recomputes_current_assignee_when_dropped_from_pool(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    anna = await make_user(email="anna@example.com", first_name="Anna")
+    bob = await make_user(email="bob@example.com", first_name="Bob")
+    household = await make_household(members=[anna, bob])
+    # alphabetical: the current assignee starts as Anna.
+    chore = await make_chore(
+        household=household,
+        assignment_type=AssignmentType.alphabetical,
+        assignees=[anna, bob],
+    )
+    client = await auth_client(anna)
+
+    # Drop Anna from the pool: the open occurrence's assignee must move off her.
+    resp = await client.patch(
+        f"/api/v1/chores/{chore.id}",
+        json=_payload(assignment_type="alphabetical", assignee_ids=[bob.id], turn_length=2),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["turn_length"] == 2
+    assert body["current_assignee"]["id"] == bob.id
+
+
+async def test_update_chore_start_date_moves_due_date_before_completion(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    # A never-completed chore's open occurrence follows a start_date edit.
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(
+        household=household, start_date=date(2026, 7, 16), repeats=RepeatPeriod.daily
+    )
+    client = await auth_client(user)
+
+    resp = await client.patch(
+        f"/api/v1/chores/{chore.id}", json=_payload(start_date="2026-08-01", repeats="daily")
+    )
+    assert resp.status_code == 200
+    occ = (
+        await db_session.execute(
+            select(ChoreOccurrence).where(
+                ChoreOccurrence.chore_id == chore.id,
+                ChoreOccurrence.status == OccurrenceStatus.open,
+            )
+        )
+    ).scalar_one()
+    assert occ.scheduled_for == datetime(2026, 8, 1, tzinfo=UTC)
+
+
+async def test_update_chore_revives_completed_one_off_into_recurring(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # Editing a done one-off into a recurring chore materialises a fresh open
+    # occurrence, so it becomes due (and completable) again instead of staying dead.
+    user = await make_user()
+    household = await make_household(members=[user])
+    today = datetime.now(UTC).date()
+    chore = await make_chore(household=household, start_date=today, repeats=RepeatPeriod.manual)
+    client = await auth_client(user)
+
+    assert (await client.post(f"/api/v1/chores/{chore.id}/complete")).status_code == 201
+    assert (await client.post(f"/api/v1/chores/{chore.id}/complete")).status_code == 409  # dead
+
+    resp = await client.patch(
+        f"/api/v1/chores/{chore.id}", json=_payload(repeats="daily", start_date=today.isoformat())
+    )
+    assert resp.status_code == 200
+    # Revived: completable again.
+    assert (await client.post(f"/api/v1/chores/{chore.id}/complete")).status_code == 201
 
 
 async def test_update_chore_clear_assignees(

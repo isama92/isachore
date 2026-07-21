@@ -14,6 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.api.v1 import auth as auth_module
 from app.core import security
+from app.core.assignment import initial_assignee
+from app.core.chores import first_occurrence
 from app.core.config import settings
 from app.core.security import generate_token, hash_token
 from app.db.base import Base
@@ -24,8 +26,9 @@ from app.models import (
     AssignmentType,
     AuthToken,
     Chore,
-    CompletedChore,
+    ChoreOccurrence,
     Household,
+    OccurrenceStatus,
     RepeatPeriod,
     Tag,
     User,
@@ -264,10 +267,13 @@ def make_chore(db_session: AsyncSession) -> Callable[..., Awaitable[Chore]]:
         start_date: date | None = None,
         repeats: RepeatPeriod = RepeatPeriod.weekly,
         assignment_type: AssignmentType = AssignmentType.manual,
+        turn_length: int = 1,
         assignees: list[User] | None = None,
         tags: list[Tag] | None = None,
-        schedule_anchor: datetime | None = None,
+        current_assignee: User | None = None,
+        with_occurrence: bool = True,
     ) -> Chore:
+        pool = assignees or []
         chore = Chore(
             household_id=household.id,
             title=title,
@@ -275,13 +281,26 @@ def make_chore(db_session: AsyncSession) -> Callable[..., Awaitable[Chore]]:
             start_date=start_date or date(2026, 7, 16),
             repeats=repeats,
             assignment_type=assignment_type,
-            schedule_anchor=schedule_anchor,
+            turn_length=turn_length,
         )
-        if assignees:
-            chore.assignees.extend(assignees)
+        if pool:
+            chore.assignees.extend(pool)
         if tags:
             chore.tags.extend(tags)
         db_session.add(chore)
+        await db_session.flush()
+        # Mirror the create endpoint: give the chore its first open occurrence unless a
+        # test wants to build a custom occurrence history itself (with_occurrence=False).
+        if with_occurrence:
+            current = current_assignee or initial_assignee(assignment_type, pool)
+            db_session.add(
+                ChoreOccurrence(
+                    chore_id=chore.id,
+                    scheduled_for=first_occurrence(chore.start_date),
+                    assignee_id=current.id if current is not None else None,
+                    status=OccurrenceStatus.open,
+                )
+            )
         await db_session.commit()
         await db_session.refresh(chore, attribute_names=["assignees", "tags"])
         return chore
@@ -290,28 +309,33 @@ def make_chore(db_session: AsyncSession) -> Callable[..., Awaitable[Chore]]:
 
 
 @pytest.fixture
-def make_completion(db_session: AsyncSession) -> Callable[..., Awaitable[CompletedChore]]:
+def make_occurrence(db_session: AsyncSession) -> Callable[..., Awaitable[ChoreOccurrence]]:
     async def _make(
         *,
         chore: Chore,
         scheduled_for: datetime,
+        assignee: User | None = None,
+        status: OccurrenceStatus = OccurrenceStatus.open,
         completed_by: User | None = None,
-        created_at: datetime | None = None,
+        completed_at: datetime | None = None,
         title: str | None = None,
-    ) -> CompletedChore:
-        completion = CompletedChore(
+    ) -> ChoreOccurrence:
+        # A done occurrence snapshots its title; an open one reads the live chore title.
+        occurrence = ChoreOccurrence(
             chore_id=chore.id,
-            title=title if title is not None else chore.title,
             scheduled_for=scheduled_for,
+            assignee_id=assignee.id if assignee is not None else None,
+            status=status,
+            title=(title if title is not None else chore.title)
+            if status == OccurrenceStatus.done
+            else None,
             completed_by_user_id=completed_by.id if completed_by is not None else None,
+            completed_at=completed_at,
         )
-        # Let tests pin created_at (e.g. "completed yesterday") instead of now().
-        if created_at is not None:
-            completion.created_at = created_at
-        db_session.add(completion)
+        db_session.add(occurrence)
         await db_session.commit()
-        await db_session.refresh(completion)
-        return completion
+        await db_session.refresh(occurrence)
+        return occurrence
 
     return _make
 
