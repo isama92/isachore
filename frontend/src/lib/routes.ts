@@ -18,6 +18,7 @@ export const routes = {
   home: '/',
   profile: '/profile',
   history: '/history',
+  statistics: '/statistics',
 
   chores: {
     list: '/chores',

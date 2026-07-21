@@ -46,6 +46,7 @@ docker compose -f compose.prod.yml up --build      # prod: nginx on :80 serving 
 docker compose exec backend alembic revision --autogenerate -m "..."
 docker compose exec backend alembic upgrade head   # run alembic INSIDE the container so host "db" resolves
 docker compose exec backend python -m app.cli init --email you@example.com --first-name You --last-name Example  # one-time bootstrap of the first admin; no-op if an admin exists
+docker compose exec backend python -m app.cli seed --fresh  # dev-only: wipe + reseed 5 users (all password `password`, incl. admin@example.com), households, chores; refuses outside a dev environment
 
 cd backend && uv run ruff check . && uv run ruff format .
 cd frontend && npm run lint && npm run format && npm run build   # build also typechecks (tsc -b)
@@ -192,9 +193,13 @@ commit. Tests live in `backend/tests/` (pytest) and alongside the code as
   - UI: headless browser via `puppeteer-core` (npm-install it in a scratch dir
     outside the repo) driving the system Chrome at `/usr/bin/google-chrome`
     against `http://localhost:5173`, and screenshot the results.
-- The local dev DB may already contain seed users created during earlier
-  sessions (e.g. `admin@example.com` / `admin12345` — dev-only, this machine
-  only). Create your own via the `init` CLI if missing.
+- The `seed` CLI (`app/db/seed.py`, `python -m app.cli seed [--fresh]`) populates
+  a realistic dev dataset: 5 users, a solo household each plus one shared "flat",
+  tags, and chores covering the full option matrix. Every seeded user shares the
+  password `password` (`SEED_PASSWORD`), including the admin `admin@example.com`;
+  the others are `bram@`/`cara@`/`dan@`/`eve@example.com`. All dev-only, this
+  machine only. If the DB is empty, `seed --fresh` is the quickest way to get a
+  login; if you only need a bare admin, use the `init` CLI instead.
 
 ## Gotchas
 

@@ -32,6 +32,7 @@
     "households": "Nuclei domestici",
     "chores": "Faccende",
     "history": "Cronologia",
+    "statistics": "Statistiche",
     "tags": "Etichette",
     "profile": "Profilo",
     "admin": "Admin",
@@ -147,6 +148,51 @@
       "userAll": "Tutti",
       "householdLabel": "Nucleo domestico",
       "householdAll": "Tutti i nuclei domestici"
+    }
+  },
+  "statistics": {
+    "title": "Statistiche",
+    "loadError": "Impossibile caricare le statistiche",
+    "empty": "Dati ancora insufficienti.",
+    "range": {
+      "label": "Intervallo di tempo",
+      "7d": "7 giorni",
+      "30d": "30 giorni",
+      "90d": "90 giorni"
+    },
+    "filters": {
+      "userLabel": "Persona",
+      "userAll": "Tutti",
+      "householdLabel": "Nucleo domestico",
+      "householdAll": "Tutti i nuclei domestici"
+    },
+    "kpis": {
+      "completed": "Completate",
+      "completedHint": "negli ultimi {{days}} giorni",
+      "overdue": "In ritardo ora",
+      "onTimeRate": "Tasso di puntualità",
+      "activeChores": "Faccende attive",
+      "noData": "—"
+    },
+    "overTime": {
+      "title": "Completamenti nel tempo",
+      "completions": "Completamenti"
+    },
+    "statusDonut": {
+      "title": "Stato attuale",
+      "overdue": "In ritardo",
+      "today": "In scadenza oggi",
+      "soon": "In arrivo"
+    },
+    "punctuality": {
+      "title": "Puntuali vs in ritardo",
+      "onTime": "Puntuali",
+      "late": "In ritardo",
+      "early": "In anticipo"
+    },
+    "perPerson": {
+      "title": "Completamenti per persona",
+      "completions": "Completamenti"
     }
   },
   "choreCreate": {

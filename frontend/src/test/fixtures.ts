@@ -8,6 +8,7 @@ import type {
   InvitationInfo,
   Me,
   ServerSettings,
+  StatsData,
   Tag,
   User,
 } from '../lib/types'
@@ -126,6 +127,31 @@ export function makeHistoryEntry(overrides: Partial<HistoryEntry> = {}): History
     days_late: 0,
     completed_by: makeHouseholdMember(),
     household: { id: 1, name: 'Test Household' },
+    ...overrides,
+  }
+}
+
+export function makeStats(overrides: Partial<StatsData> = {}): StatsData {
+  return {
+    range: '30d',
+    granularity: 'day',
+    kpis: {
+      completed_in_range: 12,
+      currently_overdue: 2,
+      on_time_rate: 0.8,
+      active_chores: 5,
+    },
+    completions_over_time: [
+      { bucket: '2026-07-01', count: 3 },
+      { bucket: '2026-07-02', count: 5 },
+      { bucket: '2026-07-03', count: 4 },
+    ],
+    status_breakdown: { overdue: 2, today: 1, soon: 2 },
+    punctuality: { on_time: 8, late: 3, early: 1 },
+    per_person: [
+      { user_id: 1, first_name: 'Ava', last_name: 'One', count: 7 },
+      { user_id: 2, first_name: 'Ben', last_name: 'Two', count: 5 },
+    ],
     ...overrides,
   }
 }

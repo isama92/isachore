@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation } from 'react-router'
 import {
+  ChartColumn,
   ChevronRight,
   CircleUser,
   ClipboardList,
@@ -46,6 +47,7 @@ export default function AppSidebar() {
   const items = [
     { to: routes.home, icon: Home, label: t('sidebar.home') },
     { to: routes.history, icon: History, label: t('sidebar.history') },
+    { to: routes.statistics, icon: ChartColumn, label: t('sidebar.statistics') },
     { to: routes.tags.list, icon: TagIcon, label: t('sidebar.tags') },
     { to: routes.chores.list, icon: ClipboardList, label: t('sidebar.chores') },
     { to: routes.households.list, icon: House, label: t('sidebar.households') },

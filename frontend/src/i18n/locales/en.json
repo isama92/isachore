@@ -32,6 +32,7 @@
     "households": "Households",
     "chores": "Chores",
     "history": "History",
+    "statistics": "Statistics",
     "tags": "Tags",
     "profile": "Profile",
     "admin": "Admin",
@@ -147,6 +148,51 @@
       "userAll": "Everyone",
       "householdLabel": "Household",
       "householdAll": "All households"
+    }
+  },
+  "statistics": {
+    "title": "Statistics",
+    "loadError": "Failed to load statistics",
+    "empty": "Not enough data yet.",
+    "range": {
+      "label": "Time range",
+      "7d": "7 days",
+      "30d": "30 days",
+      "90d": "90 days"
+    },
+    "filters": {
+      "userLabel": "Person",
+      "userAll": "Everyone",
+      "householdLabel": "Household",
+      "householdAll": "All households"
+    },
+    "kpis": {
+      "completed": "Completed",
+      "completedHint": "in the last {{days}} days",
+      "overdue": "Overdue now",
+      "onTimeRate": "On-time rate",
+      "activeChores": "Active chores",
+      "noData": "—"
+    },
+    "overTime": {
+      "title": "Completions over time",
+      "completions": "Completions"
+    },
+    "statusDonut": {
+      "title": "Current status",
+      "overdue": "Overdue",
+      "today": "Due today",
+      "soon": "Upcoming"
+    },
+    "punctuality": {
+      "title": "On time vs late",
+      "onTime": "On time",
+      "late": "Late",
+      "early": "Early"
+    },
+    "perPerson": {
+      "title": "Completions per person",
+      "completions": "Completions"
     }
   },
   "choreCreate": {

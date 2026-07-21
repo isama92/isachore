@@ -21,6 +21,7 @@ import HouseholdEdit from './pages/HouseholdEdit'
 import Households from './pages/Households'
 import Login from './pages/Login'
 import Profile from './pages/Profile'
+import Statistics from './pages/Statistics'
 import TagCreate from './pages/TagCreate'
 import TagEdit from './pages/TagEdit'
 import Tags from './pages/Tags'
@@ -38,6 +39,7 @@ export default function App() {
         <Route path={routes.chores.new} element={<ChoreCreate />} />
         <Route path={routes.chores.edit.pattern} element={<ChoreEdit />} />
         <Route path={routes.history} element={<History />} />
+        <Route path={routes.statistics} element={<Statistics />} />
         <Route path={routes.households.list} element={<Households />} />
         <Route path={routes.households.new} element={<HouseholdCreate />} />
         <Route path={routes.households.edit.pattern} element={<HouseholdEdit />} />

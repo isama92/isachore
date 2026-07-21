@@ -19,6 +19,7 @@ describe('routes', () => {
     expect(routes.home).toBe('/')
     expect(routes.profile).toBe('/profile')
     expect(routes.history).toBe('/history')
+    expect(routes.statistics).toBe('/statistics')
     expect(routes.chores.list).toBe('/chores')
     expect(routes.chores.new).toBe('/chores/new')
     expect(routes.households.list).toBe('/households')

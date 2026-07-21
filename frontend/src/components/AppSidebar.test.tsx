@@ -51,6 +51,7 @@ describe('AppSidebar', () => {
     expect(labels.map((el) => el.textContent)).toEqual([
       'Home',
       'History',
+      'Statistics',
       'Tags',
       'Chores',
       'Households',

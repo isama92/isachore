@@ -41,6 +41,11 @@ export const endpoints = {
     byId: (id: Id) => `${V1}/completions/${id}`,
   },
 
+  // Aggregated statistics for the Statistics page. The filter dropdown options
+  // (households + members) are reused from completions.filters, so there is no
+  // separate stats/filters path.
+  stats: `${V1}/stats`,
+
   tags: {
     root: `${V1}/tags`,
     byId: (id: Id) => `${V1}/tags/${id}`,

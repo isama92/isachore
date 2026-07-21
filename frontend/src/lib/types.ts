@@ -99,6 +99,34 @@ export type HistoryFilterOptions = {
 
 export type DueStatus = 'overdue' | 'today' | 'soon'
 
+// The time window a Statistics request covers. Sent as ?range=; drives which
+// completion metrics are windowed (the overdue snapshot is always live).
+export type StatsRange = '7d' | '30d' | '90d'
+
+// Aggregated statistics for the Statistics page: GET /api/v1/stats.
+// `range` echoes the request; `granularity` ('day' for 7d/30d, 'week' for 90d)
+// tells the time-series chart how to label its axis. KPIs: `completed_in_range`
+// and `on_time_rate` follow the range; `currently_overdue` and `active_chores`
+// are a live snapshot. `on_time_rate` (fraction not late) is null when nothing
+// was completed in range. status_breakdown sums to active_chores; punctuality
+// sums to completed_in_range.
+export type StatsData = {
+  range: StatsRange
+  granularity: 'day' | 'week'
+  kpis: {
+    completed_in_range: number
+    currently_overdue: number
+    on_time_rate: number | null
+    active_chores: number
+  }
+  // One point per bucket; `bucket` is an ISO date (the day, or the week's Monday).
+  completions_over_time: { bucket: string; count: number }[]
+  status_breakdown: { overdue: number; today: number; soon: number }
+  punctuality: { on_time: number; late: number; early: number }
+  // Ranked most-completions-first; excludes completions with no known completer.
+  per_person: { user_id: number; first_name: string; last_name: string; count: number }[]
+}
+
 // A chore due within the Home window (overdue / today / next 7 days), with its
 // server-computed due state plus the household it belongs to and its assignees,
 // so a row can show whose chore it is (data-minimised member shape, no email).
