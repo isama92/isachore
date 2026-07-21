@@ -8,7 +8,9 @@ from app.core.chores import (
     advance_anchor,
     days_until_due,
     due_status,
+    first_occurrence,
     next_due,
+    next_occurrence_after,
 )
 from app.models import Chore, RepeatPeriod
 
@@ -187,4 +189,58 @@ def test_advance_anchor_manual_returns_scheduled_for() -> None:
     scheduled = datetime(2026, 7, 20, tzinfo=UTC)
     assert advance_anchor(scheduled, datetime(2026, 7, 25, tzinfo=UTC), RepeatPeriod.manual) == (
         scheduled
+    )
+
+
+# --- occurrence helpers (materialised model) --------------------------------
+
+
+def test_first_occurrence_is_start_date_midnight_utc() -> None:
+    assert first_occurrence(date(2026, 7, 10)) == datetime(2026, 7, 10, tzinfo=UTC)
+
+
+def test_next_occurrence_after_early_completion_advances_one_interval() -> None:
+    # Completing tomorrow's occurrence today: the successor is the day after tomorrow.
+    assert next_occurrence_after(
+        datetime(2026, 7, 21, tzinfo=UTC),  # due tomorrow
+        datetime(2026, 7, 20, 9, 0, tzinfo=UTC),  # completed today
+        RepeatPeriod.daily,
+    ) == datetime(2026, 7, 22, tzinfo=UTC)
+
+
+def test_next_occurrence_after_overdue_skips_backlog_to_tomorrow() -> None:
+    # A daily chore a week overdue clears to tomorrow, missed days skipped not backfilled.
+    assert next_occurrence_after(
+        datetime(2026, 7, 13, tzinfo=UTC),
+        datetime(2026, 7, 20, 12, 0, tzinfo=UTC),
+        RepeatPeriod.daily,
+    ) == datetime(2026, 7, 21, tzinfo=UTC)
+
+
+def test_next_occurrence_after_weekly_preserves_weekday() -> None:
+    scheduled = datetime(2026, 6, 29, tzinfo=UTC)  # a Monday
+    nxt = next_occurrence_after(
+        scheduled, datetime(2026, 7, 15, 10, 0, tzinfo=UTC), RepeatPeriod.weekly
+    )
+    assert nxt == datetime(2026, 7, 20, tzinfo=UTC)
+    assert nxt.weekday() == scheduled.weekday()
+
+
+def test_next_occurrence_after_monthly_clamps_day_of_month() -> None:
+    # Jan 31 completed on time -> next is Feb 28 (day clamped), staying on the grid.
+    assert next_occurrence_after(
+        datetime(2026, 1, 31, tzinfo=UTC),
+        datetime(2026, 1, 31, 9, 0, tzinfo=UTC),
+        RepeatPeriod.monthly,
+    ) == datetime(2026, 2, 28, tzinfo=UTC)
+
+
+def test_next_occurrence_after_manual_is_none() -> None:
+    assert (
+        next_occurrence_after(
+            datetime(2026, 7, 20, tzinfo=UTC),
+            datetime(2026, 7, 25, tzinfo=UTC),
+            RepeatPeriod.manual,
+        )
+        is None
     )

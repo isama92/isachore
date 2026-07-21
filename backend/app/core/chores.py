@@ -15,7 +15,7 @@ is a UTC-day boundary for everyone (a per-user timezone is a future enhancement)
 """
 
 from calendar import monthrange
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 
 from app.models import Chore, RepeatPeriod
@@ -88,6 +88,29 @@ def next_due(chore: Chore) -> datetime | None:
     if chore.repeats == RepeatPeriod.manual:
         return None
     return _add_interval(chore.schedule_anchor, chore.repeats)
+
+
+def first_occurrence(start_date: date) -> datetime:
+    """The first occurrence's due datetime: midnight UTC of the chore's start date
+    (materialised as the initial open occurrence when a chore is created)."""
+    return datetime(start_date.year, start_date.month, start_date.day, tzinfo=UTC)
+
+
+def next_occurrence_after(
+    scheduled_for: datetime, completed_at: datetime, repeats: RepeatPeriod
+) -> datetime | None:
+    """The due datetime of the occurrence following completion of `scheduled_for` at
+    `completed_at`, or None for a `manual` one-off (which has no next occurrence).
+
+    Composes advance_anchor (roll forward on the grid, skipping occurrences on or
+    before the completion date) with one more interval, so an early completion advances
+    exactly one step and an overdue one jumps to the next future slot - the same
+    schedule-anchored recurrence the derived model used, now stamped onto the
+    successor occurrence row."""
+    if repeats == RepeatPeriod.manual:
+        return None
+    anchor = advance_anchor(scheduled_for, completed_at, repeats)
+    return _add_interval(anchor, repeats)
 
 
 def days_until_due(due: datetime, now: datetime) -> int:
