@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.models.chore_occurrence import ChoreOccurrence
     from app.models.household import Household
     from app.models.tag import Tag
     from app.models.user import User
@@ -58,6 +59,10 @@ class Chore(Base):
     assignment_type: Mapped[AssignmentType] = mapped_column(
         SAEnum(AssignmentType, name="assignment_type")
     )
+    # How many completions one assignee holds before the chore hands off to the next
+    # person (the strategy picks who). 1 = hand off every completion; "take turns" in
+    # the UI sets a larger value. Only meaningful for the auto-rotating strategies.
+    turn_length: Mapped[int] = mapped_column(default=1, server_default="1")
     # The scheduled date of the last cleared occurrence (skip-missed applied); the
     # anchor for the due-date computation (next_due = schedule_anchor + interval).
     # NULL means never completed. Denormalised from completed_chores so next_due
@@ -76,3 +81,4 @@ class Chore(Base):
         secondary=chore_assignees, back_populates="chores"
     )
     tags: Mapped[list["Tag"]] = relationship(secondary=chore_tags, back_populates="chores")
+    occurrences: Mapped[list["ChoreOccurrence"]] = relationship(back_populates="chore")

@@ -4,6 +4,7 @@ from app.models.app_settings import AppSettings
 from app.models.audit_event import AuditAction, AuditEvent
 from app.models.auth_token import AuthToken
 from app.models.chore import AssignmentType, Chore, RepeatPeriod
+from app.models.chore_occurrence import ChoreOccurrence, OccurrenceStatus
 from app.models.completed_chore import CompletedChore
 from app.models.confirmation_token import ConfirmationToken
 from app.models.household import Household, household_members
@@ -18,11 +19,13 @@ __all__ = [
     "AuditEvent",
     "AuthToken",
     "Chore",
+    "ChoreOccurrence",
     "CompletedChore",
     "ConfirmationToken",
     "Household",
     "HouseholdInvitation",
     "HouseholdInvitationStatus",
+    "OccurrenceStatus",
     "RepeatPeriod",
     "Tag",
     "User",

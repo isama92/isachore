@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 
 import pytest
 from httpx import AsyncClient
@@ -9,7 +10,9 @@ from sqlalchemy.orm import selectinload
 from app.models import (
     AssignmentType,
     Chore,
+    ChoreOccurrence,
     Household,
+    OccurrenceStatus,
     RepeatPeriod,
     Tag,
     User,
@@ -77,6 +80,88 @@ async def test_chore_assignees_and_tags(
     assert loaded.household.name == household.name
     assert loaded.repeats is RepeatPeriod.daily
     assert loaded.assignment_type is AssignmentType.least_done
+
+
+async def test_chore_occurrence_round_trips_open_and_done(
+    db_session,
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+) -> None:
+    alice = await make_user(email="alice@example.com")
+    household = await make_household(members=[alice])
+    chore = await make_chore(household=household, assignees=[alice])
+    assert chore.turn_length == 1  # column default
+
+    db_session.add_all(
+        [
+            ChoreOccurrence(
+                chore_id=chore.id,
+                scheduled_for=datetime(2026, 7, 20, tzinfo=UTC),
+                assignee_id=alice.id,
+            ),
+            ChoreOccurrence(
+                chore_id=chore.id,
+                scheduled_for=datetime(2026, 7, 19, tzinfo=UTC),
+                assignee_id=alice.id,
+                status=OccurrenceStatus.done,
+                title=chore.title,
+                completed_by_user_id=alice.id,
+                completed_at=datetime(2026, 7, 19, 8, 0, tzinfo=UTC),
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    result = await db_session.execute(
+        select(ChoreOccurrence)
+        .options(selectinload(ChoreOccurrence.assignee), selectinload(ChoreOccurrence.chore))
+        .where(ChoreOccurrence.chore_id == chore.id)
+        .order_by(ChoreOccurrence.scheduled_for)
+    )
+    done, current = result.scalars().all()
+    assert current.status == OccurrenceStatus.open
+    assert current.assignee.email == "alice@example.com"
+    assert current.title is None  # open rows read the live chore title
+    assert current.chore.id == chore.id
+    assert done.status == OccurrenceStatus.done
+    assert done.title == chore.title
+    assert done.completed_by_user_id == alice.id
+
+
+async def test_chore_occurrence_rejects_duplicate_slot(
+    db_session, make_household: MakeHousehold, make_chore: MakeChore
+) -> None:
+    # (chore_id, scheduled_for) is unique: an occurrence slot can exist only once.
+    household = await make_household()
+    chore = await make_chore(household=household)
+    slot = datetime(2026, 7, 20, tzinfo=UTC)
+    db_session.add(
+        ChoreOccurrence(
+            chore_id=chore.id, scheduled_for=slot, status=OccurrenceStatus.done, title="x"
+        )
+    )
+    await db_session.commit()
+    db_session.add(ChoreOccurrence(chore_id=chore.id, scheduled_for=slot))
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
+
+
+async def test_chore_occurrence_allows_only_one_open_per_chore(
+    db_session, make_household: MakeHousehold, make_chore: MakeChore
+) -> None:
+    # The partial unique index permits at most one open occurrence per chore.
+    household = await make_household()
+    chore = await make_chore(household=household)
+    db_session.add(
+        ChoreOccurrence(chore_id=chore.id, scheduled_for=datetime(2026, 7, 20, tzinfo=UTC))
+    )
+    await db_session.commit()
+    db_session.add(
+        ChoreOccurrence(chore_id=chore.id, scheduled_for=datetime(2026, 7, 21, tzinfo=UTC))
+    )
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
 
 
 # --- constraints ---
