@@ -51,7 +51,11 @@ class Chore(Base):
     __tablename__ = "chores"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    household_id: Mapped[int] = mapped_column(ForeignKey("households.id", ondelete="CASCADE"))
+    # Indexed: every chore/history/stats query scopes by household, and Postgres does
+    # not auto-index a foreign key.
+    household_id: Mapped[int] = mapped_column(
+        ForeignKey("households.id", ondelete="CASCADE"), index=True
+    )
     title: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(String(2000))
     start_date: Mapped[date] = mapped_column(Date)

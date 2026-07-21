@@ -45,6 +45,13 @@ class ChoreOccurrence(Base):
             unique=True,
             postgresql_where=text("status = 'open'"),
         ),
+        # Stats aggregations lead with status, then window on a timestamp. Composite
+        # (status, completed_at) serves the done-in-range scans (completions over time,
+        # punctuality, per-person, "done in range"); (status, scheduled_for) serves the
+        # open+overdue scans (status donut, "overdue now"). A composite also covers a
+        # status-only filter, so these two back most stats queries.
+        Index("ix_occurrence_status_completed_at", "status", "completed_at"),
+        Index("ix_occurrence_status_scheduled_for", "status", "scheduled_for"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
