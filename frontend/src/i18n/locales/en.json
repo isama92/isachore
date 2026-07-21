@@ -12,7 +12,10 @@
     "passwordMin": "At least 8 characters",
     "selectAll": "Select all",
     "clear": "Clear",
-    "remove": "Remove {{name}}"
+    "remove": "Remove {{name}}",
+    "errorTitle": "Something went wrong.",
+    "errorHint": "The page failed to load. Please reload.",
+    "reload": "Reload"
   },
   "table": {
     "rowsPerPage": "Rows per page",
