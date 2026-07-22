@@ -1,7 +1,8 @@
-import { useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useAuth } from '../auth/useAuth'
+import TwoFactorSettings from '../components/TwoFactorSettings'
 import { useTheme } from '../theme/useTheme'
 import type { Accent, Flavour } from '../theme/context'
 import { ACCENTS, THEMES, supportsAccent } from '../theme/themes'
@@ -28,11 +29,47 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 
+// The section ids, in page order, that the side submenu links to and the
+// scroll-spy tracks. Module-scoped so it is a stable IntersectionObserver input.
+const SECTION_IDS = ['photo', 'name', 'appearance', 'security'] as const
+
 export default function Profile() {
   const { user, refresh } = useAuth()
   const { t } = useTranslation()
   const { theme, setTheme, accent, setAccent } = useTheme()
   const { language, setLanguage } = useLanguage()
+
+  const [activeSection, setActiveSection] = useState<string>(SECTION_IDS[0])
+
+  // Scroll-spy: highlight the section currently in view. The observer callback
+  // (not the effect body) is what sets state, so this respects the
+  // no-setState-synchronously-in-an-effect rule.
+  useEffect(() => {
+    if (!user) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries.filter((e) => e.isIntersecting)
+        if (visible.length === 0) return
+        // The visible section nearest the top of the viewport wins.
+        const top = visible.reduce((a, b) =>
+          a.boundingClientRect.top <= b.boundingClientRect.top ? a : b,
+        )
+        setActiveSection(top.target.id)
+      },
+      // Bias the "active" band toward the upper part of the viewport.
+      { rootMargin: '-15% 0px -70% 0px' },
+    )
+    for (const id of SECTION_IDS) {
+      const el = document.getElementById(id)
+      if (el) observer.observe(el)
+    }
+    return () => observer.disconnect()
+  }, [user])
+
+  function goToSection(id: string) {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    setActiveSection(id)
+  }
 
   const [savingAppearance, setSavingAppearance] = useState(false)
   const [appearanceError, setAppearanceError] = useState<string | null>(null)
@@ -181,238 +218,294 @@ export default function Profile() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-2xl px-5 py-8">
+    <main className="mx-auto w-full max-w-5xl px-5 py-8">
       <h1 className="mb-6 font-display text-2xl font-bold tracking-tight">
         {t('profile.heading')}
       </h1>
 
-      <div className="flex flex-col gap-6">
-        {/* Picture */}
-        <section className="rounded-2xl border border-line bg-card p-6">
-          <h2 className="mb-4 font-display text-lg font-bold tracking-tight">
-            {t('profile.photo')}
-          </h2>
-          <div className="flex items-center gap-5">
-            <Avatar className="size-20">
-              {user.avatar_url && <AvatarImage src={user.avatar_url} alt={fullName(user)} />}
-              <AvatarFallback className="bg-primary/10 text-xl font-bold text-primary">
-                {initials(user)}
-              </AvatarFallback>
-            </Avatar>
-            <div className="flex flex-col gap-2">
-              <div className="flex gap-2">
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp"
-                  className="hidden"
-                  onChange={(e) => void onPickAvatar(e)}
-                />
-                <Button
+      <div className="flex gap-8">
+        {/* Section submenu: sticky on desktop, hidden on mobile (sections just
+            stack full-width there). Clicking scrolls to a section; the active
+            one auto-highlights via the scroll-spy observer. */}
+        <nav aria-label={t('profile.sectionsNav')} className="hidden shrink-0 lg:block">
+          <ul className="sticky top-8 flex w-44 flex-col gap-1">
+            {[
+              { id: 'photo', label: t('profile.photo') },
+              { id: 'name', label: t('profile.nameHeading') },
+              { id: 'appearance', label: t('profile.appearance') },
+              { id: 'security', label: t('profile.securityHeading') },
+            ].map((item) => (
+              <li key={item.id}>
+                <button
                   type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={avatarBusy}
-                  onClick={() => fileRef.current?.click()}
+                  onClick={() => goToSection(item.id)}
+                  aria-current={activeSection === item.id ? 'true' : undefined}
+                  className={cn(
+                    'w-full rounded-input px-3 py-2 text-left text-sm font-bold transition',
+                    activeSection === item.id
+                      ? 'bg-primary/10 text-primary'
+                      : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                  )}
                 >
-                  {avatarBusy ? t('profile.working') : t('profile.changePhoto')}
-                </Button>
-                {user.avatar_url && (
+                  {item.label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+
+        <div className="flex min-w-0 flex-1 flex-col gap-6">
+          {/* Picture */}
+          <section id="photo" className="scroll-mt-20 rounded-2xl border border-line bg-card p-6">
+            <h2 className="mb-4 font-display text-lg font-bold tracking-tight">
+              {t('profile.photo')}
+            </h2>
+            <div className="flex items-center gap-5">
+              <Avatar className="size-20">
+                {user.avatar_url && <AvatarImage src={user.avatar_url} alt={fullName(user)} />}
+                <AvatarFallback className="bg-primary/10 text-xl font-bold text-primary">
+                  {initials(user)}
+                </AvatarFallback>
+              </Avatar>
+              <div className="flex flex-col gap-2">
+                <div className="flex gap-2">
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="hidden"
+                    onChange={(e) => void onPickAvatar(e)}
+                  />
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="outline"
                     size="sm"
                     disabled={avatarBusy}
-                    className="text-destructive hover:opacity-80"
-                    onClick={() => void onRemoveAvatar()}
+                    onClick={() => fileRef.current?.click()}
                   >
-                    {t('profile.remove')}
+                    {avatarBusy ? t('profile.working') : t('profile.changePhoto')}
                   </Button>
-                )}
-              </div>
-              <p className="text-xs font-medium text-muted-foreground">{t('profile.photoHint')}</p>
-            </div>
-          </div>
-          {avatarError && <p className="mt-4 text-[13px] font-bold text-danger">{avatarError}</p>}
-        </section>
-
-        {/* Name */}
-        <section className="rounded-2xl border border-line bg-card p-6">
-          <h2 className="mb-4 font-display text-lg font-bold tracking-tight">
-            {t('profile.nameHeading')}
-          </h2>
-          <form onSubmit={(e) => void onNameSubmit(e)} className="flex flex-col gap-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="profile-first-name">{t('common.firstName')}</Label>
-                <Input
-                  id="profile-first-name"
-                  required
-                  value={firstName}
-                  onChange={(e) => setFirstName(e.target.value)}
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="profile-last-name">{t('common.lastName')}</Label>
-                <Input
-                  id="profile-last-name"
-                  required
-                  value={lastName}
-                  onChange={(e) => setLastName(e.target.value)}
-                />
-              </div>
-            </div>
-            {nameError && <p className="text-[13px] font-bold text-danger">{nameError}</p>}
-            <div>
-              <Button type="submit" size="lg" disabled={savingName}>
-                {savingName ? t('common.saving') : t('profile.saveName')}
-              </Button>
-            </div>
-          </form>
-        </section>
-
-        {/* Appearance */}
-        <section className="rounded-2xl border border-line bg-card p-6">
-          <h2 className="mb-4 font-display text-lg font-bold tracking-tight">
-            {t('profile.appearance')}
-          </h2>
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="language-select">{t('profile.language')}</Label>
-              <Select
-                value={language}
-                disabled={savingLanguage}
-                onValueChange={(v) => void saveLanguage(v as Language)}
-              >
-                <SelectTrigger id="language-select" className="w-full sm:w-72">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {LANGUAGES.map((l) => (
-                    <SelectItem key={l.id} value={l.id}>
-                      {l.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {languageError && (
-                <p className="text-[13px] font-bold text-danger">{languageError}</p>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="theme-select">{t('profile.theme')}</Label>
-              <Select
-                value={theme}
-                disabled={savingAppearance}
-                onValueChange={(v) => void saveAppearance(v as Flavour, accent)}
-              >
-                <SelectTrigger id="theme-select" className="w-full sm:w-72">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectLabel>{t('profile.light')}</SelectLabel>
-                    {THEMES.filter((th) => th.group === 'light').map((th) => (
-                      <SelectItem key={th.id} value={th.id}>
-                        {th.label}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                  <SelectSeparator />
-                  <SelectGroup>
-                    <SelectLabel>{t('profile.dark')}</SelectLabel>
-                    {THEMES.filter((th) => th.group === 'dark').map((th) => (
-                      <SelectItem key={th.id} value={th.id}>
-                        {th.label}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {supportsAccent(theme) && (
-              <div className="flex flex-col gap-1.5">
-                <Label>{t('profile.accentColour')}</Label>
-                <div className="flex flex-wrap gap-2">
-                  {ACCENTS.map((a) => (
-                    <button
-                      key={a.id}
+                  {user.avatar_url && (
+                    <Button
                       type="button"
-                      aria-label={a.label}
-                      aria-pressed={accent === a.id}
-                      title={a.label}
-                      disabled={savingAppearance}
-                      onClick={() => void saveAppearance(theme, a.id)}
-                      className={cn(
-                        'size-7 rounded-full ring-offset-2 ring-offset-card transition disabled:opacity-50',
-                        accent === a.id
-                          ? 'ring-2 ring-ring'
-                          : 'ring-1 ring-border hover:ring-foreground/30',
-                      )}
-                      style={{ background: `var(--ctp-${a.id})` }}
-                    />
-                  ))}
+                      variant="ghost"
+                      size="sm"
+                      disabled={avatarBusy}
+                      className="text-destructive hover:opacity-80"
+                      onClick={() => void onRemoveAvatar()}
+                    >
+                      {t('profile.remove')}
+                    </Button>
+                  )}
+                </div>
+                <p className="text-xs font-medium text-muted-foreground">
+                  {t('profile.photoHint')}
+                </p>
+              </div>
+            </div>
+            {avatarError && <p className="mt-4 text-[13px] font-bold text-danger">{avatarError}</p>}
+          </section>
+
+          {/* Name */}
+          <section id="name" className="scroll-mt-20 rounded-2xl border border-line bg-card p-6">
+            <h2 className="mb-4 font-display text-lg font-bold tracking-tight">
+              {t('profile.nameHeading')}
+            </h2>
+            <form onSubmit={(e) => void onNameSubmit(e)} className="flex flex-col gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="profile-first-name">{t('common.firstName')}</Label>
+                  <Input
+                    id="profile-first-name"
+                    required
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="profile-last-name">{t('common.lastName')}</Label>
+                  <Input
+                    id="profile-last-name"
+                    required
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                  />
                 </div>
               </div>
-            )}
+              {nameError && <p className="text-[13px] font-bold text-danger">{nameError}</p>}
+              <div>
+                <Button type="submit" size="lg" disabled={savingName}>
+                  {savingName ? t('common.saving') : t('profile.saveName')}
+                </Button>
+              </div>
+            </form>
+          </section>
 
-            {appearanceError && (
-              <p className="text-[13px] font-bold text-danger">{appearanceError}</p>
-            )}
-          </div>
-        </section>
+          {/* Appearance */}
+          <section
+            id="appearance"
+            className="scroll-mt-20 rounded-2xl border border-line bg-card p-6"
+          >
+            <h2 className="mb-4 font-display text-lg font-bold tracking-tight">
+              {t('profile.appearance')}
+            </h2>
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="language-select">{t('profile.language')}</Label>
+                <Select
+                  value={language}
+                  disabled={savingLanguage}
+                  onValueChange={(v) => void saveLanguage(v as Language)}
+                >
+                  <SelectTrigger id="language-select" className="w-full sm:w-72">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {LANGUAGES.map((l) => (
+                      <SelectItem key={l.id} value={l.id}>
+                        {l.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {languageError && (
+                  <p className="text-[13px] font-bold text-danger">{languageError}</p>
+                )}
+              </div>
 
-        {/* Password */}
-        <section className="rounded-2xl border border-line bg-card p-6">
-          <h2 className="mb-4 font-display text-lg font-bold tracking-tight">
-            {t('profile.passwordHeading')}
-          </h2>
-          <form onSubmit={(e) => void onPasswordSubmit(e)} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="current-password">{t('profile.currentPassword')}</Label>
-              <Input
-                id="current-password"
-                type="password"
-                autoComplete="current-password"
-                required
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-              />
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="theme-select">{t('profile.theme')}</Label>
+                <Select
+                  value={theme}
+                  disabled={savingAppearance}
+                  onValueChange={(v) => void saveAppearance(v as Flavour, accent)}
+                >
+                  <SelectTrigger id="theme-select" className="w-full sm:w-72">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectLabel>{t('profile.light')}</SelectLabel>
+                      {THEMES.filter((th) => th.group === 'light').map((th) => (
+                        <SelectItem key={th.id} value={th.id}>
+                          {th.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                    <SelectSeparator />
+                    <SelectGroup>
+                      <SelectLabel>{t('profile.dark')}</SelectLabel>
+                      {THEMES.filter((th) => th.group === 'dark').map((th) => (
+                        <SelectItem key={th.id} value={th.id}>
+                          {th.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {supportsAccent(theme) && (
+                <div className="flex flex-col gap-1.5">
+                  <Label>{t('profile.accentColour')}</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {ACCENTS.map((a) => (
+                      <button
+                        key={a.id}
+                        type="button"
+                        aria-label={a.label}
+                        aria-pressed={accent === a.id}
+                        title={a.label}
+                        disabled={savingAppearance}
+                        onClick={() => void saveAppearance(theme, a.id)}
+                        className={cn(
+                          'size-7 rounded-full ring-offset-2 ring-offset-card transition disabled:opacity-50',
+                          accent === a.id
+                            ? 'ring-2 ring-ring'
+                            : 'ring-1 ring-border hover:ring-foreground/30',
+                        )}
+                        style={{ background: `var(--ctp-${a.id})` }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {appearanceError && (
+                <p className="text-[13px] font-bold text-danger">{appearanceError}</p>
+              )}
             </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="new-password">{t('profile.newPassword')}</Label>
-              <Input
-                id="new-password"
-                type="password"
-                autoComplete="new-password"
-                required
-                minLength={8}
-                placeholder={t('common.passwordMin')}
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-              />
+          </section>
+
+          {/* Security: password + two-factor auth */}
+          <section
+            id="security"
+            className="scroll-mt-20 rounded-2xl border border-line bg-card p-6"
+          >
+            <h2 className="mb-4 font-display text-lg font-bold tracking-tight">
+              {t('profile.securityHeading')}
+            </h2>
+            <div className="flex flex-col gap-8">
+              <div>
+                <h3 className="mb-4 font-display text-base font-bold tracking-tight">
+                  {t('profile.passwordHeading')}
+                </h3>
+                <form onSubmit={(e) => void onPasswordSubmit(e)} className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="current-password">{t('profile.currentPassword')}</Label>
+                    <Input
+                      id="current-password"
+                      type="password"
+                      autoComplete="current-password"
+                      required
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="new-password">{t('profile.newPassword')}</Label>
+                    <Input
+                      id="new-password"
+                      type="password"
+                      autoComplete="new-password"
+                      required
+                      minLength={8}
+                      placeholder={t('common.passwordMin')}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="confirm-password">{t('profile.confirmPassword')}</Label>
+                    <Input
+                      id="confirm-password"
+                      type="password"
+                      autoComplete="new-password"
+                      required
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                    />
+                  </div>
+                  {passwordError && (
+                    <p className="text-[13px] font-bold text-danger">{passwordError}</p>
+                  )}
+                  <div>
+                    <Button type="submit" size="lg" disabled={savingPassword}>
+                      {savingPassword ? t('common.saving') : t('profile.changePassword')}
+                    </Button>
+                  </div>
+                </form>
+              </div>
+
+              <div>
+                <h3 className="mb-4 font-display text-base font-bold tracking-tight">
+                  {t('profile.twoFactorHeading')}
+                </h3>
+                <TwoFactorSettings />
+              </div>
             </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="confirm-password">{t('profile.confirmPassword')}</Label>
-              <Input
-                id="confirm-password"
-                type="password"
-                autoComplete="new-password"
-                required
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-              />
-            </div>
-            {passwordError && <p className="text-[13px] font-bold text-danger">{passwordError}</p>}
-            <div>
-              <Button type="submit" size="lg" disabled={savingPassword}>
-                {savingPassword ? t('common.saving') : t('profile.changePassword')}
-              </Button>
-            </div>
-          </form>
-        </section>
+          </section>
+        </div>
       </div>
     </main>
   )

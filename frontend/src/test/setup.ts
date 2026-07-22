@@ -20,6 +20,21 @@ window.ResizeObserver = class ResizeObserver {
   disconnect() {}
 }
 
+// The Profile page's scroll-spy submenu constructs an IntersectionObserver,
+// which jsdom does not implement. A no-op stub is enough: tests drive the DOM
+// directly and never rely on scroll-position callbacks firing.
+window.IntersectionObserver = class IntersectionObserver {
+  readonly root = null
+  readonly rootMargin = ''
+  readonly thresholds = []
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+  takeRecords() {
+    return []
+  }
+} as unknown as typeof IntersectionObserver
+
 Object.defineProperty(window, 'matchMedia', {
   writable: true,
   value: (query: string) => ({
