@@ -76,6 +76,13 @@ pre-commit run --all-files                           # what the git hook runs
   `init` CLI (no-op if an admin exists). Passwords hashed with Argon2 (pwdlib).
   Protect endpoints by reusing `CurrentUser` / `AdminUser` from `app/api/deps.py`;
   users may never demote or deactivate themselves.
+- **CSRF**: `CsrfProtectMiddleware` (`app/core/csrf.py`, global, outermost) rejects
+  unsafe-method requests (POST/PATCH/PUT/DELETE) that carry an auth cookie
+  (`isachore_token` / `isachore_admin_token`) but lack a non-empty `X-CSRF-Token`
+  header, with 403. It's a custom-header defence in depth over `SameSite=Lax`,
+  sound because there is no CORS. `Authorization: Bearer` requests and public
+  pre-auth flows (no cookie) are exempt. The frontend `api` wrapper adds the
+  header automatically, so app code needs no changes.
 - **User lifecycle**: `users.status` is a `UserStatus` StrEnum
   (`waiting_confirmation` / `active` / `disabled`; stored as a plain String,
   closed set enforced at the schema layer like theme/accent/language) plus a
@@ -179,9 +186,11 @@ the negative paths (401/403/400/404/409), not just the happy one.
   a test type error breaks the build.
 - Beyond the suites, exercise the running dev stack for what they don't cover:
   API with `curl` against `http://localhost:8000/api/v1/...` and a cookie jar
-  (`-c/-b`); UI via `puppeteer-core` (npm-install it in a scratch dir outside the
-  repo) driving the system Chrome at `/usr/bin/google-chrome` against
-  `http://localhost:5173`, and screenshot the result.
+  (`-c/-b`; a cookie-authenticated mutation also needs `-H 'X-CSRF-Token: 1'` or
+  the CSRF middleware returns 403); UI via `puppeteer-core` (npm-install it in a
+  scratch dir outside the repo) driving the system Chrome at
+  `/usr/bin/google-chrome` against `http://localhost:5173`, and screenshot the
+  result.
 
 ## Gotchas
 

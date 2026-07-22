@@ -128,7 +128,12 @@ async def client(
     app.dependency_overrides[get_session] = _override_get_session
     app.dependency_overrides[get_redis] = _override_get_redis
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
+    # The real SPA sends X-CSRF-Token on every request (see frontend api wrapper);
+    # mirror that so CsrfProtectMiddleware accepts mutations. Tests for the CSRF
+    # check itself pop this header to assert the 403.
+    async with AsyncClient(
+        transport=transport, base_url="http://testserver", headers={"X-CSRF-Token": "1"}
+    ) as ac:
         yield ac
     app.dependency_overrides.clear()
 

@@ -24,19 +24,28 @@ async function handle<T>(res: Response): Promise<T> {
   return (await res.json()) as T
 }
 
+// Sent on every request so the backend CsrfProtectMiddleware accepts unsafe
+// (POST/PATCH/PUT/DELETE) methods. The value is irrelevant: the defence is that
+// a cross-site page cannot set a custom header without a blocked CORS preflight,
+// so mere presence is enough. Safe methods ignore it server-side.
+const CSRF_HEADER = 'X-CSRF-Token'
+
 async function request<T>(path: string, method: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = { [CSRF_HEADER]: '1' }
+  if (body !== undefined) headers['Content-Type'] = 'application/json'
   const res = await fetch(path, {
     method,
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   return handle<T>(res)
 }
 
-// Multipart upload: let the browser set Content-Type (with the boundary), so
-// this path deliberately does NOT set the JSON header the request() helper does.
+// Multipart upload: pass only the CSRF header, NOT Content-Type, so the browser
+// still sets multipart/form-data with its own boundary (the request() helper's
+// JSON header would break the upload).
 async function upload<T>(path: string, method: string, data: FormData): Promise<T> {
-  const res = await fetch(path, { method, body: data })
+  const res = await fetch(path, { method, headers: { [CSRF_HEADER]: '1' }, body: data })
   return handle<T>(res)
 }
 

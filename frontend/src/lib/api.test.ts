@@ -3,7 +3,7 @@ import { api, ApiError } from './api'
 import { jsonResponse } from '../test/utils'
 
 describe('api wrapper', () => {
-  it('GET sends no body or content-type and returns parsed JSON', async () => {
+  it('GET sends only the CSRF header (no body or content-type) and returns parsed JSON', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { hello: 'world' }))
     vi.stubGlobal('fetch', fetchMock)
 
@@ -11,13 +11,13 @@ describe('api wrapper', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/thing', {
       method: 'GET',
-      headers: undefined,
+      headers: { 'X-CSRF-Token': '1' },
       body: undefined,
     })
     expect(result).toEqual({ hello: 'world' })
   })
 
-  it('POST with a body sets the JSON content-type and stringifies it', async () => {
+  it('POST with a body sets the JSON content-type and CSRF header and stringifies it', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { id: 1 }))
     vi.stubGlobal('fetch', fetchMock)
 
@@ -25,12 +25,12 @@ describe('api wrapper', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/users', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'X-CSRF-Token': '1', 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: 'a@example.com' }),
     })
   })
 
-  it('POST without a body sends no headers or body', async () => {
+  it('POST without a body still sends the CSRF header and no body', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, {}))
     vi.stubGlobal('fetch', fetchMock)
 
@@ -38,12 +38,12 @@ describe('api wrapper', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/auth/logout', {
       method: 'POST',
-      headers: undefined,
+      headers: { 'X-CSRF-Token': '1' },
       body: undefined,
     })
   })
 
-  it('PATCH sends the body with the JSON content-type', async () => {
+  it('PATCH sends the body with the JSON content-type and CSRF header', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { id: 1 }))
     vi.stubGlobal('fetch', fetchMock)
 
@@ -51,7 +51,7 @@ describe('api wrapper', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/users/1', {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'X-CSRF-Token': '1', 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: 'New' }),
     })
   })
@@ -70,15 +70,32 @@ describe('api wrapper', () => {
     data.append('file', new File(['x'], 'a.png', { type: 'image/png' }))
     const result = await api.upload<{ id: number }>('/api/v1/profile/avatar', 'PUT', data)
 
-    // No headers object at all: the browser must set multipart/form-data with
-    // its own boundary. A JSON Content-Type here would break the upload.
+    // Only the CSRF header, no Content-Type: the browser must set
+    // multipart/form-data with its own boundary. A JSON Content-Type would break
+    // the upload.
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/profile/avatar', {
       method: 'PUT',
+      headers: { 'X-CSRF-Token': '1' },
       body: data,
     })
     const init = fetchMock.mock.calls[0][1]
-    expect(init.headers).toBeUndefined()
+    expect(init.headers).toEqual({ 'X-CSRF-Token': '1' })
     expect(result).toEqual({ id: 1 })
+  })
+
+  it('sends the X-CSRF-Token header on every method', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, {}))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await api.get('/api/v1/thing')
+    await api.post('/api/v1/thing', { a: 1 })
+    await api.patch('/api/v1/thing/1', { a: 1 })
+    await api.del('/api/v1/thing/1')
+    await api.upload('/api/v1/profile/avatar', 'POST', new FormData())
+
+    for (const [, init] of fetchMock.mock.calls) {
+      expect((init.headers as Record<string, string>)['X-CSRF-Token']).toBe('1')
+    }
   })
 
   it('throws ApiError with the detail from a JSON error body', async () => {
