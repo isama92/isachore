@@ -27,3 +27,6 @@ npm-debug.log*
 # uploaded files (avatars) — keep the dir, ignore its contents
 backend/storage/*
 !backend/storage/.gitkeep
+
+# prod compose runtime data (TLS certs, postgres data)
+/volumes/
