@@ -1,0 +1,9 @@
+# Plain HTTP on :80, no TLS. For a local smoke test or a fully trusted private
+# network only -- never expose this directly to the internet. For real
+# deployments terminate TLS with compose.prod.tls.yml (nginx does it) or put
+# isachore behind a TLS-terminating proxy (see compose.prod.traefik.yml).
+#   docker compose -f compose.prod.yml -f compose.prod.http.yml up -d --build
+services:
+  frontend:
+    ports:
+      - "80:80"

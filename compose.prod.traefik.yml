@@ -1,0 +1,25 @@
+# EXAMPLE overlay for running behind your own Traefik (external TLS termination).
+# This is a TEMPLATE: adjust the router rule host, entrypoints, cert resolver and
+# the external network name to match your Traefik install. In this mode Traefik
+# terminates TLS and owns the HTTP->HTTPS redirect and HSTS; nginx stays on HTTP
+# and is reached over the shared docker network (no host port published).
+#   docker compose -f compose.prod.yml -f compose.prod.traefik.yml up -d --build
+services:
+  frontend:
+    networks:
+      # Stay on the base stack's internal network (so nginx can still reach
+      # backend:8000) AND join Traefik's external network. Declaring networks
+      # here opts out of auto-joining default, so list it explicitly.
+      - default
+      - web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.isachore.rule=Host(`isachore.example.com`)"
+      - "traefik.http.routers.isachore.entrypoints=websecure"
+      - "traefik.http.routers.isachore.tls.certresolver=letsencrypt"
+      - "traefik.http.services.isachore.loadbalancer.server.port=80"
+
+networks:
+  # The network your Traefik instance is attached to (created outside this stack).
+  web:
+    external: true

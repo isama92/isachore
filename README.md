@@ -67,10 +67,43 @@ Every seeded user's password is `password`; the admin is `admin@example.com`.
 | Postgres      | localhost:5432                          |
 | Mailpit (dev email) | http://localhost:8025             |
 
-Production build (serves everything on port 80 via nginx):
+### Production
+
+The prod stack (`compose.prod.yml`) builds the SPA, serves it and reverse-proxies
+the API through nginx, and sends security response headers (CSP, X-Frame-Options,
+X-Content-Type-Options, Referrer-Policy; plus HSTS in the TLS mode). The base
+stack publishes no host port on its own, so pick a mode.
+
+Behind your own TLS-terminating reverse proxy (recommended; e.g. Traefik). nginx
+stays on HTTP and the proxy handles TLS, the HTTP->HTTPS redirect and HSTS.
+`compose.prod.traefik.yml` is a template: edit the router rule, entrypoints, cert
+resolver and external network to match your Traefik.
 
 ```bash
-docker compose -f compose.prod.yml up --build
+docker compose -f compose.prod.yml -f compose.prod.traefik.yml up --build
+```
+
+nginx terminates TLS with your own certificate (no front proxy). Put
+`fullchain.pem` and `privkey.pem` in `./volumes/certs`, then:
+
+```bash
+docker compose -f compose.prod.yml -f compose.prod.tls.yml up --build
+```
+
+Plain HTTP on :80 for a local smoke test only (never internet-facing):
+
+```bash
+docker compose -f compose.prod.yml -f compose.prod.http.yml up --build
+```
+
+In production set `APP_BASE_URL=https://<your-domain>` in `.env` and never set
+`COOKIES_SECURE=false` (prod forces Secure cookies, which need TLS). A self-signed
+certificate for testing the TLS mode:
+
+```bash
+mkdir -p volumes/certs && openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout volumes/certs/privkey.pem -out volumes/certs/fullchain.pem \
+  -days 365 -subj "/CN=localhost"
 ```
 
 One-time setup for the lint git hook:
@@ -169,7 +202,8 @@ The app is organised into four areas (context for future work):
 
 - [ ] if one person mark a task as done, the other person see it live (websocket)
 - [ ] CI (lint + test on push)
-- [ ] Prod deploy hardening (TLS, real secrets management)
+- [x] Prod deploy hardening: TLS (nginx manual-cert mode + reverse-proxy/Traefik mode, HTTP->HTTPS redirect, HSTS, CSP + security headers)
+- [ ] Prod deploy hardening: real secrets management (Docker/Compose secrets or a vault; APP_KEY rotation)
 - [ ] chores changes log (see who changed the chores)
 
 Design mockups live in `../isachore-design/` (login = variant 1a).
