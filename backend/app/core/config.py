@@ -40,6 +40,17 @@ class Settings(BaseSettings):
     login_ip_max_attempts: int = 20
     login_attempt_window: int = 900  # seconds (15 minutes)
 
+    # Two-factor code verification throttle. A 6-digit TOTP has a tiny space, so
+    # the verify step is brute-forceable if unbounded: after this many failed
+    # codes for one user within login_attempt_window, /auth/verify-2fa returns
+    # 429. Tighter than the login limit; the per-IP dimension reuses
+    # login_ip_max_attempts. Fails open on a Redis outage, like the login
+    # throttle.
+    two_factor_max_attempts: int = 5
+    # Issuer label shown next to the account in authenticator apps (the QR /
+    # otpauth URI). Cosmetic; changing it does not invalidate existing enrolments.
+    totp_issuer: str = "isachore"
+
     # Cooldown between admin "send test email" clicks, per admin. Stops the
     # button from hammering the SMTP relay / an admin's inbox; enforced in Redis
     # (best-effort, fails open) and mirrored by a countdown in the admin UI. Keep

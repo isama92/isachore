@@ -37,9 +37,12 @@ async def test_login_success(
 
     assert resp.status_code == 200
     body = resp.json()
-    assert body["email"] == "alice@example.com"
-    assert body["id"] == user.id
-    assert "password_hash" not in body
+    # A password-only login (no 2FA) completes in one step; the user rides in the
+    # LoginResponse envelope.
+    assert body["two_factor_required"] is False
+    assert body["user"]["email"] == "alice@example.com"
+    assert body["user"]["id"] == user.id
+    assert "password_hash" not in body["user"]
     assert client.cookies.get("isachore_token")
     assert await _token_count(db_session) == 1
 
@@ -150,7 +153,7 @@ async def test_login_case_insensitive_email(client: AsyncClient, make_user: Logi
         json={"email": "Alice@Example.com", "password": "password12345"},
     )
     assert resp.status_code == 200
-    assert resp.json()["email"] == "alice@example.com"
+    assert resp.json()["user"]["email"] == "alice@example.com"
 
 
 async def test_login_purges_expired_tokens(

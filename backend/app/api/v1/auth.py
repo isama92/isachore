@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import delete, select
+from sqlalchemy.orm import joinedload
 
 from app.api.deps import (
     CurrentUser,
@@ -13,38 +14,63 @@ from app.api.deps import (
     get_user_by_token,
 )
 from app.core.audit import record_event
+from app.core.crypto import crypto_configured
 from app.core.rate_limit import (
     clear_login_failures,
+    clear_two_factor_failures,
     client_ip,
     enforce_login_rate_limit,
+    enforce_two_factor_rate_limit,
     record_login_failure,
+    record_two_factor_failure,
 )
 from app.core.security import (
     ADMIN_COOKIE_NAME,
     DUMMY_PASSWORD_HASH,
     SESSION_TOKEN_TTL,
     TOKEN_TTL,
+    TWO_FACTOR_COOKIE_NAME,
+    TWO_FACTOR_TTL,
     clear_auth_cookie,
     generate_token,
     hash_token,
     set_auth_cookie,
     verify_password,
 )
-from app.core.tokens import purge_expired_tokens
-from app.models import AuditAction, AuthToken, User, UserStatus
-from app.schemas import LoginRequest, MeRead, UserRead
+from app.core.tokens import purge_expired_tokens, purge_expired_two_factor_challenges
+from app.core.two_factor import consume_valid_code
+from app.models import AuditAction, AuthToken, TwoFactorChallenge, User, UserStatus
+from app.schemas import LoginRequest, LoginResponse, MeRead, TwoFactorVerifyRequest, UserRead
+
+# Refused when a user has 2FA enabled but the server can't decrypt the seed
+# (APP_KEY unset/invalid). Fail closed: never let a 2FA account in on password
+# alone.
+_TWO_FACTOR_UNAVAILABLE_DETAIL = "Two-factor authentication is temporarily unavailable"
 
 router = APIRouter()
 
 
-@router.post("/login", response_model=UserRead)
+def _mint_session(response: Response, token: str, *, remember: bool) -> None:
+    """Set the auth cookie for a freshly minted session and drop any parked
+    admin cookie. Shared by the single-step login and the 2FA verify step."""
+    set_auth_cookie(
+        response,
+        token,
+        # Persistent when remembering, a browser-session cookie otherwise (same
+        # source as the DB token TTL).
+        max_age=int(TOKEN_TTL.total_seconds()) if remember else None,
+    )
+    clear_auth_cookie(response, ADMIN_COOKIE_NAME)
+
+
+@router.post("/login", response_model=LoginResponse)
 async def login(
     payload: LoginRequest,
     session: SessionDep,
     redis: RedisDep,
     request: Request,
     response: Response,
-) -> User:
+) -> LoginResponse:
     ip = client_ip(request)
     # payload.email is already lower-cased by the schema (L3); keep the explicit
     # .lower() so the throttle key stays case-insensitive regardless.
@@ -68,6 +94,37 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
         )
 
+    if user.totp_enabled:
+        # Password is correct, but the account is protected: don't mint a session
+        # yet. Fail closed if the seed can't be decrypted (no session on a bare
+        # password), otherwise park a short-lived challenge and ask for the code.
+        if not crypto_configured():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=_TWO_FACTOR_UNAVAILABLE_DETAIL,
+            )
+        challenge_token = generate_token()
+        session.add(
+            TwoFactorChallenge(
+                token_hash=hash_token(challenge_token),
+                user_id=user.id,
+                remember=payload.remember,
+                expires_at=datetime.now(UTC) + TWO_FACTOR_TTL,
+            )
+        )
+        await purge_expired_two_factor_challenges(session)
+        await session.commit()
+        # Deliberately do NOT clear the login failure counter here: the login
+        # isn't complete until the code is verified, and clearing now would let
+        # someone who only has the password reset the throttle at will.
+        set_auth_cookie(
+            response,
+            challenge_token,
+            name=TWO_FACTOR_COOKIE_NAME,
+            max_age=int(TWO_FACTOR_TTL.total_seconds()),
+        )
+        return LoginResponse(two_factor_required=True)
+
     # "Remember me" opts into a persistent session (long-lived cookie + token);
     # otherwise it's a browser-session cookie capped by a short token TTL.
     ttl = TOKEN_TTL if payload.remember else SESSION_TOKEN_TTL
@@ -85,14 +142,81 @@ async def login(
     await session.commit()
 
     await clear_login_failures(redis, email=email)
-    set_auth_cookie(
-        response,
-        token,
-        # Same source as the DB expiry above: persistent when remembering,
-        # a session cookie (no Max-Age) otherwise.
-        max_age=int(ttl.total_seconds()) if payload.remember else None,
+    _mint_session(response, token, remember=payload.remember)
+    return LoginResponse(user=UserRead.model_validate(user))
+
+
+@router.post("/verify-2fa", response_model=UserRead)
+async def verify_two_factor(
+    payload: TwoFactorVerifyRequest,
+    session: SessionDep,
+    redis: RedisDep,
+    request: Request,
+    response: Response,
+) -> User:
+    """Second step of a two-step login: verify the TOTP (or recovery) code
+    against the challenge parked by /login, then mint the real session."""
+    challenge_token = request.cookies.get(TWO_FACTOR_COOKIE_NAME)
+    if not challenge_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="No two-factor challenge in progress"
+        )
+    result = await session.execute(
+        select(TwoFactorChallenge)
+        .options(joinedload(TwoFactorChallenge.user))
+        .where(
+            TwoFactorChallenge.token_hash == hash_token(challenge_token),
+            TwoFactorChallenge.expires_at > datetime.now(UTC),
+        )
     )
-    clear_auth_cookie(response, ADMIN_COOKIE_NAME)
+    challenge = result.scalar_one_or_none()
+    if challenge is None:
+        # Unknown or expired: drop the stale cookie and send them back to login.
+        clear_auth_cookie(response, TWO_FACTOR_COOKIE_NAME)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Your two-factor challenge has expired. Please log in again.",
+        )
+
+    user = challenge.user
+    ip = client_ip(request)
+    # The account could have been disabled between the two steps.
+    if user.status != UserStatus.active or user.totp_secret is None or not crypto_configured():
+        clear_auth_cookie(response, TWO_FACTOR_COOKIE_NAME)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Your two-factor challenge has expired. Please log in again.",
+        )
+
+    await enforce_two_factor_rate_limit(redis, user_id=user.id, ip=ip)
+    if not await consume_valid_code(session, user, payload.code):
+        await record_two_factor_failure(redis, user_id=user.id, ip=ip)
+        await record_event(session, action=AuditAction.two_factor_failed, actor_id=user.id, ip=ip)
+        await session.commit()
+        # The challenge is intentionally left intact so a typo doesn't force a
+        # fresh password entry; the throttle + short TTL bound the guessing.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired code"
+        )
+
+    ttl = TOKEN_TTL if challenge.remember else SESSION_TOKEN_TTL
+    token = generate_token()
+    session.add(
+        AuthToken(
+            token_hash=hash_token(token),
+            user_id=user.id,
+            expires_at=datetime.now(UTC) + ttl,
+        )
+    )
+    await session.delete(challenge)
+    await record_event(session, action=AuditAction.login_success, actor_id=user.id, ip=ip)
+    await purge_expired_tokens(session)
+    await session.commit()
+
+    await clear_login_failures(redis, email=user.email)
+    await clear_two_factor_failures(redis, user_id=user.id)
+    _mint_session(response, token, remember=challenge.remember)
+    clear_auth_cookie(response, TWO_FACTOR_COOKIE_NAME)
     return user
 
 

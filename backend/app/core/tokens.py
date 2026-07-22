@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AuthToken, ConfirmationToken
+from app.models import AuthToken, ConfirmationToken, TwoFactorChallenge
 
 
 async def purge_expired_tokens(session: AsyncSession) -> None:
@@ -22,4 +22,12 @@ async def purge_expired_confirmation_tokens(session: AsyncSession) -> None:
     sweep as purge_expired_tokens; called when a confirmation link is used."""
     await session.execute(
         delete(ConfirmationToken).where(ConfirmationToken.expires_at < datetime.now(UTC))
+    )
+
+
+async def purge_expired_two_factor_challenges(session: AsyncSession) -> None:
+    """Delete 2FA login challenges whose short TTL has elapsed. Same
+    opportunistic sweep; called when a new challenge is issued at login."""
+    await session.execute(
+        delete(TwoFactorChallenge).where(TwoFactorChallenge.expires_at < datetime.now(UTC))
     )

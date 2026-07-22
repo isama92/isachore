@@ -9,6 +9,8 @@ from app.models.confirmation_token import ConfirmationToken
 from app.models.household import Household, household_members
 from app.models.household_invitation import HouseholdInvitation, HouseholdInvitationStatus
 from app.models.tag import Tag
+from app.models.two_factor_challenge import TwoFactorChallenge
+from app.models.two_factor_recovery_code import TwoFactorRecoveryCode
 from app.models.user import User, UserStatus
 
 __all__ = [
@@ -26,6 +28,8 @@ __all__ = [
     "OccurrenceStatus",
     "RepeatPeriod",
     "Tag",
+    "TwoFactorChallenge",
+    "TwoFactorRecoveryCode",
     "User",
     "UserStatus",
     "household_members",

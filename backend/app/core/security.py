@@ -20,6 +20,10 @@ INVITATION_TOKEN_TTL = timedelta(hours=24)
 COOKIE_NAME = "isachore_token"
 # Holds the original admin session while impersonating another user
 ADMIN_COOKIE_NAME = "isachore_admin_token"
+# Holds a short-lived 2FA challenge between the password step and the code step
+# of a two-step login. Short TTL: the user should enter their code promptly.
+TWO_FACTOR_COOKIE_NAME = "isachore_2fa"
+TWO_FACTOR_TTL = timedelta(minutes=5)
 
 _password_hash = PasswordHash.recommended()
 

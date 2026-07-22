@@ -14,6 +14,7 @@ from app.api.v1 import (
     server_settings,
     stats,
     tags,
+    two_factor,
     users,
 )
 
@@ -24,6 +25,7 @@ api_router.include_router(users.router, prefix="/users", tags=["users"])
 api_router.include_router(confirmations.router, prefix="/confirm", tags=["confirm"])
 api_router.include_router(server_settings.router, prefix="/settings", tags=["settings"])
 api_router.include_router(profile.router, prefix="/profile", tags=["profile"])
+api_router.include_router(two_factor.router, prefix="/profile/2fa", tags=["two-factor"])
 api_router.include_router(home.router, prefix="/home", tags=["home"])
 api_router.include_router(households.router, prefix="/households", tags=["households"])
 api_router.include_router(

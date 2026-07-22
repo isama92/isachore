@@ -61,6 +61,10 @@ class UserRead(BaseModel):
     accent_color: Accent | None = None
     # UI language; None means the client uses its default (English).
     language: Language | None = None
+    # Whether TOTP two-factor auth is enrolled and active. Read from the ORM's
+    # totp_enabled column (the secret itself is never exposed); serialised under
+    # the clearer two_factor_enabled name the client uses.
+    two_factor_enabled: bool = Field(default=False, validation_alias="totp_enabled")
     # Raw stored filename, read from the ORM object but never serialised; the
     # client only ever sees the derived avatar_url below.
     avatar_path: str | None = Field(default=None, exclude=True)
@@ -137,3 +141,46 @@ class ConfirmTokenInfo(BaseModel):
 
 class ConfirmRequest(BaseModel):
     password: str = Field(min_length=8)
+
+
+class LoginResponse(BaseModel):
+    """Outcome of the password step. When two_factor_required is False the user
+    is fully logged in and `user` is populated; when True a short-lived 2FA
+    challenge cookie has been set and the client must POST the code to
+    /auth/verify-2fa (user is None until then)."""
+
+    two_factor_required: bool = False
+    user: UserRead | None = None
+
+
+# A submitted 2FA code: a 6-digit TOTP or a backup recovery code. Kept loose
+# (min 1) so the endpoint returns a clean 401 "invalid code" rather than a 422
+# for a wrong-length guess; the upper bound just caps abuse.
+class TwoFactorCode(BaseModel):
+    code: str = Field(min_length=1, max_length=64)
+
+
+class TwoFactorVerifyRequest(TwoFactorCode):
+    """Code submitted at the login verify step."""
+
+
+class TwoFactorConfirmRequest(TwoFactorCode):
+    """Code confirming an authenticator was set up correctly (enable)."""
+
+
+class TwoFactorDisableRequest(TwoFactorCode):
+    """Code proving possession of the second factor when disabling / regenerating."""
+
+
+class TwoFactorSetupRead(BaseModel):
+    """Everything the setup UI needs to enrol an authenticator."""
+
+    secret: str
+    otpauth_uri: str
+    qr: str  # base64 PNG data URI
+
+
+class RecoveryCodesRead(BaseModel):
+    """The one-time backup codes, returned once at enable / regeneration."""
+
+    recovery_codes: list[str]

@@ -20,7 +20,15 @@ from app.core.security import (
     hash_token,
     set_auth_cookie,
 )
-from app.models import AuditAction, AuthToken, ConfirmationToken, User, UserStatus
+from app.models import (
+    AuditAction,
+    AuthToken,
+    ConfirmationToken,
+    TwoFactorChallenge,
+    TwoFactorRecoveryCode,
+    User,
+    UserStatus,
+)
 from app.schemas import Page, UserCreate, UserRead, UserUpdate
 
 logger = logging.getLogger(__name__)
@@ -402,6 +410,38 @@ async def deactivate_user(
         ip=client_ip(request),
     )
     await session.commit()
+
+
+@router.post("/{user_id}/reset-2fa", response_model=UserRead)
+async def reset_two_factor(
+    user_id: int,
+    admin: AdminUser,
+    impersonator: Impersonator,
+    session: SessionDep,
+    request: Request,
+) -> User:
+    """Clear a user's two-factor enrolment (secret + recovery codes + any pending
+    challenges), for when they've lost their authenticator and can't get in.
+    Deliberately does NOT revoke the user's sessions: 2FA reset is about future
+    logins, and a locked-out user usually has no live session anyway. Idempotent."""
+    user = await _get_user_or_404(session, user_id)
+    user.totp_secret = None
+    user.totp_enabled = False
+    await session.execute(
+        delete(TwoFactorRecoveryCode).where(TwoFactorRecoveryCode.user_id == user.id)
+    )
+    await session.execute(delete(TwoFactorChallenge).where(TwoFactorChallenge.user_id == user.id))
+    await record_event(
+        session,
+        action=AuditAction.two_factor_reset,
+        actor_id=admin.id,
+        target_id=user.id,
+        impersonator_id=impersonator.id if impersonator else None,
+        ip=client_ip(request),
+    )
+    await session.commit()
+    await session.refresh(user)
+    return user
 
 
 @router.post("/{user_id}/resend-confirmation", status_code=status.HTTP_204_NO_CONTENT)

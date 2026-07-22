@@ -116,6 +116,51 @@ async def clear_login_failures(redis: Redis, *, email: str) -> None:
         logger.warning("Login failure counter not cleared: Redis unavailable", exc_info=True)
 
 
+_TWO_FACTOR_KEY_PREFIX = "twofa:fail:"
+
+
+def _twofa_user_key(user_id: int) -> str:
+    return f"{_TWO_FACTOR_KEY_PREFIX}user:{user_id}"
+
+
+def _twofa_ip_key(ip: str) -> str:
+    return f"{_TWO_FACTOR_KEY_PREFIX}ip:{ip}"
+
+
+async def enforce_two_factor_rate_limit(redis: Redis, *, user_id: int, ip: str | None) -> None:
+    """Raise 429 if this user (or IP) has failed too many 2FA codes. Call before
+    verifying a submitted code. Keyed separately from the login throttle so the
+    two limits are independent; the window and IP threshold are shared."""
+    try:
+        user_key = _twofa_user_key(user_id)
+        if int(await redis.get(user_key) or 0) >= settings.two_factor_max_attempts:
+            raise _locked_out(await _retry_after(redis, user_key))
+        if ip is not None:
+            ip_key = _twofa_ip_key(ip)
+            if int(await redis.get(ip_key) or 0) >= settings.login_ip_max_attempts:
+                raise _locked_out(await _retry_after(redis, ip_key))
+    except RedisError:
+        logger.warning("2FA rate-limit check skipped: Redis unavailable", exc_info=True)
+
+
+async def record_two_factor_failure(redis: Redis, *, user_id: int, ip: str | None) -> None:
+    try:
+        await _incr_with_ttl(redis, _twofa_user_key(user_id))
+        if ip is not None:
+            await _incr_with_ttl(redis, _twofa_ip_key(ip))
+    except RedisError:
+        logger.warning("2FA failure not recorded: Redis unavailable", exc_info=True)
+
+
+async def clear_two_factor_failures(redis: Redis, *, user_id: int) -> None:
+    # Only the per-user counter is cleared on success; the per-IP counter stays
+    # so one legitimate verify can't reset an attacker's IP-wide budget.
+    try:
+        await redis.delete(_twofa_user_key(user_id))
+    except RedisError:
+        logger.warning("2FA failure counter not cleared: Redis unavailable", exc_info=True)
+
+
 _TEST_EMAIL_KEY_PREFIX = "test-email:cooldown:"
 _TEST_EMAIL_COOLDOWN_DETAIL = "Please wait before sending another test email."
 

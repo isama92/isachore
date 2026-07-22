@@ -18,6 +18,11 @@ class AuditAction(enum.StrEnum):
     user_updated = "user_updated"
     user_deactivated = "user_deactivated"
     user_confirmed = "user_confirmed"
+    two_factor_enabled = "two_factor_enabled"
+    two_factor_disabled = "two_factor_disabled"
+    two_factor_failed = "two_factor_failed"
+    two_factor_reset = "two_factor_reset"
+    two_factor_recovery_regenerated = "two_factor_recovery_regenerated"
 
 
 class AuditEvent(Base):

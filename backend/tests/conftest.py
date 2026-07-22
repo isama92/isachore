@@ -4,6 +4,7 @@ from datetime import UTC, date, datetime, timedelta
 import fakeredis.aioredis
 import pytest
 import pytest_asyncio
+from cryptography.fernet import Fernet
 from httpx import ASGITransport, AsyncClient
 from pwdlib import PasswordHash
 from pwdlib.hashers.argon2 import Argon2Hasher
@@ -196,6 +197,25 @@ def smtp(monkeypatch: pytest.MonkeyPatch) -> list:
 
     monkeypatch.setattr("aiosmtplib.send", _fake_send)
     return sent
+
+
+@pytest.fixture(autouse=True)
+def _reset_app_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hermetic default: no encryption key, so crypto (and therefore 2FA) fails
+    closed regardless of the container's env (compose/.env may set APP_KEY).
+    Tests that need working encryption opt in via the `totp` fixture, which runs
+    after this autouse one and sets a real key."""
+    monkeypatch.setattr(settings, "app_key", None)
+
+
+@pytest.fixture
+def totp(monkeypatch: pytest.MonkeyPatch) -> str:
+    """Configure a throwaway APP_KEY so 2FA setup/verify work. Returns the key
+    (rarely needed; the plaintext TOTP secret comes from the /setup response or
+    the direct-enrolment helper)."""
+    key = Fernet.generate_key().decode()
+    monkeypatch.setattr(settings, "app_key", key)
+    return key
 
 
 @pytest.fixture

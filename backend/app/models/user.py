@@ -12,6 +12,8 @@ if TYPE_CHECKING:
     from app.models.chore import Chore
     from app.models.confirmation_token import ConfirmationToken
     from app.models.household import Household
+    from app.models.two_factor_challenge import TwoFactorChallenge
+    from app.models.two_factor_recovery_code import TwoFactorRecoveryCode
 
 
 class UserStatus(StrEnum):
@@ -59,6 +61,13 @@ class User(Base):
     # NULL means they never confirmed, so an admin forcing them active leaves a
     # visible "active but unconfirmed" warning in the UI.
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    # Two-factor auth (TOTP). totp_secret is the Fernet-encrypted seed (the seed
+    # must be recoverable to verify codes, so it is encrypted at rest, not
+    # hashed); NULL means never enrolled. totp_enabled gates the two-step login:
+    # a secret can exist while disabled (a pending, not-yet-confirmed enrolment),
+    # so login enforcement keys on totp_enabled, never on the secret's presence.
+    totp_secret: Mapped[str | None] = mapped_column(String(255), default=None)
+    totp_enabled: Mapped[bool] = mapped_column(default=False)
     # Indexed because it is the default sort key for the admin users table.
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
@@ -71,6 +80,12 @@ class User(Base):
         back_populates="user", cascade="all, delete-orphan"
     )
     confirmation_tokens: Mapped[list["ConfirmationToken"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    two_factor_challenges: Mapped[list["TwoFactorChallenge"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    recovery_codes: Mapped[list["TwoFactorRecoveryCode"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
     households: Mapped[list["Household"]] = relationship(
