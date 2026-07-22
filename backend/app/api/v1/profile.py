@@ -83,8 +83,9 @@ async def upload_avatar(
     """Replace the current user's avatar. The file is decoded, validated and
     re-encoded before it touches disk (see app.core.avatars)."""
     # Bound what we pull into memory to the cap (one byte past, to detect
-    # oversize). The full multipart body is still received/spooled by Starlette
-    # first; the prod nginx client_max_body_size gives a transport-level bound.
+    # oversize). The whole multipart body is bounded upstream by
+    # BodySizeLimitMiddleware (max_request_bytes) and, in prod, by nginx's
+    # client_max_body_size; this per-file cap is the tighter, avatar-specific one.
     data = await file.read(settings.avatar_max_bytes + 1)
     if len(data) > settings.avatar_max_bytes:
         raise HTTPException(

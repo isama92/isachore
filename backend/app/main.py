@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.router import api_router
 from app.core.avatars import avatars_dir
+from app.core.body_limit import BodySizeLimitMiddleware
 from app.core.scheduler import create_scheduler
 from app.db.redis import redis_client
 
@@ -28,6 +29,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="isachore API", version="0.1.0", lifespan=lifespan)
+# Transport-level request body cap (max_request_bytes); defence in depth behind
+# the prod nginx client_max_body_size for deployments without a proxy in front.
+app.add_middleware(BodySizeLimitMiddleware)
 app.include_router(api_router, prefix="/api/v1")
 
 # Serve uploaded avatars under the /api prefix so the prod nginx /api proxy

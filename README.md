@@ -190,6 +190,7 @@ Configured via `.env` (see `.env.example`). All are read by
 | `AVATAR_MAX_BYTES` | `5242880` | Max raw upload size (~5 MB). |
 | `AVATAR_MAX_PIXELS` | `50000000` | Max decoded pixel count (guards decompression bombs). |
 | `AVATAR_PX` | `512` | Side length of the stored square avatar. |
+| `MAX_REQUEST_BYTES` | `6291456` | App-level cap on any request body (~6 MB, 413 past it). Defence in depth behind nginx's `client_max_body_size`; keep the two in sync. |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM` | unset / `587` | SMTP for confirmation and test emails. Confirmation and the test button need at least a host and from address. |
 | `SMTP_STARTTLS` / `SMTP_USE_TLS` | `true` / `false` | STARTTLS (port 587) vs implicit TLS (port 465); mutually exclusive. |
 

@@ -75,6 +75,13 @@ class Settings(BaseSettings):
     avatar_max_pixels: int = 50_000_000
     # Side length (px) of the square avatar we re-encode and store.
     avatar_px: int = 512
+    # Upper bound on any request body, enforced at the ASGI layer (413 past it)
+    # by BodySizeLimitMiddleware. Defence in depth behind the prod nginx
+    # client_max_body_size (keep the two in sync): without it, a directly
+    # exposed backend would spool arbitrarily large multipart bodies before any
+    # handler-level check runs. Must stay above avatar_max_bytes plus multipart
+    # overhead. ~6 MB.
+    max_request_bytes: int = 6 * 1024 * 1024
 
     # Public base URL of the SPA, used to build the confirmation link emailed to
     # a new user (<app_base_url>/confirm?token=...). Dev default is the Vite
