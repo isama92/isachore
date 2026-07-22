@@ -1,104 +1,157 @@
 # isachore
 
-Chore management for households. Keep track of who does what, see what's
-overdue, what has to be done today, and what's coming up — shared between
-multiple people, with a JSON API so mobile clients can join later.
+Chore management for households. Track who does what, see what is overdue, due
+today, or coming up, shared between the people in a household, with a JSON API so
+mobile clients can join later.
+
+Features: multi-user households with invitations and ownership transfer, chores
+with four assignment strategies (manual, alphabetical, least-done, random) and
+turn-taking rotation, a Home due view with one-tap completion and daily progress,
+completion history, per-household tags, a Statistics page, admin user and
+household management with impersonation, English/Italian UI, per-user theming,
+optional TOTP two-factor authentication, and optional email-based account
+confirmation.
 
 ## Stack
 
-| Layer    | Tech                                                              |
-| -------- | ----------------------------------------------------------------- |
-| Backend  | FastAPI · async SQLAlchemy 2 · asyncpg · Alembic · Python 3.13 (uv) |
-| Frontend | React 19 · TypeScript · Vite · Tailwind CSS v4 · react-router 8 · shadcn/ui (Radix) |
-| Database | PostgreSQL 18                                                     |
-| Infra    | Docker everywhere (dev and prod)                                  |
+| Layer    | Tech                                                                        |
+| -------- | --------------------------------------------------------------------------- |
+| Backend  | FastAPI, async SQLAlchemy 2, asyncpg, Alembic, Python 3.13 (managed with uv) |
+| Frontend | React 19, TypeScript, Vite, Tailwind CSS v4, react-router 8, shadcn/ui (Radix) |
+| Database | PostgreSQL 18                                                               |
+| Cache    | Redis (login rate limiting)                                                 |
+| Infra    | Docker for both dev and prod (multi-stage Dockerfiles, compose files)       |
 
-## Quickstart (dev)
+There is **no self-registration**. The first admin is created with the `init`
+command (see below); every other user is created by an admin in the UI under
+**Admin > Users**.
 
-```bash
-cp .env.example .env
-docker compose up --build
-docker compose exec backend alembic upgrade head
-docker compose exec backend python -m app.cli init --email you@example.com --first-name You --last-name Example
-```
+## Development
 
-There is no self-registration. The first admin is bootstrapped with the `init`
-command above (it prompts for a password). `init` is a one-time bootstrap: it
-does nothing if an admin already exists, so it's safe to leave in a deploy
-script. Every other user is created by an admin in the UI under
-**Admin → Users**.
+### Prerequisites
 
-If **Admin → Server settings → Require user confirmation** is on, a new user
-starts as *waiting confirmation* and receives an email with a link to set their
-own password; only then does the account become active. When it's off, the
-admin sets the password in the create form and the user is active immediately.
-Confirmation needs SMTP configured (see `.env.example`); in dev, emails are
-captured by mailpit at http://localhost:8025.
+- Docker and the Docker Compose plugin.
+- Optional, for the lint git hook: `uv tool install pre-commit && pre-commit install`.
 
-Login is rate limited: repeated failures lock out both the email and the client
-IP for a window. To lift a lockout without waiting it out, clear the throttle:
+### First run
 
 ```bash
-docker compose exec backend python -m app.cli clear-login-throttle       # clear every lockout
-docker compose exec backend python -m app.cli clear-login-throttle 42    # clear one user (by id)
+cp .env.example .env                                   # dev placeholder values are fine
+docker compose up --build                              # db + redis + backend (reload) + frontend (HMR) + mailpit
+docker compose exec backend alembic upgrade head       # run migrations (inside the container so host "db" resolves)
+docker compose exec backend python -m app.cli init \
+    --email you@example.com --first-name You --last-name Example   # create the first admin (prompts for a password)
 ```
 
-With a user id it clears only that user's per-email counter (a user maps to an
-email but never to an IP); with no argument it clears every counter, per-email
-and per-IP.
+> **The `init` step is required on every fresh setup.** Without it there is no
+> way to log in (no self-registration). It is a one-time bootstrap: it does
+> nothing if an admin already exists, so it is safe to leave in a deploy script
+> and harmless to run twice.
 
-To fill the app with a rich dataset for manual testing (five users, a solo
-household each plus one shared household, and many chores covering every option
+Then open http://localhost:5173 and log in.
+
+### Services
+
+| Service              | URL                                   |
+| -------------------- | ------------------------------------- |
+| Frontend (SPA)       | http://localhost:5173                 |
+| Backend API          | http://localhost:8000/api/v1          |
+| API docs (Swagger)   | http://localhost:8000/docs            |
+| Health check         | http://localhost:8000/api/v1/health   |
+| Postgres             | localhost:5432                        |
+| Mailpit (dev email)  | http://localhost:8025                 |
+
+Redis is not published to the host; it is reachable only as `redis:6379` on the
+compose network.
+
+### Seed data
+
+To fill the app with a realistic dataset for manual testing (five users, a solo
+household each plus one shared household, tags, and chores covering every option
 with completion history), run the seeder. It refuses to run outside a dev
-environment; `--fresh` wipes all app data first so it doubles as a reset.
+environment. `--fresh` wipes all app data first, so it also doubles as a reset.
 
 ```bash
 docker compose exec backend python -m app.cli seed --fresh
 ```
 
-Every seeded user's password is `password`; the admin is `admin@example.com`.
+Every seeded user's password is `password`; the admin is `admin@example.com`
+(the others are `bram@`, `cara@`, `dan@`, `eve@example.com`). If the DB is empty,
+this is the quickest way to get a working login; if you only need a bare admin,
+use `init` instead.
 
-| Service       | URL                                     |
-| ------------- | --------------------------------------- |
-| Frontend      | http://localhost:5173                   |
-| Backend API   | http://localhost:8000/api/v1            |
-| API docs      | http://localhost:8000/docs              |
-| Health check  | http://localhost:5173/api/v1/health     |
-| Postgres      | localhost:5432                          |
-| Mailpit (dev email) | http://localhost:8025             |
+### Account confirmation (optional)
 
-### Production
+If **Admin > Server settings > Require user confirmation** is on, a new user
+starts as *waiting confirmation* and is emailed a link to set their own password;
+the account becomes active only once they do. When it is off, the admin sets the
+password in the create form and the user is active immediately. Confirmation
+needs SMTP configured (see the env table below); in dev, compose already points
+SMTP at mailpit and captured mail shows at http://localhost:8025.
 
-The prod stack (`compose.prod.yml`) builds the SPA, serves it and reverse-proxies
-the API through nginx, and sends security response headers (CSP, X-Frame-Options,
-X-Content-Type-Options, Referrer-Policy; plus HSTS in the TLS mode). The base
-stack publishes no host port on its own, so pick a mode.
+## Production
 
-Behind your own TLS-terminating reverse proxy (recommended; e.g. Traefik). nginx
-stays on HTTP and the proxy handles TLS, the HTTP->HTTPS redirect and HSTS.
-`compose.prod.traefik.yml` is a template: edit the router rule, entrypoints, cert
-resolver and external network to match your Traefik.
+Production runs the same two services (a FastAPI backend and an nginx image that
+serves the built SPA and reverse-proxies `/api/` to the backend), plus Postgres
+and Redis. Neither the database, Redis, nor the backend publishes a host port;
+only the frontend (nginx) is exposed, and only when you add a mode overlay.
+
+The base file `compose.prod.yml` publishes no host port on its own. Pick one of
+three modes:
+
+**1. Behind your own TLS-terminating reverse proxy (recommended).** nginx stays
+on HTTP; your proxy handles TLS, the HTTP to HTTPS redirect, and HSTS.
+`compose.prod.traefik.yml` is a Traefik template: edit the router rule,
+entrypoints, cert resolver, and external network to match your install.
 
 ```bash
-docker compose -f compose.prod.yml -f compose.prod.traefik.yml up --build
+docker compose -f compose.prod.yml -f compose.prod.traefik.yml up -d --build
 ```
 
-nginx terminates TLS with your own certificate (no front proxy). Put
+**2. nginx terminates TLS with your own certificate (no front proxy).** Put
 `fullchain.pem` and `privkey.pem` in `./volumes/certs`, then:
 
 ```bash
-docker compose -f compose.prod.yml -f compose.prod.tls.yml up --build
+docker compose -f compose.prod.yml -f compose.prod.tls.yml up -d --build
 ```
 
-Plain HTTP on :80 for a local smoke test only (never internet-facing):
+**3. Plain HTTP on :80, for a local smoke test only** (never internet-facing):
 
 ```bash
-docker compose -f compose.prod.yml -f compose.prod.http.yml up --build
+docker compose -f compose.prod.yml -f compose.prod.http.yml up -d --build
 ```
 
-In production set `APP_BASE_URL=https://<your-domain>` in `.env` and never set
-`COOKIES_SECURE=false` (prod forces Secure cookies, which need TLS). A self-signed
-certificate for testing the TLS mode:
+### Production checklist
+
+Set these in `.env` before deploying:
+
+- `POSTGRES_PASSWORD` to a strong secret (and matching `DATABASE_URL`).
+- `APP_KEY` to a freshly generated Fernet key (see the env table). Required for
+  two-factor auth; a 2FA-enrolled user cannot log in without it.
+- `APP_BASE_URL` to your real public HTTPS origin (used to build email links).
+- SMTP values if you want account confirmation or the test-email button.
+
+The prod stack forces `ENVIRONMENT=prod`, `COOKIES_SECURE=true`, and
+`TRUST_FORWARDED_FOR=true` regardless of `.env`, so cookies are HTTPS-only and
+per-IP rate limiting reads the real client IP behind the proxy. Every mode must
+terminate TLS in front of the app; never set `COOKIES_SECURE=false` in prod.
+
+Then, inside the running stack, run migrations and create the first admin (same
+commands as dev, they are required here too):
+
+```bash
+docker compose -f compose.prod.yml exec backend alembic upgrade head
+docker compose -f compose.prod.yml exec backend python -m app.cli init \
+    --email admin@yourdomain --first-name Admin --last-name User
+```
+
+nginx sends security response headers on every response (CSP, X-Frame-Options,
+X-Content-Type-Options, Referrer-Policy, plus HSTS in the TLS-terminating modes)
+and caps request bodies at 6 MB. Uploaded avatars live in a named `storage`
+volume and the database in `./volumes/db`, so both survive restarts.
+
+<details>
+<summary>Self-signed certificate for testing the TLS mode</summary>
 
 ```bash
 mkdir -p volumes/certs && openssl req -x509 -newkey rsa:2048 -nodes \
@@ -106,107 +159,100 @@ mkdir -p volumes/certs && openssl req -x509 -newkey rsa:2048 -nodes \
   -days 365 -subj "/CN=localhost"
 ```
 
-Note: testing the TLS mode on `localhost` makes your browser pin HSTS for
-`localhost` for two years, which can force other local HTTP projects on
-`localhost` to HTTPS and break them. Prefer a throwaway hostname, or clear it
-afterwards at `chrome://net-internals/#hsts` ("Delete domain": localhost).
+Testing the TLS mode on `localhost` makes your browser pin HSTS for `localhost`
+for two years, which can force other local HTTP projects to HTTPS and break them.
+Prefer a throwaway hostname, or clear it afterwards at
+`chrome://net-internals/#hsts` ("Delete domain": localhost).
+</details>
 
-One-time setup for the lint git hook:
+## Environment variables
+
+Configured via `.env` (see `.env.example`). All are read by
+`backend/app/core/config.py`.
+
+| Variable | Default | Purpose |
+| -------- | ------- | ------- |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | dev placeholders | Postgres container credentials. Use a strong password in prod. |
+| `DATABASE_URL` | `postgresql+asyncpg://...@db:5432/isachore` | Async DB URL. Must use the `postgresql+asyncpg://` scheme. |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis for login rate limiting (compose sets the container host). |
+| `ENVIRONMENT` | `dev` | Deployment marker (informational). Gates the dev-only `seed` command; forced to `prod` by the prod stack. |
+| `COOKIES_SECURE` | `true` | Secure flag on auth cookies. Must be `false` in dev (plain HTTP); forced `true` in prod. |
+| `APP_KEY` | unset | Fernet key encrypting secrets at rest (the 2FA seed). Generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Optional at boot, but 2FA fails closed without it. Rotating it strands existing 2FA enrolments. |
+| `TRUST_FORWARDED_FOR` | `false` | Trust proxy IP headers. Off for direct/dev access; forced `true` in prod (behind nginx). |
+| `APP_BASE_URL` | `http://localhost:5173` | Public SPA origin used to build emailed confirmation/invite links. Set to the real HTTPS origin in prod. |
+| `LOGIN_MAX_ATTEMPTS` | `5` | Failed logins per email before a 429 lockout within the window. |
+| `LOGIN_IP_MAX_ATTEMPTS` | `20` | Failed logins per client IP before lockout (looser, for shared NATs). |
+| `LOGIN_ATTEMPT_WINDOW` | `900` | Lockout window in seconds (shared by the 2FA throttle). |
+| `TWO_FACTOR_MAX_ATTEMPTS` | `5` | Failed 2FA codes per user before a 429 within the window. |
+| `TOTP_ISSUER` | `isachore` | Label shown beside the account in authenticator apps (cosmetic). |
+| `TEST_EMAIL_COOLDOWN` | `10` | Seconds between admin test-email sends, per admin. |
+| `STORAGE_DIR` | `storage` | Where uploaded avatars are written (relative to the backend workdir). |
+| `AVATAR_MAX_BYTES` | `5242880` | Max raw upload size (~5 MB). |
+| `AVATAR_MAX_PIXELS` | `50000000` | Max decoded pixel count (guards decompression bombs). |
+| `AVATAR_PX` | `512` | Side length of the stored square avatar. |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM` | unset / `587` | SMTP for confirmation and test emails. Confirmation and the test button need at least a host and from address. |
+| `SMTP_STARTTLS` / `SMTP_USE_TLS` | `true` / `false` | STARTTLS (port 587) vs implicit TLS (port 465); mutually exclusive. |
+
+## Commands
+
+Run backend commands inside the container so the `db` host resolves. In prod,
+prefix with `-f compose.prod.yml`.
+
+### Setup and operations
 
 ```bash
-uv tool install pre-commit
-pre-commit install
+# Create the first admin (REQUIRED at setup; no-op if an admin exists)
+docker compose exec backend python -m app.cli init \
+    --email you@example.com --first-name You --last-name Example
+
+# Database migrations
+docker compose exec backend alembic upgrade head
+docker compose exec backend alembic revision --autogenerate -m "describe change"
+
+# Seed / reset the dev dataset (dev environments only)
+docker compose exec backend python -m app.cli seed --fresh
+
+# Clear login rate-limit lockouts (see below)
+docker compose exec backend python -m app.cli clear-login-throttle        # all lockouts
+docker compose exec backend python -m app.cli clear-login-throttle 42     # one user, by id
+
+# Expire stale household invitations now (the hourly job, run once)
+docker compose exec backend python -m app.cli expire-invitations
 ```
 
-## Frontend UI
+**Clearing a lockout:** repeated failed logins lock out both the attempted email
+and the client IP for the window. `clear-login-throttle` with a user id clears
+only that user's per-email counter (a user maps to an email, never to an IP);
+with no argument it clears every counter, per-email and per-IP.
 
-The UI is built on [shadcn/ui](https://ui.shadcn.com) (the `radix-nova` style,
-Radix UI under the hood). Components you own and can edit live in
-`frontend/src/components/ui/`; the config is `frontend/components.json`. Import
-them through the `@/` alias (e.g. `@/components/ui/button`) and combine classes
-with the `cn()` helper in `frontend/src/lib/utils.ts`.
-
-Add more components with the CLI (run from `frontend/`):
+### Linting and formatting
 
 ```bash
-# NOTE: this prompts to overwrite the brand-customised button.tsx — decline it,
-# which the piped "n" does. If it changed package.json, also install in the
-# container (a named volume shadows the container's node_modules).
-printf 'n\n' | npx shadcn@latest add <component>
-docker compose exec frontend npm install
+cd backend && uv run ruff check . && uv run ruff format .
+cd frontend && npm run lint && npm run format && npm run build   # build also typechecks (tsc -b)
+pre-commit run --all-files                                       # what the git hook runs
 ```
 
-- **Design tokens & theming** live only in `frontend/src/index.css`. The four
-  Catppuccin flavours are `[data-theme]` blocks (Latte = light; Frappé /
-  Macchiato / Mocha = dark) and the accent colour is re-pointed by
-  `:root[data-accent]` rules; `frontend/src/theme/themes.ts` holds the metadata.
-- **Theme**: `useTheme()` from `frontend/src/theme/` exposes `theme` (flavour) +
-  `accent`. Both are a per-user preference chosen on the profile page, persisted
-  server-side (`users.theme` / `users.accent_color`) and mirrored to
-  `localStorage` (with a pre-paint script in `index.html` to avoid a flash). It
-  follows the OS preference until the user picks a flavour; the calendar starts
-  weeks on Monday.
-- **Language**: the UI ships in English (the default) and Italian, chosen on the
-  profile page. Like the theme it is a per-user preference, saved server-side
-  (`users.language`) and mirrored to `localStorage` (`isachore-language`), so it
-  survives reloads and is re-applied on login on any device. Strings live in
-  `frontend/src/i18n/locales/{en,it}.json`, keyed Laravel-style (nested dot keys
-  such as `chores.title`); components read them with `useTranslation()` /
-  `t('chores.title')`. Dates follow the active locale (en → en-GB, it → it-IT).
-  Built on `react-i18next` + `i18next`. See the i18n conventions in `CLAUDE.md`
-  before adding new strings.
-- **Toasts**: `import { toast } from 'sonner'` and call `toast.success(...)`
-  for success feedback; the single `<Toaster />` is mounted in `main.tsx`.
+### Tests
 
-Libraries the migration added: `radix-ui`, `class-variance-authority`, `clsx`,
-`tailwind-merge`, `lucide-react` (icons), `tw-animate-css`, `shadcn` (provides
-`shadcn/tailwind.css`), `react-day-picker` + `date-fns` (date picker) and
-`sonner` (toasts).
-
-## Tests
-
-Backend uses pytest, frontend uses vitest; both can report coverage. Run the
-backend suite inside the container so the `db` host resolves.
+Backend uses pytest, frontend uses vitest; both must pass before you commit.
 
 ```bash
-docker compose exec backend uv run pytest                          # backend
-cd frontend && npm run test                                        # frontend
+docker compose exec backend uv run pytest                        # backend (run in the container)
+cd frontend && npm run test                                      # frontend
 
-# with coverage:
+# with coverage (HTML report at backend/htmlcov/ and frontend/coverage/):
 docker compose exec backend uv run pytest --cov=app --cov-report=term-missing --cov-report=html
 cd frontend && npm run test:coverage
 ```
 
-Coverage prints a per-file table in the terminal and writes a browsable HTML
-report — open `backend/htmlcov/index.html` or `frontend/coverage/index.html`.
-Every feature should ship with tests; both suites must pass before committing.
+## Contributing
 
-## TODO
+Conventions, architecture notes, and gotchas for working in this codebase live in
+[CLAUDE.md](CLAUDE.md). UI mockups are in `../isachore-design/`.
 
-The idea, step by step. Done so far: project scaffold, linters + pre-commit
-hook, Docker dev/prod, hello world at `/`, login page UI at `/login`, chores +
-users management UI, a shadcn/ui component kit with light/dark theming, a
-self-service profile page (name / password / avatar upload) reached from an
-avatar menu in the top bar, English/Italian UI translations (react-i18next)
-picked per user on the profile page, email-based user confirmation with a
-server-settings page (SMTP, mailpit in dev) plus the one-time `init` bootstrap,
-a Home due view (overdue / due today / due within a week) with one-tap chore
-completion and a daily progress bar, and optional TOTP two-factor authentication
-(authenticator app plus one-time recovery codes, managed from the profile's
-Security section and enforced as a second login step; the TOTP seed is encrypted
-at rest with `APP_KEY`, and admins can reset a locked-out user's enrolment).
+### Roadmap
 
-The app is organised into four areas (context for future work):
-
-- **Homepage**: the due view (what is overdue, due today, due soon), filterable by
-  household and by assignees. It defaults to your own chores plus shared ones, and
-  widening the assignee filter shows the whole household's.
-- **Admin**: manage server settings, users, and anything else that comes up.
-- **Chores management**: manage the household's chores.
-- **Tags management**: create, edit and delete tags.
-
-- [ ] if one person mark a task as done, the other person see it live (websocket)
+- [ ] Live updates when a housemate completes a chore (websocket)
 - [ ] CI (lint + test on push)
-- [ ] chores changes log (see who changed the chores)
-
-Design mockups live in `../isachore-design/` (login = variant 1a).
+- [ ] Chore change log (who changed what)
