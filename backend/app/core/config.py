@@ -13,6 +13,16 @@ class Settings(BaseSettings):
     # it must opt out explicitly with COOKIES_SECURE=false.
     cookies_secure: bool = True
 
+    # Symmetric key for encrypting secrets at rest (a urlsafe-base64 Fernet key;
+    # generate with `python -c "from cryptography.fernet import Fernet;
+    # print(Fernet.generate_key().decode())"`). General-purpose, consumed via
+    # app/core/crypto.py; the first user is 2FA (the TOTP seed must be
+    # recoverable, so it is encrypted rather than hashed). Optional at boot so
+    # the app runs without it, but anything that needs encryption fails closed
+    # when it is unset. Rotating this key strands data encrypted under the old
+    # one (e.g. every enrolled 2FA user) unless key rotation is added later.
+    app_key: str | None = None
+
     # Default targets localhost for host-side tooling; docker compose overrides
     # the host to "db" via env_file. The +asyncpg scheme is required.
     database_url: str = (
