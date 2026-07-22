@@ -142,8 +142,11 @@ async def list_completions(
 
 @router.delete("/{completion_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def undo_completion(completion_id: int, user: CurrentUser, session: SessionDep) -> None:
-    """Undo a completion (identified by its done-occurrence id). Only the person who
-    recorded it may undo. Undoing the chore's latest completion reopens that occurrence
+    """Undo a completion (identified by its done-occurrence id). Only the user the
+    completion is credited to (completed_by) may undo it; the occurrence stores no
+    separate record of who submitted it, so someone who completes a chore on another
+    member's behalf cannot undo it themselves.
+    Undoing the chore's latest completion reopens that occurrence
     (deleting the successor open occurrence first) so the chore is due again with its
     original assignee; undoing an older one just removes that history row."""
     # Scope to the user's active households (same scope as the list): a done occurrence
