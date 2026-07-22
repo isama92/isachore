@@ -5,8 +5,11 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # Deployment marker (e.g. "dev" / "prod"). Informational only; cookie
-    # security is controlled by cookies_secure below, not by this value.
-    environment: str = "dev"
+    # security is controlled by cookies_secure below, not by this value. Defaults
+    # to "prod" so an unconfigured deploy fails safe: `python -m app.cli seed`
+    # only runs on a dev-like value (dev/development/local/test/testing), so dev
+    # and test opt in explicitly (dev compose reads it from .env).
+    environment: str = "prod"
 
     # Auth cookies get the Secure flag (HTTPS only) by default, so a deploy that
     # configures nothing fails closed. Local dev is served over plain HTTP, so

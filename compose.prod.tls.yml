@@ -1,15 +1,77 @@
 # Manual-certificate TLS mode: nginx terminates TLS on :443 and redirects :80.
-# This overlay bind-mounts a config file from the repo, so run it from a repo
-# checkout (not a bare image pull). Use together with the base file:
-#   docker compose -f compose.prod.yml -f compose.prod.tls.yml up -d --build
-# Put your fullchain.pem and privkey.pem in ./volumes/certs. For a self-signed
-# test cert see the Production section in README.md. The detect-private-key
-# pre-commit hook guards against accidentally committing a key left there.
+# Self-contained: run it on its own, no base file.
+#   docker compose -f compose.prod.tls.yml up -d --build
+# This bind-mounts a config file and certs from the repo, so run it from a repo
+# checkout. Put your fullchain.pem and privkey.pem in ./volumes/certs. For a
+# self-signed test cert see the Production section in README.md. The
+# detect-private-key pre-commit hook guards against committing a key left there.
 services:
+  backend:
+    build:
+      context: ./backend
+      target: prod
+    env_file: .env
+    environment:
+      # Explicit so the prod stack is always marked prod regardless of .env (overrides
+      # env_file). Keeps the dev-only `python -m app.cli seed` guard fail-closed here.
+      ENVIRONMENT: prod
+      TRUST_FORWARDED_FOR: "true"
+      # Force Secure auth cookies in prod regardless of .env; every prod mode
+      # terminates TLS before the browser (nginx:443, or an upstream proxy).
+      COOKIES_SECURE: "true"
+    volumes:
+      # Named volume, not a host bind mount: the image creates /app/storage owned
+      # by the non-root `app` user, and a named volume inherits that ownership on
+      # first mount, so avatar uploads are writable. A host bind mount is created
+      # root-owned, which the app user cannot write to (the process would crash on
+      # boot creating storage/avatars).
+      - storage:/app/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   frontend:
+    build:
+      context: ./frontend
+      target: prod
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ./frontend/nginx.tls.conf:/etc/nginx/conf.d/default.conf:ro
       - ./volumes/certs:/etc/nginx/certs:ro
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ./volumes/db:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+
+  redis:
+    image: redis:8-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  storage:

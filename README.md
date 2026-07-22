@@ -94,10 +94,10 @@ SMTP at mailpit and captured mail shows at http://localhost:8025.
 Production runs the same two services (a FastAPI backend and an nginx image that
 serves the built SPA and reverse-proxies `/api/` to the backend), plus Postgres
 and Redis. Neither the database, Redis, nor the backend publishes a host port;
-only the frontend (nginx) is exposed, and only when you add a mode overlay.
+only the frontend (nginx) is exposed, and only in the mode file you run.
 
-The base file `compose.prod.yml` publishes no host port on its own. Pick one of
-three modes:
+Each mode is a single self-contained compose file: copy the one you need and run
+it on its own (there is no base file to combine). Pick one of three modes:
 
 **1. Behind your own TLS-terminating reverse proxy (recommended).** nginx stays
 on HTTP; your proxy handles TLS, the HTTP to HTTPS redirect, and HSTS.
@@ -105,20 +105,20 @@ on HTTP; your proxy handles TLS, the HTTP to HTTPS redirect, and HSTS.
 entrypoints, cert resolver, and external network to match your install.
 
 ```bash
-docker compose -f compose.prod.yml -f compose.prod.traefik.yml up -d --build
+docker compose -f compose.prod.traefik.yml up -d --build
 ```
 
 **2. nginx terminates TLS with your own certificate (no front proxy).** Put
 `fullchain.pem` and `privkey.pem` in `./volumes/certs`, then:
 
 ```bash
-docker compose -f compose.prod.yml -f compose.prod.tls.yml up -d --build
+docker compose -f compose.prod.tls.yml up -d --build
 ```
 
 **3. Plain HTTP on :80, for a local smoke test only** (never internet-facing):
 
 ```bash
-docker compose -f compose.prod.yml -f compose.prod.http.yml up -d --build
+docker compose -f compose.prod.http.yml up -d --build
 ```
 
 ### Production checklist
@@ -137,11 +137,12 @@ per-IP rate limiting reads the real client IP behind the proxy. Every mode must
 terminate TLS in front of the app; never set `COOKIES_SECURE=false` in prod.
 
 Then, inside the running stack, run migrations and create the first admin (same
-commands as dev, they are required here too):
+commands as dev, they are required here too). Use the same compose file you
+deployed with (the examples use the TLS mode):
 
 ```bash
-docker compose -f compose.prod.yml exec backend alembic upgrade head
-docker compose -f compose.prod.yml exec backend python -m app.cli init \
+docker compose -f compose.prod.tls.yml exec backend alembic upgrade head
+docker compose -f compose.prod.tls.yml exec backend python -m app.cli init \
     --email admin@yourdomain --first-name Admin --last-name User
 ```
 
@@ -175,7 +176,7 @@ Configured via `.env` (see `.env.example`). All are read by
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | dev placeholders | Postgres container credentials. Use a strong password in prod. |
 | `DATABASE_URL` | `postgresql+asyncpg://...@db:5432/isachore` | Async DB URL. Must use the `postgresql+asyncpg://` scheme. |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis for login rate limiting (compose sets the container host). |
-| `ENVIRONMENT` | `dev` | Deployment marker (informational). Gates the dev-only `seed` command; forced to `prod` by the prod stack. |
+| `ENVIRONMENT` | `prod` | Deployment marker (informational). Defaults to `prod` (fail-safe); set a dev-like value (`dev`/`development`/`local`/`test`/`testing`) locally to allow the dev-only `seed` command. The prod stack forces `prod`. |
 | `COOKIES_SECURE` | `true` | Secure flag on auth cookies. Must be `false` in dev (plain HTTP); forced `true` in prod. |
 | `APP_KEY` | unset | Fernet key encrypting secrets at rest (the 2FA seed). Generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Optional at boot, but 2FA fails closed without it. Rotating it strands existing 2FA enrolments. |
 | `TRUST_FORWARDED_FOR` | `false` | Trust proxy IP headers. Off for direct/dev access; forced `true` in prod (behind nginx). |
@@ -197,7 +198,7 @@ Configured via `.env` (see `.env.example`). All are read by
 ## Commands
 
 Run backend commands inside the container so the `db` host resolves. In prod,
-prefix with `-f compose.prod.yml`.
+prefix with the compose file you deployed (e.g. `-f compose.prod.tls.yml`).
 
 ### Setup and operations
 
@@ -254,6 +255,9 @@ Conventions, architecture notes, and gotchas for working in this codebase live i
 
 ### Roadmap
 
+- [ ] check ../REPORT.md
+- [ ] have compose prod files pull images instead of building them
+- [ ] is it possible to have a docker folder with Dockerfile inside?
 - [ ] Live updates when a housemate completes a chore (websocket)
 - [ ] CI (lint + test on push)
 - [ ] Chore change log (who changed what)

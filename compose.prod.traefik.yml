@@ -1,13 +1,47 @@
-# EXAMPLE overlay for running behind your own Traefik (external TLS termination).
+# EXAMPLE for running behind your own Traefik (external TLS termination).
+# Self-contained: run it on its own, no base file.
+#   docker compose -f compose.prod.traefik.yml up -d --build
 # This is a TEMPLATE: adjust the router rule host, entrypoints, cert resolver and
 # the external network name to match your Traefik install. In this mode Traefik
 # terminates TLS and owns the HTTP->HTTPS redirect and HSTS; nginx stays on HTTP
 # and is reached over the shared docker network (no host port published).
-#   docker compose -f compose.prod.yml -f compose.prod.traefik.yml up -d --build
 services:
+  backend:
+    build:
+      context: ./backend
+      target: prod
+    env_file: .env
+    environment:
+      # Explicit so the prod stack is always marked prod regardless of .env (overrides
+      # env_file). Keeps the dev-only `python -m app.cli seed` guard fail-closed here.
+      ENVIRONMENT: prod
+      TRUST_FORWARDED_FOR: "true"
+      # Force Secure auth cookies in prod regardless of .env; Traefik terminates
+      # TLS before the browser.
+      COOKIES_SECURE: "true"
+    volumes:
+      # Named volume, not a host bind mount: the image creates /app/storage owned
+      # by the non-root `app` user, and a named volume inherits that ownership on
+      # first mount, so avatar uploads are writable. A host bind mount is created
+      # root-owned, which the app user cannot write to (the process would crash on
+      # boot creating storage/avatars).
+      - storage:/app/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   frontend:
+    build:
+      context: ./frontend
+      target: prod
+    # No host port published: Traefik reaches nginx over the shared docker network.
+    expose:
+      - "80"
     networks:
-      # Stay on the base stack's internal network (so nginx can still reach
+      # Stay on this stack's internal network (so nginx can still reach
       # backend:8000) AND join Traefik's external network. Declaring networks
       # here opts out of auto-joining default, so list it explicitly.
       - default
@@ -18,8 +52,40 @@ services:
       - "traefik.http.routers.isachore.entrypoints=websecure"
       - "traefik.http.routers.isachore.tls.certresolver=letsencrypt"
       - "traefik.http.services.isachore.loadbalancer.server.port=80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ./volumes/db:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+
+  redis:
+    image: redis:8-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
 
 networks:
   # The network your Traefik instance is attached to (created outside this stack).
   web:
     external: true
+
+volumes:
+  storage:

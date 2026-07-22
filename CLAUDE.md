@@ -37,8 +37,8 @@ and the non-obvious gotchas.
   component code in `src/components/ui/`.
 - **DB**: PostgreSQL 18. **Redis** backs login rate limiting (reachable only as
   `redis:6379` on the compose network, not published to the host). **Docker** for
-  dev and prod (multi-stage Dockerfiles, `compose.yml` dev / `compose.prod.yml`
-  prod).
+  dev and prod (multi-stage Dockerfiles, `compose.yml` dev / one self-contained
+  `compose.prod.<mode>.yml` per prod deployment mode: http / tls / traefik).
 
 ## Commands
 
@@ -245,8 +245,8 @@ the negative paths (401/403/400/404/409), not just the happy one.
 - Alembic files generated inside the container are root-owned on the host:
   `docker compose exec backend chown -R $(id -u):$(id -g) alembic/versions`.
 - To smoke-test prod compose without touching the running dev stack, use a
-  separate project name: `docker compose -f compose.prod.yml -p isachore-prod up
-  --build -d` (and `down -v` afterwards).
+  separate project name and a mode file: `docker compose -f compose.prod.http.yml
+  -p isachore-prod up --build -d` (and `down -v` afterwards).
 - Test-infra quirks (handled in the committed setup, don't undo them): coverage
   needs `concurrency = ["greenlet"]` in `pyproject.toml` or async SQLAlchemy
   endpoint bodies read as uncovered; pydantic `EmailStr` rejects `.test` TLDs, so
