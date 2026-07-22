@@ -481,8 +481,10 @@
     "notConfiguredValue": "Non impostato",
     "testEmail": "Invia",
     "testEmailSending": "Invio…",
+    "testEmailCooldown": "Attendi {{seconds}}s",
     "testEmailSent": "Email di prova inviata a {{email}}",
-    "testEmailError": "Impossibile inviare l'email di prova"
+    "testEmailError": "Impossibile inviare l'email di prova",
+    "testEmailCooldownError": "Attendi prima di inviare un'altra email di prova"
   },
   "confirmAccount": {
     "title": "Imposta la tua password",

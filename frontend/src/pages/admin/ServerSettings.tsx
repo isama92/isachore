@@ -9,6 +9,11 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 
+// Mirrors settings.test_email_cooldown on the backend, which enforces the same
+// limit server-side (429). This countdown is the UX half: it disables the
+// button so a normal user never runs into the 429 in the first place.
+const TEST_EMAIL_COOLDOWN_SECONDS = 10
+
 export default function ServerSettings() {
   const { user } = useAuth()
   const { t } = useTranslation()
@@ -24,6 +29,7 @@ export default function ServerSettings() {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [sendingTest, setSendingTest] = useState(false)
   const [testError, setTestError] = useState<string | null>(null)
+  const [testCooldown, setTestCooldown] = useState(0)
 
   const load = useCallback(
     () =>
@@ -46,6 +52,15 @@ export default function ServerSettings() {
   useEffect(() => {
     void load()
   }, [load])
+
+  // Tick the test-email cooldown down to zero, a second at a time. Each tick
+  // schedules the next, so the setState only ever fires inside the timer
+  // callback, never synchronously in the effect body (the hooks rule).
+  useEffect(() => {
+    if (testCooldown <= 0) return
+    const timer = setTimeout(() => setTestCooldown((s) => s - 1), 1000)
+    return () => clearTimeout(timer)
+  }, [testCooldown])
 
   // Optimistic toggle + rollback (mirrors Profile.saveAppearance). Enabling
   // without SMTP configured is rejected by the server (400); the rollback then
@@ -80,9 +95,22 @@ export default function ServerSettings() {
       await api.post(endpoints.settings.testEmail)
       toast.success(t('serverSettings.testEmailSent', { email: user?.email ?? '' }))
     } catch (err) {
-      setTestError(err instanceof ApiError ? err.message : t('serverSettings.testEmailError'))
+      // A 429 means the server-side cooldown caught us (e.g. a second tab); show
+      // the translated cooldown note rather than the English backend detail.
+      const cooledDown = err instanceof ApiError && err.status === 429
+      setTestError(
+        cooledDown
+          ? t('serverSettings.testEmailCooldownError')
+          : err instanceof ApiError
+            ? err.message
+            : t('serverSettings.testEmailError'),
+      )
     } finally {
+      // Start the cooldown once the request settles, whatever the outcome: the
+      // backend claims its cooldown on any accepted send (success or a relay
+      // failure), so mirror that here to keep the button in step.
       setSendingTest(false)
+      setTestCooldown(TEST_EMAIL_COOLDOWN_SECONDS)
     }
   }
 
@@ -160,12 +188,14 @@ export default function ServerSettings() {
                 <Button
                   type="button"
                   size="sm"
-                  disabled={!smtpConfigured || sendingTest}
+                  disabled={!smtpConfigured || sendingTest || testCooldown > 0}
                   onClick={() => void sendTestEmail()}
                 >
                   {sendingTest
                     ? t('serverSettings.testEmailSending')
-                    : t('serverSettings.testEmail')}
+                    : testCooldown > 0
+                      ? t('serverSettings.testEmailCooldown', { seconds: testCooldown })
+                      : t('serverSettings.testEmail')}
                 </Button>
               </span>
             </div>

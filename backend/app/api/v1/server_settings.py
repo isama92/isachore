@@ -2,10 +2,11 @@ import logging
 
 from fastapi import APIRouter, HTTPException, status
 
-from app.api.deps import AdminUser, SessionDep
+from app.api.deps import AdminUser, RedisDep, SessionDep
 from app.core.app_settings import get_app_settings
 from app.core.config import settings
 from app.core.email import NO_SMTP_DETAIL, send_email, smtp_configured
+from app.core.rate_limit import enforce_test_email_cooldown
 from app.models import AppSettings
 from app.schemas import ServerSettingsRead, ServerSettingsUpdate
 
@@ -44,9 +45,10 @@ async def update_settings(
 
 
 @router.post("/test-email", status_code=status.HTTP_204_NO_CONTENT)
-async def send_test_email(admin: AdminUser) -> None:
+async def send_test_email(admin: AdminUser, redis: RedisDep) -> None:
     if not smtp_configured():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=NO_SMTP_DETAIL)
+    await enforce_test_email_cooldown(redis, user_id=admin.id)
     try:
         await send_email(
             admin.email,

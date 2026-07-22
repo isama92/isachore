@@ -481,8 +481,10 @@
     "notConfiguredValue": "Not set",
     "testEmail": "Send",
     "testEmailSending": "Sending…",
+    "testEmailCooldown": "Wait {{seconds}}s",
     "testEmailSent": "Test email sent to {{email}}",
-    "testEmailError": "Could not send the test email"
+    "testEmailError": "Could not send the test email",
+    "testEmailCooldownError": "Please wait before sending another test email"
   },
   "confirmAccount": {
     "title": "Set your password",

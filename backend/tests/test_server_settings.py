@@ -2,7 +2,10 @@ from collections.abc import Awaitable, Callable
 
 import pytest
 from httpx import AsyncClient
+from redis.asyncio import Redis
+from redis.exceptions import ConnectionError as RedisConnectionError
 
+from app.core.config import settings
 from app.models import User
 
 Login = Callable[..., Awaitable[User]]
@@ -145,3 +148,59 @@ async def test_test_email_member_forbidden(make_user: Login, auth_client: AuthCl
     client = await auth_client(member)
     resp = await client.post("/api/v1/settings/test-email")
     assert resp.status_code == 403
+
+
+# --- test email cooldown -------------------------------------------------
+
+
+async def test_test_email_cooldown_blocks_second_send(
+    make_user: Login, auth_client: AuthClient, smtp: list
+) -> None:
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    client = await auth_client(admin)
+
+    first = await client.post("/api/v1/settings/test-email")
+    assert first.status_code == 204
+
+    # A second send inside the window is refused before another mail goes out.
+    second = await client.post("/api/v1/settings/test-email")
+    assert second.status_code == 429
+    assert 0 < int(second.headers["Retry-After"]) <= settings.test_email_cooldown
+    assert len(smtp) == 1
+
+
+async def test_test_email_cooldown_is_per_admin(
+    make_user: Login, auth_client: AuthClient, smtp: list
+) -> None:
+    admin_a = await make_user(email="admin-a@example.com", is_admin=True)
+    admin_b = await make_user(email="admin-b@example.com", is_admin=True)
+
+    client = await auth_client(admin_a)
+    assert (await client.post("/api/v1/settings/test-email")).status_code == 204
+
+    # A different admin has their own cooldown, so their first send still works.
+    client = await auth_client(admin_b)
+    assert (await client.post("/api/v1/settings/test-email")).status_code == 204
+    assert len(smtp) == 2
+
+
+async def test_test_email_cooldown_fails_open_when_redis_unavailable(
+    make_user: Login,
+    auth_client: AuthClient,
+    smtp: list,
+    fake_redis: Redis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A Redis outage must not disable the diagnostic button: the cooldown skips
+    # and back-to-back sends both go through.
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    client = await auth_client(admin)
+
+    async def boom(*args: object, **kwargs: object) -> object:
+        raise RedisConnectionError("redis down")
+
+    monkeypatch.setattr(fake_redis, "set", boom)
+
+    assert (await client.post("/api/v1/settings/test-email")).status_code == 204
+    assert (await client.post("/api/v1/settings/test-email")).status_code == 204
+    assert len(smtp) == 2

@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     login_ip_max_attempts: int = 20
     login_attempt_window: int = 900  # seconds (15 minutes)
 
+    # Cooldown between admin "send test email" clicks, per admin. Stops the
+    # button from hammering the SMTP relay / an admin's inbox; enforced in Redis
+    # (best-effort, fails open) and mirrored by a countdown in the admin UI. Keep
+    # in sync with TEST_EMAIL_COOLDOWN_SECONDS in the frontend ServerSettings page.
+    test_email_cooldown: int = 10  # seconds
+
     # Trust the client IP from the X-Forwarded-For header. Off by default (safe
     # for direct/dev access); turn on only behind a trusted reverse proxy such as
     # the prod nginx, which sets the header.

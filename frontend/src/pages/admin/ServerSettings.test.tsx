@@ -106,6 +106,42 @@ describe('ServerSettings', () => {
     expect(toastSpy).toHaveBeenCalledWith('Test email sent to admin@example.com')
   })
 
+  it('blocks the send button with a countdown once used', async () => {
+    const fetchMock = stubFetch({
+      settings: makeServerSettings({ smtp_configured: true }),
+      post: () => jsonBody(undefined, 204),
+    })
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderWithProviders(<ServerSettings />, { authValue: { user: admin } })
+
+    await user.click(await screen.findByRole('button', { name: 'Send' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/settings/test-email',
+        expect.objectContaining({ method: 'POST' }),
+      ),
+    )
+    // After sending, the button counts down and can't be clicked again.
+    const cooling = await screen.findByRole('button', { name: /Wait \d+s/ })
+    expect(cooling).toBeDisabled()
+  })
+
+  it('shows a cooldown note when the server returns 429', async () => {
+    stubFetch({
+      settings: makeServerSettings({ smtp_configured: true }),
+      post: () => jsonBody({ detail: 'Please wait before sending another test email.' }, 429),
+    })
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderWithProviders(<ServerSettings />, { authValue: { user: admin } })
+
+    await user.click(await screen.findByRole('button', { name: 'Send' }))
+
+    expect(
+      await screen.findByText('Please wait before sending another test email'),
+    ).toBeInTheDocument()
+  })
+
   it('shows an error when the test email fails', async () => {
     stubFetch({
       settings: makeServerSettings({ smtp_configured: true }),

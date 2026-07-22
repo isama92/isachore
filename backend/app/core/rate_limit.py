@@ -116,6 +116,40 @@ async def clear_login_failures(redis: Redis, *, email: str) -> None:
         logger.warning("Login failure counter not cleared: Redis unavailable", exc_info=True)
 
 
+_TEST_EMAIL_KEY_PREFIX = "test-email:cooldown:"
+_TEST_EMAIL_COOLDOWN_DETAIL = "Please wait before sending another test email."
+
+
+def _test_email_key(user_id: int) -> str:
+    return f"{_TEST_EMAIL_KEY_PREFIX}{user_id}"
+
+
+async def enforce_test_email_cooldown(redis: Redis, *, user_id: int) -> None:
+    """Rate-limit the admin "send test email" button to one send per cooldown
+    window, per admin. Call before sending.
+
+    Uses an atomic `SET NX EX` so the check and the claim are one round trip and
+    two tabs can't both slip through. When the key already exists the admin is
+    still cooling down, so refuse with 429 plus a Retry-After of the remaining
+    TTL. Best-effort like the login throttle: a Redis outage fails open (a full
+    cache outage shouldn't disable a diagnostic tool). The cooldown is claimed
+    even if the send later fails, so a broken relay can't be hammered either.
+    """
+    try:
+        key = _test_email_key(user_id)
+        claimed = await redis.set(key, "1", ex=settings.test_email_cooldown, nx=True)
+        if not claimed:
+            ttl = await redis.ttl(key)
+            retry_after = ttl if ttl and ttl > 0 else settings.test_email_cooldown
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=_TEST_EMAIL_COOLDOWN_DETAIL,
+                headers={"Retry-After": str(retry_after)},
+            )
+    except RedisError:
+        logger.warning("Test-email cooldown check skipped: Redis unavailable", exc_info=True)
+
+
 async def clear_login_throttle(redis: Redis, *, email: str | None = None) -> int:
     """Maintenance helper for the management CLI. With `email`, delete only that
     address's counter; without it, delete every login throttle key (per-email
