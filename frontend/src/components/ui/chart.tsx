@@ -7,6 +7,14 @@ import { cn } from '@/lib/utils'
 // Format: { THEME_NAME: CSS_SELECTOR }
 const THEMES = { light: '', dark: '.dark' } as const
 
+// ChartStyle injects these tokens verbatim into an inline <style> via
+// dangerouslySetInnerHTML (the reason the CSP keeps style-src 'unsafe-inline').
+// Validate every token so a config with user-controlled keys/colours cannot
+// break out of the declaration and inject arbitrary CSS. See finding L6.
+const CSS_IDENT = /^[\w-]+$/ // custom-property key: letters, digits, _ and -
+const SAFE_COLOR = /^[\w\s#(),.%-]+$/ // hex / rgb() / hsl() / var(--…) / named;
+// excludes ; } { : < > @ / * " ' \ which could escape the declaration
+
 const INITIAL_DIMENSION = { width: 320, height: 200 } as const
 type TooltipNameType = number | string
 
@@ -82,17 +90,20 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
     return null
   }
 
+  const safeId = id.replace(/[^\w-]/g, '')
+
   return (
     <style
       dangerouslySetInnerHTML={{
         __html: Object.entries(THEMES)
           .map(
             ([theme, prefix]) => `
-${prefix} [data-chart=${id}] {
+${prefix} [data-chart=${safeId}] {
 ${colorConfig
   .map(([key, itemConfig]) => {
     const color = itemConfig.theme?.[theme as keyof typeof itemConfig.theme] ?? itemConfig.color
-    return color ? `  --color-${key}: ${color};` : null
+    if (!color || !CSS_IDENT.test(key) || !SAFE_COLOR.test(color)) return null
+    return `  --color-${key}: ${color};`
   })
   .join('\n')}
 }
