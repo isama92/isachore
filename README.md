@@ -202,8 +202,6 @@ The app is organised into four areas (context for future work):
 
 - [ ] if one person mark a task as done, the other person see it live (websocket)
 - [ ] CI (lint + test on push)
-- [x] Prod deploy hardening: TLS (nginx manual-cert mode + reverse-proxy/Traefik mode, HTTP->HTTPS redirect, HSTS, CSP + security headers)
-- [ ] Prod deploy hardening: real secrets management (Docker/Compose secrets or a vault; APP_KEY rotation)
 - [ ] chores changes log (see who changed the chores)
 
 Design mockups live in `../isachore-design/` (login = variant 1a).
