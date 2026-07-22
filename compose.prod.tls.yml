@@ -1,0 +1,15 @@
+# Manual-certificate TLS mode: nginx terminates TLS on :443 and redirects :80.
+# This overlay bind-mounts a config file from the repo, so run it from a repo
+# checkout (not a bare image pull). Use together with the base file:
+#   docker compose -f compose.prod.yml -f compose.prod.tls.yml up -d --build
+# Put your fullchain.pem and privkey.pem in ./volumes/certs. For a self-signed
+# test cert see the Production section in README.md. The detect-private-key
+# pre-commit hook guards against accidentally committing a key left there.
+services:
+  frontend:
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./frontend/nginx.tls.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./volumes/certs:/etc/nginx/certs:ro

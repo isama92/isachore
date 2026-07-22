@@ -41,7 +41,7 @@ overdue / due-today / due-soon views, JSON API for future mobile clients.
 
 ```bash
 docker compose up --build                          # dev stack: db + backend (reload) + frontend (HMR)
-docker compose -f compose.prod.yml up --build      # prod: nginx on :80 serving SPA + /api proxy
+docker compose -f compose.prod.yml -f compose.prod.http.yml up --build   # prod plain HTTP :80 (base alone publishes no port); TLS/Traefik modes: README "Production"
 
 docker compose exec backend alembic revision --autogenerate -m "..."
 docker compose exec backend alembic upgrade head   # run alembic INSIDE the container so host "db" resolves

@@ -9,8 +9,16 @@ services:
       # env_file). Keeps the dev-only `python -m app.cli seed` guard fail-closed here.
       ENVIRONMENT: prod
       TRUST_FORWARDED_FOR: "true"
+      # Force Secure auth cookies in prod regardless of .env; every prod mode
+      # terminates TLS before the browser (nginx:443, or an upstream proxy).
+      COOKIES_SECURE: "true"
     volumes:
-      - ./volumes/storage:/app/storage
+      # Named volume, not a host bind mount: the image creates /app/storage owned
+      # by the non-root `app` user, and a named volume inherits that ownership on
+      # first mount, so avatar uploads are writable. A host bind mount is created
+      # root-owned, which the app user cannot write to (the process would crash on
+      # boot creating storage/avatars).
+      - storage:/app/storage
     depends_on:
       db:
         condition: service_healthy
@@ -22,8 +30,11 @@ services:
     build:
       context: ./frontend
       target: prod
-    ports:
-      - "80:80"
+    # No host port here: the base stack is the "behind a reverse proxy" baseline.
+    # Add a mode overlay to publish ports: compose.prod.http.yml (plain :80),
+    # compose.prod.tls.yml (:80 + :443 with your cert), or compose.prod.traefik.yml.
+    expose:
+      - "80"
     depends_on:
       - backend
     restart: unless-stopped
@@ -53,3 +64,6 @@ services:
       retries: 10
       start_period: 10s
     restart: unless-stopped
+
+volumes:
+  storage:
