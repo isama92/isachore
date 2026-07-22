@@ -152,8 +152,11 @@ self-service profile page (name / password / avatar upload) reached from an
 avatar menu in the top bar, English/Italian UI translations (react-i18next)
 picked per user on the profile page, email-based user confirmation with a
 server-settings page (SMTP, mailpit in dev) plus the one-time `init` bootstrap,
-and a Home due view (overdue / due today / due within a week) with one-tap chore
-completion and a daily progress bar.
+a Home due view (overdue / due today / due within a week) with one-tap chore
+completion and a daily progress bar, and optional TOTP two-factor authentication
+(authenticator app plus one-time recovery codes, managed from the profile's
+Security section and enforced as a second login step; the TOTP seed is encrypted
+at rest with `APP_KEY`, and admins can reset a locked-out user's enrolment).
 
 The app is organised into four areas (context for future work):
 
