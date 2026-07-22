@@ -38,8 +38,8 @@ describe('Login', () => {
   })
 
   it('submits the credentials and shows a pending state', async () => {
-    let resolveLogin: () => void = () => {}
-    const pending = new Promise<void>((resolve) => {
+    let resolveLogin: (r: { twoFactorRequired: boolean }) => void = () => {}
+    const pending = new Promise<{ twoFactorRequired: boolean }>((resolve) => {
       resolveLogin = resolve
     })
     const { value } = renderWithProviders(<Login />, {
@@ -54,14 +54,14 @@ describe('Login', () => {
     expect(value.login).toHaveBeenCalledWith('a@example.com', 'password12345', false)
     expect(screen.getByRole('button', { name: 'Signing in…' })).toBeDisabled()
 
-    resolveLogin()
+    resolveLogin({ twoFactorRequired: false })
     await waitFor(() => expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled())
   })
 
   it('passes remember=true when the box is ticked', async () => {
     const { value } = renderWithProviders(<Login />, {
       route: '/login',
-      authValue: { login: vi.fn(() => Promise.resolve()) },
+      authValue: { login: vi.fn(() => Promise.resolve({ twoFactorRequired: false })) },
     })
 
     await userEvent.type(screen.getByLabelText('Email'), 'a@example.com')
@@ -70,6 +70,62 @@ describe('Login', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Sign in' }))
 
     expect(value.login).toHaveBeenCalledWith('a@example.com', 'password12345', true)
+  })
+
+  it('shows the code step and verifies when 2FA is required', async () => {
+    const verifyTwoFactor = vi.fn(async () => {})
+    renderWithProviders(<Login />, {
+      route: '/login',
+      authValue: {
+        login: vi.fn(async () => ({ twoFactorRequired: true })),
+        verifyTwoFactor,
+      },
+    })
+
+    await userEvent.type(screen.getByLabelText('Email'), 'a@example.com')
+    await userEvent.type(screen.getByLabelText('Password'), 'password12345')
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    // The password form is replaced by the code step.
+    const codeInput = await screen.findByLabelText('Authentication code')
+    await userEvent.type(codeInput, '123456')
+    await userEvent.click(screen.getByRole('button', { name: 'Verify' }))
+
+    expect(verifyTwoFactor).toHaveBeenCalledWith('123456')
+  })
+
+  it('lets the user switch to a recovery code on the 2FA step', async () => {
+    renderWithProviders(<Login />, {
+      route: '/login',
+      authValue: { login: vi.fn(async () => ({ twoFactorRequired: true })) },
+    })
+
+    await userEvent.type(screen.getByLabelText('Email'), 'a@example.com')
+    await userEvent.type(screen.getByLabelText('Password'), 'password12345')
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    await screen.findByLabelText('Authentication code')
+    await userEvent.click(screen.getByRole('button', { name: 'Use a recovery code instead' }))
+    expect(screen.getByLabelText('Recovery code')).toBeInTheDocument()
+  })
+
+  it('shows an error when the 2FA code is rejected', async () => {
+    renderWithProviders(<Login />, {
+      route: '/login',
+      authValue: {
+        login: vi.fn(async () => ({ twoFactorRequired: true })),
+        verifyTwoFactor: vi.fn().mockRejectedValue(new ApiError(401, 'Invalid or expired code')),
+      },
+    })
+
+    await userEvent.type(screen.getByLabelText('Email'), 'a@example.com')
+    await userEvent.type(screen.getByLabelText('Password'), 'password12345')
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    await userEvent.type(await screen.findByLabelText('Authentication code'), '000000')
+    await userEvent.click(screen.getByRole('button', { name: 'Verify' }))
+
+    expect(await screen.findByText('Invalid or expired code')).toBeInTheDocument()
   })
 
   it('shows the API error message on a failed login', async () => {

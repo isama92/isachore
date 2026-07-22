@@ -53,7 +53,20 @@
     "signingIn": "Accesso…",
     "rememberMe": "Ricordami",
     "hint": "Nuovo qui? Chiedi un account all'amministratore del tuo nucleo domestico.",
-    "error": "Qualcosa è andato storto, riprova"
+    "error": "Qualcosa è andato storto, riprova",
+    "twoFactorTitle": "Verifica in due passaggi",
+    "twoFactorSubtitle": "Inserisci il codice dalla tua app di autenticazione per completare l'accesso.",
+    "twoFactorRecoverySubtitle": "Inserisci uno dei tuoi codici di recupero per completare l'accesso.",
+    "code": "Codice di autenticazione",
+    "codePlaceholder": "123456",
+    "recoveryCode": "Codice di recupero",
+    "recoveryCodePlaceholder": "Codice di backup",
+    "verify": "Verifica",
+    "verifying": "Verifica…",
+    "useRecoveryCode": "Usa invece un codice di recupero",
+    "useAuthenticator": "Usa invece la tua app di autenticazione",
+    "backToSignIn": "Torna all'accesso",
+    "twoFactorError": "Impossibile verificare il codice"
   },
   "home": {
     "titleMine": "Le tue faccende",

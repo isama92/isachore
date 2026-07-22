@@ -22,9 +22,32 @@ export type User = {
   accent_color: Accent | null
   // UI language preference; null means the client uses its default (English).
   language: Language | null
+  // Whether TOTP two-factor auth is enrolled and active for the account.
+  two_factor_enabled: boolean
 }
 
 export type Me = User & { impersonating: boolean }
+
+// Outcome of the password step of login (backend LoginResponse). When
+// two_factor_required is true the user must submit a code to /auth/verify-2fa;
+// otherwise the login is complete and `user` is populated.
+export type LoginResponse = {
+  two_factor_required: boolean
+  user: User | null
+}
+
+// What POST /profile/2fa/setup returns to drive enrolment: the secret (for
+// manual entry), the otpauth URI, and a base64 PNG data URI of the QR code.
+export type TwoFactorSetup = {
+  secret: string
+  otpauth_uri: string
+  qr: string
+}
+
+// The one-time backup codes returned once at enable / regeneration.
+export type RecoveryCodes = {
+  recovery_codes: string[]
+}
 
 // Envelope returned by the server-side-paginated list endpoints (see
 // backend/app/schemas/pagination.py). Drives the reusable DataTable.

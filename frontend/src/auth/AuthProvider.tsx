@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { api } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
-import type { Me, User } from '../lib/types'
+import type { LoginResponse, Me, User } from '../lib/types'
 import { useTheme } from '../theme/useTheme'
 import { changeLanguage } from '../i18n/i18n'
 import { AuthContext } from './context'
@@ -64,7 +64,23 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (email: string, password: string, remember: boolean) => {
-      const me = await api.post<User>(endpoints.auth.login, { email, password, remember })
+      const res = await api.post<LoginResponse>(endpoints.auth.login, { email, password, remember })
+      // When 2FA is required the server has NOT minted a session yet; leave the
+      // user null and let the caller collect a code for verifyTwoFactor.
+      if (res.two_factor_required || !res.user) {
+        return { twoFactorRequired: res.two_factor_required }
+      }
+      setUser(res.user)
+      setImpersonating(false)
+      syncAppearance(res.user)
+      return { twoFactorRequired: false }
+    },
+    [syncAppearance],
+  )
+
+  const verifyTwoFactor = useCallback(
+    async (code: string) => {
+      const me = await api.post<User>(endpoints.auth.verifyTwoFactor, { code })
       setUser(me)
       setImpersonating(false)
       syncAppearance(me)
@@ -79,8 +95,8 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const value = useMemo(
-    () => ({ user, impersonating, loading, login, logout, refresh }),
-    [user, impersonating, loading, login, logout, refresh],
+    () => ({ user, impersonating, loading, login, verifyTwoFactor, logout, refresh }),
+    [user, impersonating, loading, login, verifyTwoFactor, logout, refresh],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -53,7 +53,20 @@
     "signingIn": "Signing in…",
     "rememberMe": "Remember me",
     "hint": "New here? Ask your household admin for an account.",
-    "error": "Something went wrong, please try again"
+    "error": "Something went wrong, please try again",
+    "twoFactorTitle": "Two-step verification",
+    "twoFactorSubtitle": "Enter the code from your authenticator app to finish signing in.",
+    "twoFactorRecoverySubtitle": "Enter one of your backup recovery codes to finish signing in.",
+    "code": "Authentication code",
+    "codePlaceholder": "123456",
+    "recoveryCode": "Recovery code",
+    "recoveryCodePlaceholder": "Backup code",
+    "verify": "Verify",
+    "verifying": "Verifying…",
+    "useRecoveryCode": "Use a recovery code instead",
+    "useAuthenticator": "Use your authenticator app instead",
+    "backToSignIn": "Back to sign in",
+    "twoFactorError": "Could not verify the code"
   },
   "home": {
     "titleMine": "Your chores",

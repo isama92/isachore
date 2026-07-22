@@ -28,6 +28,7 @@ export function makeUser(overrides: Partial<User> = {}): User {
     theme: null,
     accent_color: null,
     language: null,
+    two_factor_enabled: false,
     ...overrides,
   }
 }

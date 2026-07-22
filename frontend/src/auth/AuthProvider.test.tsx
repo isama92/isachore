@@ -9,13 +9,14 @@ import { jsonResponse, mockFetch } from '../test/utils'
 import { makeMe, makeUser } from '../test/fixtures'
 
 function Harness() {
-  const { user, impersonating, loading, login, logout, refresh } = useAuth()
+  const { user, impersonating, loading, login, verifyTwoFactor, logout, refresh } = useAuth()
   return (
     <div>
       <span data-testid="loading">{String(loading)}</span>
       <span data-testid="user">{user ? user.email : 'none'}</span>
       <span data-testid="impersonating">{String(impersonating)}</span>
       <button onClick={() => void login('a@example.com', 'password12345', true)}>login</button>
+      <button onClick={() => void verifyTwoFactor('123456')}>verify</button>
       <button onClick={() => void logout()}>logout</button>
       <button onClick={() => void refresh()}>refresh</button>
     </div>
@@ -73,7 +74,11 @@ describe('AuthProvider', () => {
   it('login posts credentials and sets the user', async () => {
     const fetchMock = mockFetch([
       { path: '/api/v1/auth/me', status: 401, body: { detail: 'x' } },
-      { path: '/api/v1/auth/login', method: 'POST', body: makeUser({ email: 'a@example.com' }) },
+      {
+        path: '/api/v1/auth/login',
+        method: 'POST',
+        body: { two_factor_required: false, user: makeUser({ email: 'a@example.com' }) },
+      },
     ])
     renderProvider()
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'))
@@ -93,6 +98,33 @@ describe('AuthProvider', () => {
         }),
       }),
     )
+  })
+
+  it('a 2FA-required login does not sign in until the code is verified', async () => {
+    mockFetch([
+      { path: '/api/v1/auth/me', status: 401, body: { detail: 'x' } },
+      {
+        path: '/api/v1/auth/login',
+        method: 'POST',
+        body: { two_factor_required: true, user: null },
+      },
+      {
+        path: '/api/v1/auth/verify-2fa',
+        method: 'POST',
+        body: makeUser({ email: 'a@example.com' }),
+      },
+    ])
+    renderProvider()
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'))
+
+    // Password step succeeds but 2FA is required, so no user yet.
+    await userEvent.click(screen.getByText('login'))
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'))
+    expect(screen.getByTestId('user')).toHaveTextContent('none')
+
+    // Verifying the code completes the login.
+    await userEvent.click(screen.getByText('verify'))
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('a@example.com'))
   })
 
   it('logout clears the user', async () => {

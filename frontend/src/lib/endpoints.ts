@@ -18,6 +18,7 @@ export const endpoints = {
   auth: {
     me: `${V1}/auth/me`,
     login: `${V1}/auth/login`,
+    verifyTwoFactor: `${V1}/auth/verify-2fa`,
     logout: `${V1}/auth/logout`,
     stopImpersonating: `${V1}/auth/stop-impersonating`,
   },
@@ -27,6 +28,14 @@ export const endpoints = {
   profile: {
     root: `${V1}/profile`,
     avatar: `${V1}/profile/avatar`,
+    // Two-factor auth management, all POST (setup returns the QR/secret;
+    // confirm/recoveryCodes return the one-time codes; disable needs a code).
+    twoFactor: {
+      setup: `${V1}/profile/2fa/setup`,
+      confirm: `${V1}/profile/2fa/confirm`,
+      recoveryCodes: `${V1}/profile/2fa/recovery-codes`,
+      disable: `${V1}/profile/2fa/disable`,
+    },
   },
 
   chores: {
@@ -76,6 +85,7 @@ export const endpoints = {
     byId: (id: Id) => `${V1}/users/${id}`,
     impersonate: (id: Id) => `${V1}/users/${id}/impersonate`,
     resendConfirmation: (id: Id) => `${V1}/users/${id}/resend-confirmation`,
+    resetTwoFactor: (id: Id) => `${V1}/users/${id}/reset-2fa`,
   },
 
   settings: {
