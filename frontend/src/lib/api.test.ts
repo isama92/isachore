@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest'
-import { api, ApiError } from './api'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { api, ApiError, setUnauthorizedHandler } from './api'
 import { jsonResponse } from '../test/utils'
 
 describe('api wrapper', () => {
@@ -129,5 +129,54 @@ describe('api wrapper', () => {
     expect(err).toBeInstanceOf(Error)
     expect(err.status).toBe(403)
     expect(err.message).toBe('Admin only')
+  })
+})
+
+describe('unauthorized signal', () => {
+  // The handler is module-level state, so clear it after each case to stop it
+  // leaking into the next test (or into other files).
+  afterEach(() => setUnauthorizedHandler(null))
+
+  it('invokes the registered handler on a 401 and still throws ApiError(401)', async () => {
+    const onUnauthorized = vi.fn()
+    setUnauthorizedHandler(onUnauthorized)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(401, { detail: 'Expired' })))
+
+    await expect(api.get('/api/v1/thing')).rejects.toMatchObject({ status: 401 })
+    expect(onUnauthorized).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not invoke the handler on non-401 errors (403, 500)', async () => {
+    const onUnauthorized = vi.fn()
+    setUnauthorizedHandler(onUnauthorized)
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(403, { detail: 'Admin only' })))
+    await expect(api.get('/api/v1/thing')).rejects.toMatchObject({ status: 403 })
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })))
+    await expect(api.get('/api/v1/thing')).rejects.toMatchObject({ status: 500 })
+
+    expect(onUnauthorized).not.toHaveBeenCalled()
+  })
+
+  it('invokes the handler when an upload gets a 401', async () => {
+    const onUnauthorized = vi.fn()
+    setUnauthorizedHandler(onUnauthorized)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(401, { detail: 'Expired' })))
+
+    await expect(api.upload('/api/v1/profile/avatar', 'PUT', new FormData())).rejects.toMatchObject(
+      { status: 401 },
+    )
+    expect(onUnauthorized).toHaveBeenCalledTimes(1)
+  })
+
+  it('stops invoking the handler once it is unregistered', async () => {
+    const onUnauthorized = vi.fn()
+    setUnauthorizedHandler(onUnauthorized)
+    setUnauthorizedHandler(null)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(401, { detail: 'Expired' })))
+
+    await expect(api.get('/api/v1/thing')).rejects.toMatchObject({ status: 401 })
+    expect(onUnauthorized).not.toHaveBeenCalled()
   })
 })

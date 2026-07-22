@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { toast } from 'sonner'
 import AuthProvider from './AuthProvider'
 import { useAuth } from './useAuth'
+import { api } from '../lib/api'
 import ThemeProvider from '../theme/ThemeProvider'
 import i18n from '../i18n/i18n'
 import { jsonResponse, mockFetch } from '../test/utils'
@@ -19,6 +21,7 @@ function Harness() {
       <button onClick={() => void verifyTwoFactor('123456')}>verify</button>
       <button onClick={() => void logout()}>logout</button>
       <button onClick={() => void refresh()}>refresh</button>
+      <button onClick={() => void api.get('/api/v1/thing').catch(() => {})}>fetch</button>
     </div>
   )
 }
@@ -202,5 +205,58 @@ describe('AuthProvider', () => {
     expect(localStorage.getItem('isachore-accent')).toBeNull()
     expect(i18n.language).toBe('en')
     expect(localStorage.getItem('isachore-language')).toBeNull()
+  })
+
+  it('clears auth state and toasts when an API call 401s mid-session', async () => {
+    const toastSpy = vi.spyOn(toast, 'info')
+    mockFetch([
+      { path: '/api/v1/auth/me', body: makeMe({ email: 'a@example.com', impersonating: true }) },
+      { path: '/api/v1/thing', status: 401, body: { detail: 'Session expired' } },
+    ])
+    renderProvider()
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('a@example.com'))
+    expect(screen.getByTestId('impersonating')).toHaveTextContent('true')
+
+    // A data call whose session has expired mid-use returns 401.
+    await userEvent.click(screen.getByText('fetch'))
+
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('none'))
+    expect(screen.getByTestId('impersonating')).toHaveTextContent('false')
+    expect(toastSpy).toHaveBeenCalledWith('Your session has expired. Please sign in again.', {
+      id: 'session-expired',
+    })
+  })
+
+  it('ignores a 401 when there is no active session (pre-auth)', async () => {
+    const toastSpy = vi.spyOn(toast, 'info')
+    const fetchMock = mockFetch([
+      { path: '/api/v1/auth/me', status: 401, body: { detail: 'x' } },
+      { path: '/api/v1/thing', status: 401, body: { detail: 'x' } },
+    ])
+    renderProvider()
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'))
+    expect(screen.getByTestId('user')).toHaveTextContent('none')
+
+    await userEvent.click(screen.getByText('fetch'))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/thing', expect.anything()))
+
+    // The gate short-circuits: no user, so no toast and no spurious redirect.
+    expect(screen.getByTestId('user')).toHaveTextContent('none')
+    expect(toastSpy).not.toHaveBeenCalled()
+  })
+
+  it('unregisters the expiry handler on unmount', async () => {
+    const toastSpy = vi.spyOn(toast, 'info')
+    mockFetch([{ path: '/api/v1/auth/me', body: makeMe({ email: 'a@example.com' }) }])
+    const { unmount } = renderProvider()
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('a@example.com'))
+
+    unmount()
+
+    // After unmount the handler is gone, so a later 401 just throws with nothing
+    // reacting to it.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(401, { detail: 'x' })))
+    await expect(api.get('/api/v1/thing')).rejects.toMatchObject({ status: 401 })
+    expect(toastSpy).not.toHaveBeenCalled()
   })
 })

@@ -7,6 +7,16 @@ export class ApiError extends Error {
   }
 }
 
+// The fetch layer knows nothing about React or routing, so on a 401 it invokes
+// whatever handler AuthProvider registers (it owns the auth state and clears it,
+// which lets RequireAuth redirect to /login). A single module-level slot, not an
+// event bus: there is exactly one consumer and it stays trivially testable.
+let onUnauthorized: (() => void) | null = null
+
+export function setUnauthorizedHandler(handler: (() => void) | null) {
+  onUnauthorized = handler
+}
+
 async function handle<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let detail = res.statusText
@@ -18,6 +28,7 @@ async function handle<T>(res: Response): Promise<T> {
     } catch {
       // response body was not JSON; keep the status text
     }
+    if (res.status === 401) onUnauthorized?.()
     throw new ApiError(res.status, detail)
   }
   if (res.status === 204) return undefined as T

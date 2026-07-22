@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { api } from '../lib/api'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { toast } from 'sonner'
+import { api, setUnauthorizedHandler } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
 import type { LoginResponse, Me, User } from '../lib/types'
 import { useTheme } from '../theme/useTheme'
-import { changeLanguage } from '../i18n/i18n'
+import i18n, { changeLanguage } from '../i18n/i18n'
 import { AuthContext } from './context'
 
 export default function AuthProvider({ children }: { children: ReactNode }) {
@@ -11,6 +12,9 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const [impersonating, setImpersonating] = useState(false)
   const [loading, setLoading] = useState(true)
   const { setTheme, setAccent } = useTheme()
+  // Mirrors `user` for the 401 handler so it can read the live session without
+  // being re-created (and re-registered) on every auth change.
+  const userRef = useRef<User | null>(null)
 
   // Adopt the user's saved appearance + language (mirrored into localStorage by
   // setTheme / setAccent / the languageChanged listener). Skip while
@@ -49,6 +53,31 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       cancelled = true
     }
   }, [syncAppearance])
+
+  // Keep the ref in step with the state. A setState-free effect, so it is exempt
+  // from the no-setState-in-effect rule.
+  useEffect(() => {
+    userRef.current = user
+  }, [user])
+
+  // Central reaction to a session that expired mid-use: an API 401 while we
+  // still hold a user clears auth state (RequireAuth then redirects to /login,
+  // preserving the current page for return after re-login) and shows a toast.
+  // Gate on an active session so pre-auth 401s (a failed login, the logged-out
+  // /auth/me probe, verify-2fa) stay no-ops. Use the i18n singleton, not a
+  // captured `t`, so the message is in the current language; the fixed toast id
+  // collapses several simultaneous 401s into one notice.
+  const handleExpiry = useCallback(() => {
+    if (!userRef.current) return
+    setUser(null)
+    setImpersonating(false)
+    toast.info(i18n.t('common.sessionExpired'), { id: 'session-expired' })
+  }, [])
+
+  useEffect(() => {
+    setUnauthorizedHandler(handleExpiry)
+    return () => setUnauthorizedHandler(null)
+  }, [handleExpiry])
 
   const refresh = useCallback(async () => {
     try {

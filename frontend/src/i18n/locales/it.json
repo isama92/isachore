@@ -15,7 +15,8 @@
     "remove": "Rimuovi {{name}}",
     "errorTitle": "Qualcosa è andato storto.",
     "errorHint": "Impossibile caricare la pagina. Ricarica.",
-    "reload": "Ricarica"
+    "reload": "Ricarica",
+    "sessionExpired": "La tua sessione è scaduta. Accedi di nuovo."
   },
   "table": {
     "rowsPerPage": "Righe per pagina",

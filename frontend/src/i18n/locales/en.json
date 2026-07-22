@@ -15,7 +15,8 @@
     "remove": "Remove {{name}}",
     "errorTitle": "Something went wrong.",
     "errorHint": "The page failed to load. Please reload.",
-    "reload": "Reload"
+    "reload": "Reload",
+    "sessionExpired": "Your session has expired. Please sign in again."
   },
   "table": {
     "rowsPerPage": "Rows per page",
