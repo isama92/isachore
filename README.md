@@ -106,6 +106,11 @@ mkdir -p volumes/certs && openssl req -x509 -newkey rsa:2048 -nodes \
   -days 365 -subj "/CN=localhost"
 ```
 
+Note: testing the TLS mode on `localhost` makes your browser pin HSTS for
+`localhost` for two years, which can force other local HTTP projects on
+`localhost` to HTTPS and break them. Prefer a throwaway hostname, or clear it
+afterwards at `chrome://net-internals/#hsts` ("Delete domain": localhost).
+
 One-time setup for the lint git hook:
 
 ```bash
