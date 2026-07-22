@@ -167,11 +167,9 @@ The app is organised into four areas (context for future work):
 - **Chores management**: manage the household's chores.
 - **Tags management**: create, edit and delete tags.
 
-- [ ] if one persone mark a task as done, the other person see it live (websocket)
+- [ ] if one person mark a task as done, the other person see it live (websocket)
 - [ ] CI (lint + test on push)
-- [ ] Prod deploy hardening (TLS, real secrets management, DB backups)
-- [ ] API keys for mobile / 3rd-party clients (reuse `auth_tokens` via `Authorization: Bearer`)
-- [ ] API docs
+- [ ] Prod deploy hardening (TLS, real secrets management)
 - [ ] chores changes log (see who changed the chores)
 
 Design mockups live in `../isachore-design/` (login = variant 1a).
