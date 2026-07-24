@@ -195,11 +195,16 @@ Then set:
   interpolates the former into the `db` service, and the backend authenticates
   with the latter.
 - `APP_KEY` to a freshly generated key:
-  `docker compose -f compose.prod.tls.yml run --rm backend python -m app.cli generate-key`.
-  Always pass the mode file: compose only auto-discovers `compose.yml`, so a bare
-  `docker compose` either finds nothing in a deploy directory or starts the dev
-  stack in a checkout. Required for two-factor auth; a 2FA-enrolled user cannot
-  log in without it.
+  `docker compose -f compose.prod.tls.yml run --rm --no-deps backend python -m app.cli generate-key`.
+  Required for two-factor auth; a 2FA-enrolled user cannot log in without it. Two
+  flags earn their place here. Always pass the mode file, because compose only
+  auto-discovers `compose.yml`, so a bare `docker compose` either finds nothing in
+  a deploy directory or starts the dev stack in a checkout. And `--no-deps`,
+  because `run` otherwise starts `db` first and Postgres initialises its data
+  directory with whatever `POSTGRES_PASSWORD` is in `.env` *at that moment* —
+  still the placeholder, if you are generating the key before setting the
+  password. The real password would then never authenticate, and only wiping
+  `./volumes/db` would clear it. `generate-key` needs no database at all.
 - `APP_BASE_URL` to your real public HTTPS origin (used to build email links).
 - SMTP values if you want account confirmation or the test-email button.
 
@@ -222,9 +227,12 @@ that is refusing to serve. Use `run --rm` rather than `exec`, since there is no
 healthy container to exec into:
 
 ```bash
-docker compose -f compose.prod.tls.yml run --rm backend python -m app.cli generate-key
+docker compose -f compose.prod.tls.yml run --rm --no-deps backend python -m app.cli generate-key
 docker compose -f compose.prod.tls.yml run --rm backend alembic upgrade head
 ```
+
+(`--no-deps` on the first only: a key needs no database, whereas the migration
+obviously does.)
 
 Then, inside the running stack, run migrations and create the first admin (same
 commands as dev, they are required here too). Use the same compose file you
