@@ -62,7 +62,7 @@ app.include_router(api_router, prefix="/api/v1")
 # about where or when it was taken.
 #
 # Note this does NOT lean on Referrer-Policy, despite that header being set
-# (frontend/nginx-common.conf, prod only): an avatar URL appears solely as an
+# (docker/nginx/nginx-common.conf, prod only): an avatar URL appears solely as an
 # <img src>, and a Referer carries the referring document's URL, never a
 # subresource's, so the header only covers opening the image as a document and
 # then following an off-site link from it.

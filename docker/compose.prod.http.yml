@@ -1,14 +1,15 @@
 # Plain HTTP on :80, no TLS. Self-contained: run it on its own, no base file.
-#   docker compose -f compose.prod.http.yml up -d --build
+#   docker compose -f compose.prod.http.yml up -d
+# Needs no repo checkout: the app images are pulled from GHCR. Copy this file and
+# a .env next to each other on the host, and run it from that directory.
+#   Upgrade with: docker compose -f compose.prod.http.yml pull && ... up -d
 # For a local smoke test or a fully trusted private network ONLY -- never expose
 # this directly to the internet. For real deployments terminate TLS with
 # compose.prod.tls.yml (nginx does it) or put isachore behind a TLS-terminating
 # proxy (see compose.prod.traefik.yml).
 services:
   backend:
-    build:
-      context: ./backend
-      target: prod
+    image: ghcr.io/isama92/isachore-backend:latest
     env_file: .env
     environment:
       # Explicit so the prod stack is always marked prod regardless of .env (overrides
@@ -61,9 +62,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    build:
-      context: ./frontend
-      target: prod
+    image: ghcr.io/isama92/isachore-frontend:latest
     ports:
       - "80:80"
     # nginx starts as root to bind the privileged port and to hand its workers

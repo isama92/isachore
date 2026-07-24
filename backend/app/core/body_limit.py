@@ -1,7 +1,7 @@
 """App-level cap on the size of any request body.
 
 In prod, nginx rejects oversized bodies at the edge (client_max_body_size in
-frontend/nginx-common.conf; keep the two limits in sync). This middleware is
+docker/nginx/nginx-common.conf; keep the two limits in sync). This middleware is
 defence in depth for a deployment that exposes the backend directly: Starlette
 spools an entire multipart body (memory, then temp files) before a handler's
 own size check ever runs, so without a transport-level bound a client could

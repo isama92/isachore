@@ -36,9 +36,21 @@ and the non-obvious gotchas.
   react-router 8, npm. UI built on shadcn/ui (radix-nova style, Radix UI); owned
   component code in `src/components/ui/`.
 - **DB**: PostgreSQL 18. **Redis** backs login rate limiting (reachable only as
-  `redis:6379` on the compose network, not published to the host). **Docker** for
-  dev and prod (multi-stage Dockerfiles, `compose.yml` dev / one self-contained
-  `compose.prod.<mode>.yml` per prod deployment mode: http / tls / traefik).
+  `redis:6379` on the compose network, not published to the host).
+- **Docker** (`docker/`): everything Docker-related except the dev compose file,
+  which stays at the root as `compose.yml` because it is the everyday entry point.
+  `docker/` holds `backend.Dockerfile` and `frontend.Dockerfile` (multi-stage),
+  `nginx/` (the three nginx configs), and one self-contained
+  `compose.prod.<mode>.yml` per prod deployment mode: http / tls / traefik.
+- **CI** (`.github/workflows/`): `ci.yml` (ruff + pytest + eslint + prettier +
+  `tsc -b` + vitest + a no-push build of both prod images) runs on pull requests
+  and is *called* by `publish.yml`, which on every push to `main` pushes
+  `ghcr.io/isama92/isachore-{backend,frontend}:latest`. `ci.yml` deliberately has
+  no `push` trigger, or every `main` commit would run it twice. One-time manual
+  step, not scriptable: GHCR packages are created **private** on first publish and
+  inherit nothing from repo visibility, so both must be flipped to public
+  (Packages > package > settings) or every `docker compose pull` in README.md's
+  Production section fails with `denied`.
 
 ## Commands
 
@@ -64,6 +76,34 @@ pre-commit run --all-files                           # what the git hook runs
 
 - API lives under `/api/v1`, JSON only. Routers in `backend/app/api/v1/`,
   registered in `router.py`.
+- **Docker layout / prod is pull-only**: `compose.yml` is the ONLY file with
+  `build:` blocks; the prod mode files carry `image:` and nothing else, so a
+  deployment is a compose file, a `.env` and a `docker compose pull` with no repo
+  checkout on the host. Never add `build:` back to a prod mode file: on a server
+  there is no `./backend` to build from, so `up -d` would fail confusingly.
+  Three coupled details:
+  - Build **contexts stay `./backend` and `./frontend`** even though the
+    Dockerfiles moved, because every `COPY`/`--mount=source=` inside them is
+    context-relative. Only a `dockerfile: ../docker/<name>.Dockerfile` was added
+    (a relative `dockerfile` resolves from the context). The `.dockerignore`
+    files stay beside the contexts too, which is where Docker looks for them.
+  - The frontend prod stage takes its nginx configs from the **`nginxconf` named
+    build context** (`docker/nginx`), not the build context. Any compose block or
+    `docker build` that targets `prod` needs
+    `additional_contexts: {nginxconf: ./docker/nginx}` / `--build-context
+    nginxconf=./docker/nginx`, or `COPY --from=nginxconf` degrades into trying to
+    pull an image called `nginxconf`. It is declared on the dev block too for
+    exactly that reason.
+  - `nginx.tls.conf` is baked to `/etc/nginx/modes/tls.conf`, where it is inert
+    (nginx only auto-includes `conf.d/*.conf`), *and* bind-mounted by the tls mode
+    from beside the compose file. The baked copy exists so an operator can extract
+    the version matching their image; if you change that conf, keep both the
+    Dockerfile path and the compose bind mount in step.
+- Relative paths in a prod mode file (`.env`, `./volumes/db`, `./nginx.tls.conf`)
+  resolve against **the compose file's own directory**, not the repo root. Running
+  one from the repo therefore wants a `docker/.env` (already gitignored) and
+  creates `docker/volumes/`; `.gitignore`'s `volumes/` entry is unanchored so that
+  cannot be committed.
 - Config via `app/core/config.py` (pydantic-settings, env vars from `.env`). In
   compose the DB host is `db`; the code default targets `localhost` for host-side
   tooling. `DATABASE_URL` must use the `postgresql+asyncpg://` scheme.
@@ -222,6 +262,11 @@ the negative paths (401/403/400/404/409), not just the happy one.
 - Changing `POSTGRES_*` in `.env` after first boot needs `docker compose down -v`.
 - Keep the ruff version in `.pre-commit-config.yaml` (`ruff-pre-commit` rev) in
   sync with the ruff dev dependency in `backend/pyproject.toml`.
+- `.github/workflows/ci.yml` restates two toolchain versions that the Dockerfiles
+  own: uv (`docker/backend.Dockerfile`'s `ghcr.io/astral-sh/uv` tag) and node
+  (`docker/frontend.Dockerfile`'s base image). CI installs them directly rather
+  than running the suites inside the images, so bumping either Dockerfile means
+  bumping `ci.yml` too or CI silently tests on a different toolchain.
 - Never commit `.env`. Two templates, both committed: `.env.example.dev` (dev,
   ready to run) and `.env.example` (the prod reference, placeholders only). Note
   `.gitignore`'s `.env.*` line means any further template needs its own `!`
@@ -265,9 +310,15 @@ the negative paths (401/403/400/404/409), not just the happy one.
   `app.openapi()['paths']`, not `app.routes`.
 - Alembic files generated inside the container are root-owned on the host:
   `docker compose exec backend chown -R $(id -u):$(id -g) alembic/versions`.
-- To smoke-test prod compose without touching the running dev stack, use a
-  separate project name and a mode file: `docker compose -f compose.prod.http.yml
-  -p isachore-prod up --build -d` (and `down -v` afterwards).
+- Smoke-testing prod compose no longer builds anything: the mode files pull
+  `:latest` from GHCR, so what you test is the last merge to `main`, not your
+  working tree. Use a separate project name and a `docker/.env`, then
+  `docker compose -f docker/compose.prod.http.yml -p isachore-prod up -d` (and
+  `down -v` afterwards). To exercise a prod *Dockerfile* change before it is
+  published, build it directly instead of through compose:
+  `docker build -f docker/frontend.Dockerfile --target prod --build-context
+  nginxconf=./docker/nginx ./frontend`. On a PR, `ci.yml`'s `images` job does the
+  same build, so a broken prod Dockerfile fails the PR rather than the publish.
 - Test-infra quirks (handled in the committed setup, don't undo them): coverage
   needs `concurrency = ["greenlet"]` in `pyproject.toml` or async SQLAlchemy
   endpoint bodies read as uncovered; pydantic `EmailStr` rejects `.test` TLDs, so

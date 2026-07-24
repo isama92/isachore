@@ -3,6 +3,5 @@ __pycache__
 *.pyc
 .ruff_cache
 .pytest_cache
-Dockerfile
 # Uploaded files live in a mounted volume at runtime; never bake them into the image.
 storage

@@ -1,0 +1,140 @@
+name: CI
+
+# There is deliberately no `push` trigger: publish.yml calls this workflow for
+# the main-branch run, so adding one here would run every main commit twice.
+# Consequence worth knowing: a push to a branch with no open PR runs nothing.
+on:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (ruff + pytest)
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: isachore
+          POSTGRES_PASSWORD: isachore_ci_password
+          POSTGRES_DB: isachore
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U isachore -d isachore"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Mirrors .env.example.dev, with the DB on localhost rather than the
+      # compose host `db`. Two things are deliberately absent:
+      #   - REDIS_URL: tests/conftest.py overrides get_redis with fakeredis, so
+      #     no Redis service is needed and the default is never dialled.
+      #   - APP_KEY: the autouse _reset_app_key fixture clears it so crypto
+      #     fails closed, and the 2FA tests generate their own key.
+      ENVIRONMENT: test
+      COOKIES_SECURE: "false"
+      DATABASE_URL: postgresql+asyncpg://isachore:isachore_ci_password@localhost:5432/isachore
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          # Keep in sync with the uv version in docker/backend.Dockerfile
+          version: "0.11"
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      # --frozen so a stale uv.lock fails here rather than drifting silently
+      - run: uv sync --frozen
+
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      # Creates its own throwaway isachore_test database off DATABASE_URL; the
+      # service container's POSTGRES_USER is a superuser, so CREATE DATABASE works.
+      - run: uv run pytest
+
+  frontend:
+    name: Frontend (eslint + prettier + tsc + vitest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          # Keep in sync with the node image in docker/frontend.Dockerfile
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      - run: npm run lint
+      - run: npm run format:check
+      # `tsc -b` runs first, which also typechecks the tests via tsconfig.vitest.json
+      - run: npm run build
+      - run: npm run test
+
+  images:
+    name: Docker (compose config + prod image builds)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Schema and interpolation check on all four compose files. It does NOT
+      # stat the Dockerfiles (compose defers `dockerfile:` to build time), so the
+      # real guard on the moved Dockerfiles is the two build steps below.
+      - name: Validate compose files
+        run: |
+          # Both .env files are gitignored, so CI has to supply them: compose
+          # treats a missing env_file as a hard load error, and each prod mode
+          # file reads the .env beside itself, not the repo root's.
+          cp .env.example.dev .env
+          printf 'POSTGRES_USER=ci\nPOSTGRES_PASSWORD=ci\nPOSTGRES_DB=ci\n' > docker/.env
+          docker compose -f compose.yml config -q
+          for mode in http tls traefik; do
+            docker compose -f "docker/compose.prod.$mode.yml" config -q
+          done
+          rm -f .env docker/.env
+
+      # Build without pushing, so a broken prod Dockerfile fails the PR. This is
+      # the only pre-merge check on the prod images: the prod compose files are
+      # pull-only and have no build path.
+      - name: Build backend prod image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: docker/backend.Dockerfile
+          target: prod
+          push: false
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      - name: Build frontend prod image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: docker/frontend.Dockerfile
+          target: prod
+          # The nginx confs configure the image, not the app, so they come from
+          # docker/nginx via a named context rather than the build context.
+          build-contexts: nginxconf=./docker/nginx
+          push: false
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend

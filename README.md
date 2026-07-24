@@ -20,7 +20,7 @@ confirmation.
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS v4, react-router 8, shadcn/ui (Radix) |
 | Database | PostgreSQL 18                                                               |
 | Cache    | Redis (login rate limiting)                                                 |
-| Infra    | Docker for both dev and prod (multi-stage Dockerfiles, compose files)       |
+| Infra    | Docker for both dev and prod. Everything Docker-related lives in `docker/` (multi-stage Dockerfiles, nginx config, the prod compose modes); the dev `compose.yml` stays at the root. Prod pulls prebuilt images from GHCR. |
 
 There is **no self-registration**. The first admin is created with the `init`
 command (see below); every other user is created by an admin in the UI under
@@ -104,35 +104,91 @@ serves the built SPA and reverse-proxies `/api/` to the backend), plus Postgres
 and Redis. Neither the database, Redis, nor the backend publishes a host port;
 only the frontend (nginx) is exposed, and only in the mode file you run.
 
-Each mode is a single self-contained compose file: copy the one you need and run
-it on its own (there is no base file to combine). Pick one of three modes:
+**Nothing is built on the server.** The two app images are built by CI and
+published to GHCR, so a deployment is a compose file, a `.env`, and a pull. You
+do not need a repo checkout, a toolchain, or build capacity on the host:
+
+| Image | Contains |
+| ----- | -------- |
+| `ghcr.io/isama92/isachore-backend:latest` | FastAPI app, its venv, Alembic migrations and the `app.cli` commands |
+| `ghcr.io/isama92/isachore-frontend:latest` | nginx plus the built SPA and the baked nginx config |
+
+Both packages are public, so pulling needs no `docker login`. They are
+`linux/amd64` only: an arm64 host (Raspberry Pi, Graviton, Apple silicon) cannot
+run them as published.
+
+Each mode is a single self-contained compose file from `docker/`: copy the one
+you need onto the host and run it on its own (there is no base file to combine).
+Relative paths inside it, including `.env`, resolve next to the compose file, so
+put each deployment in its own directory. Pick one of three modes:
 
 **1. Behind your own TLS-terminating reverse proxy (recommended).** nginx stays
 on HTTP; your proxy handles TLS, the HTTP to HTTPS redirect, and HSTS.
-`compose.prod.traefik.yml` is a Traefik template: edit the router rule,
-entrypoints, cert resolver, and external network to match your install.
+`docker/compose.prod.traefik.yml` is a Traefik template: edit the router rule,
+entrypoints, cert resolver, and external network to match your install. Needs
+`compose.prod.traefik.yml` and `.env` in the directory.
 
 ```bash
-docker compose -f compose.prod.traefik.yml up -d --build
+docker compose -f compose.prod.traefik.yml up -d
 ```
 
-**2. nginx terminates TLS with your own certificate (no front proxy).** Put
-`fullchain.pem` and `privkey.pem` in `./volumes/certs`, then:
+**2. nginx terminates TLS with your own certificate (no front proxy).** The only
+mode needing more than the compose file and `.env`: put `fullchain.pem` and
+`privkey.pem` in `./volumes/certs`, and place an `nginx.tls.conf` beside the
+compose file. Extract that conf from the image you are about to run rather than
+copying it out of the repo, so the two cannot drift apart:
 
 ```bash
-docker compose -f compose.prod.tls.yml up -d --build
+docker run --rm ghcr.io/isama92/isachore-frontend:latest \
+    cat /etc/nginx/modes/tls.conf > nginx.tls.conf
+docker compose -f compose.prod.tls.yml up -d
 ```
 
-**3. Plain HTTP on :80, for a local smoke test only** (never internet-facing):
+**3. Plain HTTP on :80, for a local smoke test only** (never internet-facing).
+Needs `compose.prod.http.yml` and `.env`:
 
 ```bash
-docker compose -f compose.prod.http.yml up -d --build
+docker compose -f compose.prod.http.yml up -d
 ```
+
+### Upgrading
+
+`latest` moves on every merge to `main`, but nothing on the host follows it until
+you ask. Pull and recreate:
+
+```bash
+docker compose -f compose.prod.tls.yml pull
+docker compose -f compose.prod.tls.yml up -d
+docker compose -f compose.prod.tls.yml exec backend alembic upgrade head
+```
+
+In the TLS mode, re-extract `nginx.tls.conf` after an upgrade if the config
+changed.
+
+And because `latest` is the only published tag, the build you replace becomes
+reachable only by digest, so record it *before* pulling if you want a way back:
+
+```bash
+docker image inspect --format '{{index .RepoDigests 0}}' \
+    ghcr.io/isama92/isachore-backend:latest
+```
+
+To roll back, put that `ghcr.io/...@sha256:...` reference in the mode file's
+`image:` line and run `up -d` again. Note `docker compose images` is not a
+substitute: it reports the local image ID, which pins nothing on another host.
 
 ### Production checklist
 
-Start from `cp .env.example .env` (the production reference, not
-`.env.example.dev`) and set:
+Start from `.env.example`, the production reference (not `.env.example.dev`). It
+is the one file the images cannot hand you, so on a host with no checkout fetch it
+into the deploy directory:
+
+```bash
+curl -fsSL -o .env \
+    https://raw.githubusercontent.com/isama92/isachore/main/.env.example
+```
+
+Then set:
 
 - `POSTGRES_PASSWORD` to a strong secret, and the same password in
   `DATABASE_URL`. These are two independent paths to one credential: compose
@@ -140,9 +196,10 @@ Start from `cp .env.example .env` (the production reference, not
   with the latter.
 - `APP_KEY` to a freshly generated key:
   `docker compose -f compose.prod.tls.yml run --rm backend python -m app.cli generate-key`.
-  Pass the compose file you are deploying, or you will build and start the dev
-  stack instead. Required for two-factor auth; a 2FA-enrolled user cannot log in
-  without it.
+  Always pass the mode file: compose only auto-discovers `compose.yml`, so a bare
+  `docker compose` either finds nothing in a deploy directory or starts the dev
+  stack in a checkout. Required for two-factor auth; a 2FA-enrolled user cannot
+  log in without it.
 - `APP_BASE_URL` to your real public HTTPS origin (used to build email links).
 - SMTP values if you want account confirmation or the test-email button.
 
@@ -203,8 +260,8 @@ OpenSSL's default, which leads with the post-quantum hybrid `X25519MLKEM768`:
 pinning `ssl_ecdh_curve` would replace that list and quietly drop back to
 classical-only key exchange. OCSP stapling is deliberately not enabled either:
 Let's Encrypt stopped serving OCSP in 2025 and no longer puts an OCSP URI in its
-certificates, which makes stapling a no-op; `nginx.tls.conf` documents what to add
-if your CA still publishes it.
+certificates, which makes stapling a no-op; `docker/nginx/nginx.tls.conf`
+documents what to add if your CA still publishes it.
 
 ### Container hardening
 
@@ -230,6 +287,8 @@ a redirect.
 
 <details>
 <summary>Self-signed certificate for testing the TLS mode</summary>
+
+Run this in the deploy directory, beside `compose.prod.tls.yml`:
 
 ```bash
 mkdir -p volumes/certs && openssl req -x509 -newkey rsa:2048 -nodes \
@@ -277,7 +336,15 @@ for production. All are read by `backend/app/core/config.py`, and the ones marke
 ## Commands
 
 Run backend commands inside the container so the `db` host resolves. In prod,
-prefix with the compose file you deployed (e.g. `-f compose.prod.tls.yml`).
+prefix with the compose file you deployed (e.g. `-f compose.prod.tls.yml`) and run
+it from the deploy directory, so the mode file finds the `.env` beside it and, in
+the TLS mode, its `nginx.tls.conf` and certs.
+
+Alembic and `app.cli` are baked into the published backend image, so the setup and
+recovery commands work against a pulled image with no checkout. Two below are
+dev-only and will not work against a prod stack: `alembic revision
+--autogenerate` needs to write into `/app/alembic/versions`, which is on a
+read-only rootfs, and `seed` refuses to run outside a dev environment.
 
 ### Setup and operations
 
@@ -370,6 +437,32 @@ docker compose exec backend uv run pytest --cov=app --cov-report=term-missing --
 cd frontend && npm run test:coverage
 ```
 
+### Continuous integration
+
+Two workflows in `.github/workflows/`:
+
+- **`ci.yml`** runs on every pull request: ruff (`check` and `format --check`)
+  plus pytest against a Postgres service container, eslint, prettier `--check`,
+  `tsc -b` and vitest, and a build of both prod images without pushing. That last
+  job is the only pre-merge check on the Dockerfiles, since the prod compose files
+  are pull-only and have no build path.
+- **`publish.yml`** runs on every push to `main`: it calls `ci.yml` first and
+  pushes to GHCR only if everything passed, so a red commit can never become
+  `:latest`. Images are `linux/amd64`.
+
+`ci.yml` has no `push` trigger of its own (that would run every `main` commit
+twice, once directly and once via `publish.yml`), so pushing a branch with no open
+PR runs nothing.
+
+To reproduce the prod image builds locally, build them directly rather than
+through compose:
+
+```bash
+docker build -f docker/backend.Dockerfile --target prod -t isachore-backend:test ./backend
+docker build -f docker/frontend.Dockerfile --target prod \
+    --build-context nginxconf=./docker/nginx -t isachore-frontend:test ./frontend
+```
+
 ## Contributing
 
 Conventions, architecture notes, and gotchas for working in this codebase live in
@@ -377,8 +470,5 @@ Conventions, architecture notes, and gotchas for working in this codebase live i
 
 ### Roadmap
 
-- [ ] have compose prod files pull images instead of building them
-- [ ] is it possible to have a docker folder with Dockerfile inside?
 - [ ] Live updates when a housemate completes a chore (websocket)
-- [ ] CI (lint + test on push)
 - [ ] Chore change log (who changed what)
