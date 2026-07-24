@@ -12,6 +12,13 @@ and the non-obvious gotchas.
 - Work in small steps; the roadmap in README.md is the backlog (tick items off
   when done). When a requirement is ambiguous or a decision shapes UX or
   architecture, ask before building.
+- **Never commit to `main`.** Branch at the *start* of a step, before the first
+  edit, and always from an updated `main` rather than from whatever branch you are
+  on: `git checkout main && git pull`, then `git checkout -b <name>`. Finish by
+  pushing and opening a PR (`gh pr create`). Beyond review, `ci.yml` only triggers
+  on `pull_request`: work landed straight on `main` skips the lint/test gate, and
+  `publish.yml` publishes `:latest` from it regardless. The git history predates
+  this rule and is mostly direct commits to `main`; do not read that as permission.
 - Every feature ships with tests in the same step: backend endpoints get
   `pytest` cases, frontend components/pages get `vitest` cases, covering the
   negative paths too. Both suites must be green before you commit.
