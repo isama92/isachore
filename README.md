@@ -149,9 +149,20 @@ docker compose -f compose.prod.tls.yml exec backend python -m app.cli init \
 ```
 
 nginx sends security response headers on every response (CSP, X-Frame-Options,
-X-Content-Type-Options, Referrer-Policy, plus HSTS in the TLS-terminating modes)
-and caps request bodies at 6 MB. Uploaded avatars live in a named `storage`
-volume and the database in `./volumes/db`, so both survive restarts.
+X-Content-Type-Options, Referrer-Policy, Permissions-Policy, plus HSTS in the
+TLS-terminating modes), hides its version, and caps request bodies at 6 MB.
+Uploaded avatars live in a named `storage` volume and the database in
+`./volumes/db`, so both survive restarts.
+
+In the TLS mode nginx serves TLS 1.2 and 1.3 with an ECDHE-only, AEAD-only
+cipher list (Mozilla's intermediate profile), so no `dhparam` file is needed, and
+session tickets are off. The key-exchange group list is deliberately left at
+OpenSSL's default, which leads with the post-quantum hybrid `X25519MLKEM768`:
+pinning `ssl_ecdh_curve` would replace that list and quietly drop back to
+classical-only key exchange. OCSP stapling is deliberately not enabled either:
+Let's Encrypt stopped serving OCSP in 2025 and no longer puts an OCSP URI in its
+certificates, which makes stapling a no-op; `nginx.tls.conf` documents what to add
+if your CA still publishes it.
 
 <details>
 <summary>Self-signed certificate for testing the TLS mode</summary>
