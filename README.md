@@ -443,12 +443,16 @@ Two workflows in `.github/workflows/`:
 
 - **`ci.yml`** runs on every pull request: ruff (`check` and `format --check`)
   plus pytest against a Postgres service container, eslint, prettier `--check`,
-  `tsc -b` and vitest, and a build of both prod images without pushing. That last
-  job is the only pre-merge check on the Dockerfiles, since the prod compose files
-  are pull-only and have no build path.
+  `tsc -b` and vitest, and a build of both prod images **without pushing**. That
+  last job is the only pre-merge check on the Dockerfiles, since the prod compose
+  files are pull-only and have no build path. It is skipped on the main-branch run,
+  where `publish.yml` builds the same targets for real.
 - **`publish.yml`** runs on every push to `main`: it calls `ci.yml` first and
   pushes to GHCR only if everything passed, so a red commit can never become
   `:latest`. Images are `linux/amd64`.
+
+Nothing is published from a pull request, however many times you push to it: the
+PR build is validation only, and `:latest` moves exactly once per merge.
 
 `ci.yml` has no `push` trigger of its own (that would run every `main` commit
 twice, once directly and once via `publish.yml`), so pushing a branch with no open

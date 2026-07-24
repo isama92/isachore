@@ -43,8 +43,9 @@ and the non-obvious gotchas.
   `nginx/` (the three nginx configs), and one self-contained
   `compose.prod.<mode>.yml` per prod deployment mode: http / tls / traefik.
 - **CI** (`.github/workflows/`): `ci.yml` (ruff + pytest + eslint + prettier +
-  `tsc -b` + vitest + a no-push build of both prod images) runs on pull requests
-  and is *called* by `publish.yml`, which on every push to `main` pushes
+  `tsc -b` + vitest, plus a no-push build of both prod images that runs on pull
+  requests ONLY, since on the merge path publish.yml's own build is the gate)
+  runs on pull requests and is *called* by `publish.yml`, which on push to `main` pushes
   `ghcr.io/isama92/isachore-{backend,frontend}:latest`. `ci.yml` deliberately has
   no `push` trigger, or every `main` commit would run it twice. One-time manual
   step, not scriptable: GHCR packages are created **private** on first publish and

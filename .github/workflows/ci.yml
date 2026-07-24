@@ -92,6 +92,12 @@ jobs:
   images:
     name: Docker (compose config + prod image builds)
     runs-on: ubuntu-latest
+    # Pull requests only. On the main-branch run this job would be pure
+    # duplication: publish.yml builds the very same targets to push them, and if
+    # that build fails nothing is published, so it is already its own gate.
+    # `github.event_name` is the ORIGINAL trigger even when called via
+    # workflow_call, so this is `push` on the merge path and skips correctly.
+    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v5
 
