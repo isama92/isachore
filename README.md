@@ -164,6 +164,28 @@ Let's Encrypt stopped serving OCSP in 2025 and no longer puts an OCSP URI in its
 certificates, which makes stapling a no-op; `nginx.tls.conf` documents what to add
 if your CA still publishes it.
 
+### Container hardening
+
+Every prod service runs with `no-new-privileges` and all Linux capabilities
+dropped, keeping back only what each image demonstrably needs (nginx: binding
+:80/:443 and chowning the temp dirs it hands to its worker user; Postgres:
+chowning its data dir before dropping privileges; Redis: only the privilege drop;
+the backend: nothing at all). The backend and nginx also run on a read-only root
+filesystem, with tmpfs mounts for the paths they genuinely write: `/tmp` for the
+backend (multipart uploads spool there) and nginx's temp dirs and pid file. A
+consequence worth knowing: inside a running backend or frontend container you can
+only write to `/tmp` and, in the backend, `/app/storage`.
+
+Both web-tier services have healthchecks, and on `docker compose up` `frontend`
+waits for `backend` to be *healthy* rather than merely started, so nginx does not
+answer 502s while the backend is still booting. Two limits worth knowing: plain
+Compose does not restart an unhealthy container (only Swarm acts on health), and a
+host reboot brings containers back through the restart policy, which ignores
+`depends_on` ordering. So the healthchecks give you an accurate
+`docker compose ps` plus that one readiness gate, not self-healing. `/healthz` on
+the frontend is the probe target, a static `ok` that needs neither the backend nor
+a redirect.
+
 <details>
 <summary>Self-signed certificate for testing the TLS mode</summary>
 

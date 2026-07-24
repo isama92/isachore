@@ -19,6 +19,10 @@ services:
       # Force Secure auth cookies in prod regardless of .env; Traefik terminates
       # TLS before the browser.
       COOKIES_SECURE: "true"
+      # Tidiness, not a fix: an unwritable __pycache__ is non-fatal to CPython,
+      # but with /app read-only there is no point retrying the writes on every
+      # import. (The venv's bytecode is already compiled into the image.)
+      PYTHONDONTWRITEBYTECODE: "1"
     volumes:
       # Named volume, not a host bind mount: the image creates /app/storage owned
       # by the non-root `app` user, and a named volume inherits that ownership on
@@ -26,11 +30,35 @@ services:
       # root-owned, which the app user cannot write to (the process would crash on
       # boot creating storage/avatars).
       - storage:/app/storage
+    # The image already runs as the non-root `app` user and listens on 8000, so
+    # it needs no Linux capabilities at all. Everything it writes is either the
+    # storage volume above or /tmp below.
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      # Required, not cosmetic: Starlette spools multipart bodies over ~1 MB to
+      # disk, so avatar uploads fail on a read-only rootfs without this.
+      - /tmp:size=64m,mode=1777
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # Readiness signal for `docker compose ps` and for the frontend's
+    # depends_on below. It does NOT self-heal: plain Compose never restarts an
+    # unhealthy container (only Swarm acts on health), and `restart` reacts to
+    # the process exiting. python:3.13-slim ships no curl or wget, hence the
+    # stdlib probe; urlopen raises on the 503 the endpoint returns when
+    # Postgres is unreachable.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
   frontend:
@@ -52,8 +80,42 @@ services:
       - "traefik.http.routers.isachore.entrypoints=websecure"
       - "traefik.http.routers.isachore.tls.certresolver=letsencrypt"
       - "traefik.http.services.isachore.loadbalancer.server.port=80"
+    # nginx starts as root to bind port 80 inside the container (still a
+    # privileged port, even unpublished) and to hand its workers to the `nginx`
+    # user, so it keeps exactly those capabilities and no more. CHOWN is
+    # load-bearing: the master chowns the temp dirs it creates on the tmpfs
+    # below to the worker uid, which is what lets nginx buffer a large request
+    # body to disk.
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - CHOWN
+      - SETGID
+      - SETUID
+    read_only: true
+    tmpfs:
+      # The only paths nginx writes: its temp dirs and its pid file. Everything
+      # else stays read-only, including /etc/nginx - which is why the image's
+      # ipv6 entrypoint script logs one harmless "can not modify
+      # /etc/nginx/conf.d/default.conf (read-only file system?)" info line on
+      # every start. No /tmp: nothing in this image uses it, and a writable
+      # tmpfs in the internet-facing container is exactly what read_only removes.
+      - /var/cache/nginx
+      - /var/run
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     depends_on:
-      - backend
+      # Readiness, not just start, so nginx cannot answer 502s while the backend
+      # is still booting. Costs a few seconds of downtime on a cold start.
+      backend:
+        condition: service_healthy
     restart: unless-stopped
 
   db:
@@ -64,6 +126,20 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - ./volumes/db:/var/lib/postgresql
+    # The entrypoint starts as root to chown the (root-owned) bind-mounted data
+    # dir, then drops to the postgres user, so it keeps just those capabilities.
+    # No read_only: Postgres writes sockets and lock files outside its data dir,
+    # and a wrong tmpfs set would surface at the worst possible moment.
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
@@ -74,6 +150,16 @@ services:
 
   redis:
     image: redis:8-alpine
+    # Root only long enough to drop to the redis user. No CHOWN: /data is
+    # already redis-owned in the image and this stack mounts nothing there. Add
+    # CHOWN back if you ever bind-mount a host directory onto /data.
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
