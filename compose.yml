@@ -6,7 +6,7 @@ services:
     env_file: .env
     # Every dev port is published on the loopback interfaces only, never on the
     # LAN: this stack runs with the documented placeholder credentials from
-    # .env.example. Both families are listed because a bare "127.0.0.1:" prefix
+    # .env.example.dev. Both families are listed because a bare "127.0.0.1:" prefix
     # would stop publishing on IPv6, leaving tooling that resolves localhost to
     # ::1 without a listener. (On a host with IPv6 disabled entirely, drop the
     # [::1] lines: publishing them fails.) Nothing in the app depends on these

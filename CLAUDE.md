@@ -66,6 +66,14 @@ pre-commit run --all-files                           # what the git hook runs
 - Config via `app/core/config.py` (pydantic-settings, env vars from `.env`). In
   compose the DB host is `db`; the code default targets `localhost` for host-side
   tooling. `DATABASE_URL` must use the `postgresql+asyncpg://` scheme.
+- **Startup config check** (I1): `app/core/startup.py` refuses to boot outside a
+  dev environment (`DEV_ENVIRONMENTS` in `config.py`) on an unusable `APP_KEY`,
+  `COOKIES_SECURE=false`, or a known-bad `DATABASE_URL` password. Enforced from
+  the `lifespan` in `main.py`, deliberately NOT as a `Settings` validator: the
+  settings singleton is built at import time by every process, so a validator
+  would also break `pytest` and `python -m app.cli`, including the commands
+  needed to repair the deploy it rejected. Add new invariants to
+  `check_startup_config()` (pure, returns a list of problems) rather than inline.
 - Models live in `app/models/` and inherit from `app.db.base.Base` (naming
   convention for Alembic autogenerate). Re-export new models from
   `app/models/__init__.py`: that import is what registers them on
@@ -204,13 +212,16 @@ the negative paths (401/403/400/404/409), not just the happy one.
 - Changing `POSTGRES_*` in `.env` after first boot needs `docker compose down -v`.
 - Keep the ruff version in `.pre-commit-config.yaml` (`ruff-pre-commit` rev) in
   sync with the ruff dev dependency in `backend/pyproject.toml`.
-- Never commit `.env`; dev-only placeholder credentials belong in `.env.example`.
-  No real secrets, credentials, or production hostnames anywhere in the repo.
+- Never commit `.env`. Two templates, both committed: `.env.example.dev` (dev,
+  ready to run) and `.env.example` (the prod reference, placeholders only). Note
+  `.gitignore`'s `.env.*` line means any further template needs its own `!`
+  negation or it is silently never committed. No real secrets, credentials, or
+  production hostnames anywhere in the repo.
 - Auth cookies get the `Secure` flag by default (fail-closed). Local dev is plain
-  HTTP, so set `COOKIES_SECURE=false` in the dev `.env` or login cookies won't be
-  sent. Leave it unset/true in production (which must terminate TLS).
-  `ENVIRONMENT` is an informational deployment marker and does not control cookie
-  security.
+  HTTP, so `COOKIES_SECURE=false` (already set in `.env.example.dev`) or login
+  cookies won't be sent. Leave it unset/true in production (which must terminate
+  TLS). `ENVIRONMENT` does not control cookie security; it gates the dev-only
+  `seed` command and the startup check below.
 - eslint-plugin-react-hooks v7 (`set-state-in-effect`): never call a
   state-setting function synchronously in a `useEffect` body; do data loading with
   promise chains where setState happens only inside `.then/.catch/.finally` (see

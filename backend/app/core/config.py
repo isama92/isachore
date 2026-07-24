@@ -1,14 +1,21 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Environment markers that count as "a developer's machine". Anything else reads
+# as a real deployment, which is fail-safe: an unset ENVIRONMENT defaults to
+# "prod" and a typo like "prood" lands on the strict side. Two things gate on
+# this: the destructive `python -m app.cli seed` (refuses to run outside it) and
+# the prod boot check in app/core/startup.py (I1, only runs outside it).
+DEV_ENVIRONMENTS = frozenset({"dev", "development", "local", "test", "testing"})
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # Deployment marker (e.g. "dev" / "prod"). Informational only; cookie
-    # security is controlled by cookies_secure below, not by this value. Defaults
-    # to "prod" so an unconfigured deploy fails safe: `python -m app.cli seed`
-    # only runs on a dev-like value (dev/development/local/test/testing), so dev
-    # and test opt in explicitly (dev compose reads it from .env).
+    # Deployment marker (e.g. "dev" / "prod"). Cookie security is controlled by
+    # cookies_secure below, not by this value. Defaults to "prod" so an
+    # unconfigured deploy fails safe: it gates the dev-only `seed` command and
+    # the startup config check (see DEV_ENVIRONMENTS above), so dev and test opt
+    # out explicitly (dev compose reads it from .env).
     environment: str = "prod"
 
     # Auth cookies get the Secure flag (HTTPS only) by default, so a deploy that
@@ -17,13 +24,14 @@ class Settings(BaseSettings):
     cookies_secure: bool = True
 
     # Symmetric key for encrypting secrets at rest (a urlsafe-base64 Fernet key;
-    # generate with `python -c "from cryptography.fernet import Fernet;
-    # print(Fernet.generate_key().decode())"`). General-purpose, consumed via
-    # app/core/crypto.py; the first user is 2FA (the TOTP seed must be
-    # recoverable, so it is encrypted rather than hashed). Optional at boot so
-    # the app runs without it, but anything that needs encryption fails closed
-    # when it is unset. Rotating this key strands data encrypted under the old
-    # one (e.g. every enrolled 2FA user) unless key rotation is added later.
+    # generate with `python -m app.cli generate-key`). General-purpose, consumed
+    # via app/core/crypto.py; the first user is 2FA (the TOTP seed must be
+    # recoverable, so it is encrypted rather than hashed). Optional in a dev
+    # environment, where anything needing encryption fails closed while it is
+    # unset; REQUIRED outside one, where a missing or malformed key refuses boot
+    # (I1, app/core/startup.py) rather than silently locking out every enrolled
+    # 2FA user. Rotating this key strands data encrypted under the old one unless
+    # key rotation is added later.
     app_key: str | None = None
 
     # Default targets localhost for host-side tooling; docker compose overrides
@@ -110,3 +118,10 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def is_dev_environment() -> bool:
+    """Whether the deployment marker names a developer machine (see
+    DEV_ENVIRONMENTS). Fail-safe: an unrecognised value reads as a real
+    deployment."""
+    return settings.environment.lower() in DEV_ENVIRONMENTS

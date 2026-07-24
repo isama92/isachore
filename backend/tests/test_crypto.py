@@ -2,7 +2,7 @@ import pytest
 from cryptography.fernet import Fernet, InvalidToken
 
 from app.core.config import settings
-from app.core.crypto import crypto_configured, decrypt, encrypt
+from app.core.crypto import crypto_configured, decrypt, encrypt, generate_key
 
 # A throwaway key generated per test run; never a real secret.
 _KEY = Fernet.generate_key().decode()
@@ -64,6 +64,19 @@ def test_decrypt_rejects_garbage_ciphertext(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(settings, "app_key", _KEY)
     with pytest.raises(InvalidToken):
         decrypt("not-a-real-token")
+
+
+def test_generate_key_produces_a_usable_app_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    # What `python -m app.cli generate-key` prints must satisfy the same check
+    # the startup gate (I1) and the 2FA gates use, or the documented fix for a
+    # boot refusal would not actually fix it.
+    monkeypatch.setattr(settings, "app_key", generate_key())
+    assert crypto_configured() is True
+    assert decrypt(encrypt("JBSWY3DPEHPK3PXP")) == "JBSWY3DPEHPK3PXP"
+
+
+def test_generate_key_is_random() -> None:
+    assert generate_key() != generate_key()
 
 
 def test_decrypt_rejects_ciphertext_from_a_different_key(monkeypatch: pytest.MonkeyPatch) -> None:

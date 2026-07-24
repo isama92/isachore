@@ -28,6 +28,13 @@ def _fernet() -> Fernet | None:
         return None
 
 
+def generate_key() -> str:
+    """A fresh key suitable for APP_KEY. Lives here so the one place that knows
+    the key format also produces it: `python -m app.cli generate-key` prints
+    this, and what it prints always satisfies crypto_configured()."""
+    return Fernet.generate_key().decode()
+
+
 def crypto_configured() -> bool:
     """Whether a usable encryption key is present. A missing OR malformed
     APP_KEY reads as not configured, so security-critical callers fail closed."""

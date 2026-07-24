@@ -10,6 +10,7 @@ from app.core.avatars import avatars_dir
 from app.core.body_limit import BodySizeLimitMiddleware
 from app.core.csrf import CsrfProtectMiddleware
 from app.core.scheduler import create_scheduler
+from app.core.startup import enforce_startup_config
 from app.db.redis import redis_client
 
 # INFO so the app.audit trail (M3) is emitted alongside the DB records.
@@ -18,6 +19,10 @@ logging.basicConfig(level=logging.INFO)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # Refuse to serve a misconfigured non-dev deploy (I1) before anything else
+    # starts. Only the web process is gated: `python -m app.cli` and alembic do
+    # not run the lifespan, so they still work to repair what this rejected.
+    enforce_startup_config()
     # Recurring background jobs (e.g. expiring stale invitations) run inside the
     # web process; started here and stopped on shutdown.
     scheduler = create_scheduler()

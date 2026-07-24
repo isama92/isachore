@@ -14,7 +14,8 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
+from app.core.config import is_dev_environment, settings
+from app.core.crypto import generate_key
 from app.core.households import add_to_default_household
 from app.core.invitations import run_expire_invitations
 from app.core.rate_limit import clear_login_throttle
@@ -23,9 +24,6 @@ from app.db.redis import redis_client
 from app.db.seed import seed
 from app.db.session import async_session_factory
 from app.models import User, UserStatus
-
-# Seeding is destructive dev tooling; only run it where the deployment marker says dev.
-_DEV_ENVIRONMENTS = {"dev", "development", "local", "test", "testing"}
 
 
 async def init_admin(email: str, first_name: str, last_name: str, password: str) -> None:
@@ -100,7 +98,7 @@ async def _seed_main(fresh: bool) -> None:
 
 def _guard_dev_environment() -> None:
     """Refuse to seed anywhere that isn't marked as a dev environment (fail-closed)."""
-    if settings.environment.lower() not in _DEV_ENVIRONMENTS:
+    if not is_dev_environment():
         sys.exit(f"refusing to seed: environment {settings.environment!r} is not a dev environment")
 
 
@@ -129,6 +127,11 @@ def main() -> None:
         help="mark stale pending household invitations as expired (the hourly job, run once)",
     )
 
+    subparsers.add_parser(
+        "generate-key",
+        help="print a fresh Fernet key for APP_KEY (required outside a dev environment)",
+    )
+
     seed_parser = subparsers.add_parser(
         "seed",
         help="populate a rich dev/test dataset (users, households, chores, history)",
@@ -147,6 +150,8 @@ def main() -> None:
         asyncio.run(_clear_throttle_main(args.user_id))
     elif args.command == "expire-invitations":
         asyncio.run(_expire_invitations_main())
+    elif args.command == "generate-key":
+        print(generate_key())
     elif args.command == "seed":
         _guard_dev_environment()
         try:

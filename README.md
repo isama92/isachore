@@ -36,7 +36,7 @@ command (see below); every other user is created by an admin in the UI under
 ### First run
 
 ```bash
-cp .env.example .env                                   # dev placeholder values are fine
+cp .env.example.dev .env                               # dev template, ready to run as-is
 docker compose up --build                              # db + redis + backend (reload) + frontend (HMR) + mailpit
 docker compose exec backend alembic upgrade head       # run migrations (inside the container so host "db" resolves)
 docker compose exec backend python -m app.cli init \
@@ -63,8 +63,13 @@ Then open http://localhost:5173 and log in.
 
 Every dev port is published on the loopback interfaces only (`127.0.0.1` and
 `[::1]`), so the stack is not reachable from your network: it runs with the
-documented placeholder credentials from `.env.example`. Redis is not published at
-all; it is reachable only as `redis:6379` on the compose network.
+documented placeholder credentials from `.env.example.dev`. Redis is not published
+at all; it is reachable only as `redis:6379` on the compose network.
+
+> `.env.example.dev` is the dev template and `.env.example` is the production
+> reference. They differ where it matters: dev marks `ENVIRONMENT=dev` and turns
+> the `Secure` cookie flag off for plain HTTP, which is exactly the configuration
+> the backend refuses to boot with anywhere else (see below).
 
 ### Seed data
 
@@ -125,11 +130,18 @@ docker compose -f compose.prod.http.yml up -d --build
 
 ### Production checklist
 
-Set these in `.env` before deploying:
+Start from `cp .env.example .env` (the production reference, not
+`.env.example.dev`) and set:
 
-- `POSTGRES_PASSWORD` to a strong secret (and matching `DATABASE_URL`).
-- `APP_KEY` to a freshly generated Fernet key (see the env table). Required for
-  two-factor auth; a 2FA-enrolled user cannot log in without it.
+- `POSTGRES_PASSWORD` to a strong secret, and the same password in
+  `DATABASE_URL`. These are two independent paths to one credential: compose
+  interpolates the former into the `db` service, and the backend authenticates
+  with the latter.
+- `APP_KEY` to a freshly generated key:
+  `docker compose -f compose.prod.tls.yml run --rm backend python -m app.cli generate-key`.
+  Pass the compose file you are deploying, or you will build and start the dev
+  stack instead. Required for two-factor auth; a 2FA-enrolled user cannot log in
+  without it.
 - `APP_BASE_URL` to your real public HTTPS origin (used to build email links).
 - SMTP values if you want account confirmation or the test-email button.
 
@@ -137,6 +149,24 @@ The prod stack forces `ENVIRONMENT=prod`, `COOKIES_SECURE=true`, and
 `TRUST_FORWARDED_FOR=true` regardless of `.env`, so cookies are HTTPS-only and
 per-IP rate limiting reads the real client IP behind the proxy. Every mode must
 terminate TLS in front of the app; never set `COOKIES_SECURE=false` in prod.
+
+**The backend refuses to start** outside a dev environment if any of these is
+wrong, rather than booting into a deployment that fails quietly later: a missing
+or malformed `APP_KEY` (which would otherwise turn away every 2FA-enrolled user
+with an opaque 503 at login), `COOKIES_SECURE=false`, or a `DATABASE_URL` whose
+password is empty or one of the publicly known placeholders. Each problem is
+logged individually, and all of them are reported on the first attempt, so
+`docker compose logs backend` tells you everything to fix in one pass.
+
+Only the web process is gated, which is what makes it recoverable: management
+commands do not run the app's startup path, so they still work against a backend
+that is refusing to serve. Use `run --rm` rather than `exec`, since there is no
+healthy container to exec into:
+
+```bash
+docker compose -f compose.prod.tls.yml run --rm backend python -m app.cli generate-key
+docker compose -f compose.prod.tls.yml run --rm backend alembic upgrade head
+```
 
 Then, inside the running stack, run migrations and create the first admin (same
 commands as dev, they are required here too). Use the same compose file you
@@ -203,17 +233,19 @@ Prefer a throwaway hostname, or clear it afterwards at
 
 ## Environment variables
 
-Configured via `.env` (see `.env.example`). All are read by
-`backend/app/core/config.py`.
+Configured via `.env`: copy `.env.example.dev` for development or `.env.example`
+for production. All are read by `backend/app/core/config.py`, and the ones marked
+**boot-checked** are validated on startup outside a dev environment
+(`backend/app/core/startup.py`).
 
 | Variable | Default | Purpose |
 | -------- | ------- | ------- |
-| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | dev placeholders | Postgres container credentials. Use a strong password in prod. |
-| `DATABASE_URL` | `postgresql+asyncpg://...@db:5432/isachore` | Async DB URL. Must use the `postgresql+asyncpg://` scheme. |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | dev placeholders | Postgres container credentials. Use a strong password in prod, and keep it identical in `DATABASE_URL`. |
+| `DATABASE_URL` | `postgresql+asyncpg://...@db:5432/isachore` | Async DB URL. Must use the `postgresql+asyncpg://` scheme. **Boot-checked**: refuses to start when its password is empty or a publicly known placeholder. |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis for login rate limiting (compose sets the container host). |
-| `ENVIRONMENT` | `prod` | Deployment marker (informational). Defaults to `prod` (fail-safe); set a dev-like value (`dev`/`development`/`local`/`test`/`testing`) locally to allow the dev-only `seed` command. The prod stack forces `prod`. |
-| `COOKIES_SECURE` | `true` | Secure flag on auth cookies. Must be `false` in dev (plain HTTP); forced `true` in prod. |
-| `APP_KEY` | unset | Fernet key encrypting secrets at rest (the 2FA seed). Generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Optional at boot, but 2FA fails closed without it. Rotating it strands existing 2FA enrolments. |
+| `ENVIRONMENT` | `prod` | Deployment marker. Gates two things: the dev-only `seed` command runs only on a dev-like value (`dev`/`development`/`local`/`test`/`testing`), and the startup config check runs only when it is *not* one of those. Defaults to `prod` and anything unrecognised reads as a real deployment, so both fail safe. The prod stack forces `prod`. |
+| `COOKIES_SECURE` | `true` | Secure flag on auth cookies. Must be `false` in dev (plain HTTP); forced `true` in prod. **Boot-checked**: refuses to start when false. |
+| `APP_KEY` | unset | Fernet key encrypting secrets at rest (the 2FA seed). Generate with `python -m app.cli generate-key`. Optional in dev, where 2FA fails closed without it; **boot-checked** elsewhere, where a missing or malformed key refuses to start. Rotating it strands existing 2FA enrolments. |
 | `TRUST_FORWARDED_FOR` | `false` | Trust proxy IP headers. Off for direct/dev access; forced `true` in prod (behind nginx). |
 | `APP_BASE_URL` | `http://localhost:5173` | Public SPA origin used to build emailed confirmation/invite links. Set to the real HTTPS origin in prod. |
 | `LOGIN_MAX_ATTEMPTS` | `5` | Failed logins per email before a 429 lockout within the window. |
@@ -241,6 +273,9 @@ prefix with the compose file you deployed (e.g. `-f compose.prod.tls.yml`).
 # Create the first admin (REQUIRED at setup; no-op if an admin exists)
 docker compose exec backend python -m app.cli init \
     --email you@example.com --first-name You --last-name Example
+
+# Print a fresh Fernet key for APP_KEY (required outside a dev environment)
+docker compose exec backend python -m app.cli generate-key
 
 # Database migrations
 docker compose exec backend alembic upgrade head

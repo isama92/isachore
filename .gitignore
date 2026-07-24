@@ -2,6 +2,9 @@
 .env
 .env.*
 !.env.example
+# Needs its own negation: the !.env.example line above does not cover it, so
+# without this the dev template is silently never committed.
+!.env.example.dev
 
 # python
 __pycache__/
