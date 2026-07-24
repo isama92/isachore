@@ -61,8 +61,10 @@ Then open http://localhost:5173 and log in.
 | Postgres             | localhost:5432                        |
 | Mailpit (dev email)  | http://localhost:8025                 |
 
-Redis is not published to the host; it is reachable only as `redis:6379` on the
-compose network.
+Every dev port is published on the loopback interfaces only (`127.0.0.1` and
+`[::1]`), so the stack is not reachable from your network: it runs with the
+documented placeholder credentials from `.env.example`. Redis is not published at
+all; it is reachable only as `redis:6379` on the compose network.
 
 ### Seed data
 

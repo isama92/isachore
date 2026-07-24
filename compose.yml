@@ -4,8 +4,18 @@ services:
       context: ./backend
       target: dev
     env_file: .env
+    # Every dev port is published on the loopback interfaces only, never on the
+    # LAN: this stack runs with the documented placeholder credentials from
+    # .env.example. Both families are listed because a bare "127.0.0.1:" prefix
+    # would stop publishing on IPv6, leaving tooling that resolves localhost to
+    # ::1 without a listener. (On a host with IPv6 disabled entirely, drop the
+    # [::1] lines: publishing them fails.) Nothing in the app depends on these
+    # host ports -
+    # the frontend reaches the backend over the compose network
+    # (BACKEND_ORIGIN: http://backend:8000).
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
+      - "[::1]:8000:8000"
     volumes:
       - ./backend:/app
       - ./backend/storage:/app/storage
@@ -24,7 +34,8 @@ services:
     environment:
       BACKEND_ORIGIN: http://backend:8000
     ports:
-      - "5173:5173"
+      - "127.0.0.1:5173:5173"
+      - "[::1]:5173:5173"
     volumes:
       - ./frontend:/app
       - frontend_node_modules:/app/node_modules
@@ -38,7 +49,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
+      - "[::1]:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql
     healthcheck:
@@ -60,7 +72,8 @@ services:
   mailpit:
     image: axllent/mailpit:latest
     ports:
-      - "8025:8025"
+      - "127.0.0.1:8025:8025"
+      - "[::1]:8025:8025"
 
 volumes:
   pgdata:
