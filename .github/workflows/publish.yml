@@ -5,6 +5,15 @@ name: Publish images
 on:
   push:
     branches: [main]
+    # A prose-only merge cannot change either image, so republishing would just
+    # move :latest to a new digest for nothing - and with :latest as the only tag,
+    # that silently invalidates any digest an operator recorded to roll back to.
+    # Same list as ci.yml. Use workflow_dispatch to publish deliberately.
+    paths-ignore:
+      - README.md
+      - CLAUDE.md
+      - COPYING
+      - docs/**
   workflow_dispatch:
 
 permissions:

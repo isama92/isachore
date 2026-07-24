@@ -5,6 +5,14 @@ name: CI
 # Consequence worth knowing: a push to a branch with no open PR runs nothing.
 on:
   pull_request:
+    # Nothing in CI lints these: the prettier hook is scoped `^frontend/` and
+    # `npm run format:check` runs with cwd=frontend, so root prose has no check to
+    # skip. Markdown under frontend/ is NOT listed, because prettier does cover it.
+    paths-ignore:
+      - README.md
+      - CLAUDE.md
+      - COPYING
+      - docs/**
   workflow_call:
 
 permissions:

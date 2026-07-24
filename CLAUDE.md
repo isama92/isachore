@@ -54,7 +54,10 @@ and the non-obvious gotchas.
   requests ONLY, since on the merge path publish.yml's own build is the gate)
   runs on pull requests and is *called* by `publish.yml`, which on push to `main` pushes
   `ghcr.io/isama92/isachore-{backend,frontend}:latest`. `ci.yml` deliberately has
-  no `push` trigger, or every `main` commit would run it twice. One-time manual
+  no `push` trigger, or every `main` commit would run it twice. Both carry the same
+  `paths-ignore` list (root prose + `docs/**`) so a documentation change runs
+  nothing and does not churn `:latest`; keep the two lists identical, and do NOT
+  add `**.md`, since prettier does check markdown under `frontend/`. One-time manual
   step, not scriptable: GHCR packages are created **private** on first publish and
   inherit nothing from repo visibility, so both must be flipped to public
   (Packages > package > settings) or every `docker compose pull` in README.md's
