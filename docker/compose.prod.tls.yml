@@ -1,15 +1,23 @@
 # Manual-certificate TLS mode: nginx terminates TLS on :443 and redirects :80.
 # Self-contained: run it on its own, no base file.
-#   docker compose -f compose.prod.tls.yml up -d --build
-# This bind-mounts a config file and certs from the repo, so run it from a repo
-# checkout. Put your fullchain.pem and privkey.pem in ./volumes/certs. For a
-# self-signed test cert see the Production section in README.md. The
-# detect-private-key pre-commit hook guards against committing a key left there.
+#   docker compose -f compose.prod.tls.yml up -d
+# Needs no repo checkout: the app images are pulled from GHCR. This is the one
+# mode that needs files beside it, so assemble a deploy directory holding:
+#   compose.prod.tls.yml  this file
+#   .env                  from .env.example
+#   nginx.tls.conf        extract the copy matching your image, see README:
+#                           docker run --rm \
+#                             ghcr.io/isama92/isachore-frontend:latest \
+#                             cat /etc/nginx/modes/tls.conf > nginx.tls.conf
+#   volumes/certs/        your fullchain.pem and privkey.pem
+# For a self-signed test cert see the Production section in README.md. Keep that
+# directory outside the repo: the detect-private-key pre-commit hook is the only
+# thing standing between a key left in volumes/certs and a public commit.
+#   Upgrade with: docker compose -f compose.prod.tls.yml pull && ... up -d
+# Re-extract nginx.tls.conf after an upgrade if the README notes a conf change.
 services:
   backend:
-    build:
-      context: ./backend
-      target: prod
+    image: ghcr.io/isama92/isachore-backend:latest
     env_file: .env
     environment:
       # Explicit so the prod stack is always marked prod regardless of .env (overrides
@@ -62,14 +70,14 @@ services:
     restart: unless-stopped
 
   frontend:
-    build:
-      context: ./frontend
-      target: prod
+    image: ghcr.io/isama92/isachore-frontend:latest
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./frontend/nginx.tls.conf:/etc/nginx/conf.d/default.conf:ro
+      # Beside this file, not in the repo: see the header for how to extract the
+      # copy baked into the image you are running (/etc/nginx/modes/tls.conf).
+      - ./nginx.tls.conf:/etc/nginx/conf.d/default.conf:ro
       - ./volumes/certs:/etc/nginx/certs:ro
     # nginx starts as root to bind the privileged ports and to hand its workers
     # to the `nginx` user, so it keeps exactly those capabilities and no more.

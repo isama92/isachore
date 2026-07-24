@@ -1,15 +1,16 @@
 # EXAMPLE for running behind your own Traefik (external TLS termination).
 # Self-contained: run it on its own, no base file.
-#   docker compose -f compose.prod.traefik.yml up -d --build
+#   docker compose -f compose.prod.traefik.yml up -d
+# Needs no repo checkout: the app images are pulled from GHCR. Copy this file and
+# a .env next to each other on the host, and run it from that directory.
+#   Upgrade with: docker compose -f compose.prod.traefik.yml pull && ... up -d
 # This is a TEMPLATE: adjust the router rule host, entrypoints, cert resolver and
 # the external network name to match your Traefik install. In this mode Traefik
 # terminates TLS and owns the HTTP->HTTPS redirect and HSTS; nginx stays on HTTP
 # and is reached over the shared docker network (no host port published).
 services:
   backend:
-    build:
-      context: ./backend
-      target: prod
+    image: ghcr.io/isama92/isachore-backend:latest
     env_file: .env
     environment:
       # Explicit so the prod stack is always marked prod regardless of .env (overrides
@@ -62,9 +63,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    build:
-      context: ./frontend
-      target: prod
+    image: ghcr.io/isama92/isachore-frontend:latest
     # No host port published: Traefik reaches nginx over the shared docker network.
     expose:
       - "80"

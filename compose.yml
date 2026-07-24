@@ -1,7 +1,13 @@
+# Development stack. The prod modes live in docker/ and pull published images
+# instead of building; this is the only compose file that builds anything.
 services:
   backend:
     build:
       context: ./backend
+      # The Dockerfiles live in docker/, but the contexts stay at the app roots:
+      # a relative `dockerfile` is resolved from the context, while every COPY
+      # inside them is context-relative, so nothing else had to change.
+      dockerfile: ../docker/backend.Dockerfile
       target: dev
     env_file: .env
     # Every dev port is published on the loopback interfaces only, never on the
@@ -30,7 +36,13 @@ services:
   frontend:
     build:
       context: ./frontend
+      dockerfile: ../docker/frontend.Dockerfile
       target: dev
+      additional_contexts:
+        # Only the prod stage copies from this, but it is declared here too:
+        # without it a `COPY --from=nginxconf` would fall back to resolving
+        # `nginxconf` as an image name, which fails obscurely.
+        nginxconf: ./docker/nginx
     environment:
       BACKEND_ORIGIN: http://backend:8000
     ports:

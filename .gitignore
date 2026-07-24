@@ -31,5 +31,6 @@ npm-debug.log*
 backend/storage/*
 !backend/storage/.gitkeep
 
-# prod compose runtime data (TLS certs, postgres data)
-/volumes/
+# prod compose runtime data (TLS certs, postgres data). Unanchored so it also
+# covers docker/volumes/, which is where a mode file run from docker/ puts them.
+volumes/
