@@ -185,6 +185,17 @@ TLS-terminating modes), hides its version, and caps request bodies at 6 MB.
 Uploaded avatars live in a named `storage` volume and the database in
 `./volumes/db`, so both survive restarts.
 
+Avatars are served unauthenticated, which is a deliberate trade rather than an
+oversight. Each file is a capability URL: the name is 128 random bits and holds
+no user id, the directory has no listing, and the name is only ever returned by
+authenticated endpoints, so the people able to obtain one are the user, admins,
+and their household peers, all of whom see the picture in the app anyway. Uploads
+are re-encoded to WebP with no metadata carried over, so a file discloses the
+picture and nothing about where or when it was taken. The accepted downside:
+anyone who gets hold of a URL can fetch that image until the avatar is deleted or
+replaced, which are the only ways to invalidate it. Worth revisiting if uploads
+ever carry anything more sensitive than a profile picture.
+
 In the TLS mode nginx serves TLS 1.2 and 1.3 with an ECDHE-only, AEAD-only
 cipher list (Mozilla's intermediate profile), so no `dhparam` file is needed, and
 session tickets are off. The key-exchange group list is deliberately left at
@@ -366,7 +377,6 @@ Conventions, architecture notes, and gotchas for working in this codebase live i
 
 ### Roadmap
 
-- [ ] check ../REPORT.md
 - [ ] have compose prod files pull images instead of building them
 - [ ] is it possible to have a docker folder with Dockerfile inside?
 - [ ] Live updates when a housemate completes a chore (websocket)
