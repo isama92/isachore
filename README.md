@@ -45,8 +45,9 @@ docker compose exec backend python -m app.cli init \
 
 > **The `init` step is required on every fresh setup.** Without it there is no
 > way to log in (no self-registration). It is a one-time bootstrap: it does
-> nothing if an admin already exists, so it is safe to leave in a deploy script
-> and harmless to run twice.
+> nothing if an *active* admin already exists, so it is safe to leave in a deploy
+> script and harmless to run twice. When there is no active admin it doubles as
+> the recovery tool, see [Lost admin access](#lost-admin-access).
 
 Then open http://localhost:5173 and log in.
 
@@ -270,7 +271,9 @@ prefix with the compose file you deployed (e.g. `-f compose.prod.tls.yml`).
 ### Setup and operations
 
 ```bash
-# Create the first admin (REQUIRED at setup; no-op if an admin exists)
+# Create the first admin (REQUIRED at setup; no-op if an ACTIVE admin exists.
+# With none it recovers instead, taking over this email if it exists or creating
+# a new admin if it does not - see "Lost admin access" below)
 docker compose exec backend python -m app.cli init \
     --email you@example.com --first-name You --last-name Example
 
@@ -296,6 +299,44 @@ docker compose exec backend python -m app.cli expire-invitations
 and the client IP for the window. `clear-login-throttle` with a user id clears
 only that user's per-email counter (a user maps to an email, never to an IP);
 with no argument it clears every counter, per-email and per-IP.
+
+### Lost admin access
+
+Only an `active` admin can administer anything, and the UI cannot leave you with
+none: nobody may demote or deactivate themselves. It is still reachable, though,
+by disabling admins from another admin account or by editing the database
+directly, and a disabled admin cannot be re-enabled from the UI because logging
+in as one is impossible.
+
+`init` is the way back in. With no active admin it stops being a pure bootstrap
+and repairs instead, so run it exactly as at setup:
+
+```bash
+docker compose exec backend python -m app.cli init \
+    --email locked-out@example.com --first-name Admin --last-name User
+```
+
+- **Pass the locked-out account's own email** and that account is taken over:
+  promoted to admin if it was not one, re-activated, marked confirmed, and given
+  the password you type at the prompt. It also clears the account's two-factor
+  enrolment (a restored password alone would still dead-end at the authenticator
+  prompt) and revokes its sessions and any pending confirmation link, so nothing
+  issued before the lockout can be replayed. It prints exactly which of those it
+  changed. All of that is unconditional, so name an account you intend to take
+  over; `--first-name` / `--last-name` are ignored here, the existing name is
+  kept.
+- **Pass an email nobody has** and a brand new admin is created instead, leaving
+  the old accounts untouched.
+
+Either way it refuses to change anything while an active admin still exists, so
+it stays safe in a deploy script. If the backend is also refusing to boot, use
+`run --rm` instead of `exec` (see the [production checklist](#production-checklist)).
+
+**The one case it cannot fix** is an admin row that is still `active` but that
+nobody can log in as: a forgotten password, or a lost authenticator with no
+recovery codes left. `init` sees a healthy admin and declines, and `reset-2fa`
+needs an admin to call it. Set that row's `status` to `disabled` in the database
+first, then run `init` as above.
 
 ### Linting and formatting
 

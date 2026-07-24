@@ -49,7 +49,8 @@ README.md. The essentials, run inside the container so the `db` host resolves:
 docker compose up --build                           # dev stack
 docker compose exec backend alembic revision --autogenerate -m "..."
 docker compose exec backend alembic upgrade head
-docker compose exec backend python -m app.cli init --email you@example.com --first-name You --last-name Example  # first admin; no-op if one exists
+docker compose exec backend python -m app.cli init --email you@example.com --first-name You --last-name Example  # first admin; no-op if an ACTIVE one exists, else recovers that email
+docker compose exec backend python -m app.cli generate-key  # fresh APP_KEY (required outside dev)
 docker compose exec backend python -m app.cli seed --fresh   # dev-only reseed (5 users, all password `password`, incl. admin@example.com)
 
 docker compose exec backend uv run pytest           # backend tests (in the container)
@@ -80,10 +81,19 @@ pre-commit run --all-files                           # what the git hook runs
   `Base.metadata`. Pydantic schemas live in `app/schemas/`.
 - **Auth**: DB-backed opaque tokens (`auth_tokens` table, SHA-256 hashed), sent
   as an httpOnly `isachore_token` cookie or `Authorization: Bearer`. NO
-  self-registration: admins create users; the first admin comes from the one-time
-  `init` CLI (no-op if an admin exists). Passwords hashed with Argon2 (pwdlib).
-  Protect endpoints by reusing `CurrentUser` / `AdminUser` from `app/api/deps.py`;
-  users may never demote or deactivate themselves.
+  self-registration: admins create users; the first admin comes from the `init`
+  CLI. Passwords hashed with Argon2 (pwdlib). Protect endpoints by reusing
+  `CurrentUser` / `AdminUser` from `app/api/deps.py`; users may never demote or
+  deactivate themselves. Note that self-guard is the ONLY floor: nothing counts
+  admins, so admins can disable each other down to zero active ones.
+- **Admin lockout recovery** (I2): `init` no-ops only while an *active* admin
+  exists. With none, it takes over the account named by `--email` (promote,
+  re-activate, reset password, clear 2FA, revoke sessions and confirmation links)
+  or creates a fresh admin if that email is unknown. Any new "restore access"
+  step belongs in `_restore_admin`, which mirrors the revocations `update_user` /
+  `reset_two_factor` do for the same changes; forgetting one leaves a stale way
+  in. It cannot help while an admin row is active but unusable (2FA lost,
+  password forgotten): that needs a direct DB edit first.
 - **CSRF**: `CsrfProtectMiddleware` (`app/core/csrf.py`, global, outermost) rejects
   unsafe-method requests (POST/PATCH/PUT/DELETE) that carry an auth cookie
   (`isachore_token` / `isachore_admin_token`) but lack a non-empty `X-CSRF-Token`

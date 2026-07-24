@@ -6,17 +6,34 @@ to assert against Redis the way `test_rate_limit.py` does.
 """
 
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from sqlalchemy import distinct, func, select
 
-from app.cli import _guard_dev_environment, clear_throttle
+from app.cli import _guard_dev_environment, clear_throttle, init_admin
+from app.core.crypto import encrypt
 from app.core.rate_limit import clear_login_throttle
-from app.core.security import verify_password
+from app.core.security import generate_token, hash_token, verify_password
 from app.db.seed import SEED_PASSWORD, seed
-from app.models import Chore, ChoreOccurrence, Household, OccurrenceStatus, User
+from app.models import (
+    AuditAction,
+    AuditEvent,
+    AuthToken,
+    Chore,
+    ChoreOccurrence,
+    ConfirmationToken,
+    Household,
+    OccurrenceStatus,
+    TwoFactorRecoveryCode,
+    User,
+    UserStatus,
+    household_members,
+)
+
+_INIT_PASSWORD = "init-password12345"
 
 
 def _email_key(email: str) -> str:
@@ -25,6 +42,261 @@ def _email_key(email: str) -> str:
 
 def _ip_key(ip: str) -> str:
     return f"login:fail:ip:{ip}"
+
+
+# --- init_admin (bootstrap and lockout recovery, I2) ----------------------
+
+
+async def test_init_creates_the_first_admin_on_an_empty_db(db_session) -> None:
+    await init_admin(db_session, "Owner@Example.com", "Owner", "User", _INIT_PASSWORD)
+
+    user = await db_session.scalar(select(User).where(User.email == "owner@example.com"))
+    # The email is lowercased, since the CLI bypasses the Pydantic normalisation.
+    assert user is not None
+    assert user.is_admin is True
+    assert user.status == UserStatus.active
+    assert user.confirmed_at is not None
+    assert verify_password(_INIT_PASSWORD, user.password_hash)
+
+
+async def test_init_joins_the_new_admin_to_the_default_household(
+    db_session, make_household: Callable[..., Awaitable[Household]]
+) -> None:
+    household = await make_household(name="Existing")
+
+    await init_admin(db_session, "owner@example.com", "Owner", "User", _INIT_PASSWORD)
+
+    user = await db_session.scalar(select(User).where(User.email == "owner@example.com"))
+    memberships = (
+        (
+            await db_session.execute(
+                select(household_members.c.household_id).where(
+                    household_members.c.user_id == user.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert memberships == [household.id]
+
+
+async def test_init_is_a_noop_when_an_active_admin_exists(
+    db_session, make_user: Callable[..., Awaitable[User]]
+) -> None:
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    original_hash = admin.password_hash
+
+    await init_admin(db_session, "someone@example.com", "Some", "One", _INIT_PASSWORD)
+
+    # Nothing created, and crucially the sitting admin's password is untouched:
+    # this command lives in deploy scripts and must not reset it on every run.
+    assert await db_session.scalar(select(func.count()).select_from(User)) == 1
+    await db_session.refresh(admin)
+    assert admin.password_hash == original_hash
+
+
+@pytest.mark.parametrize("status", [UserStatus.disabled, UserStatus.waiting_confirmation])
+async def test_init_restores_the_sole_admin_under_its_own_email(
+    db_session, make_user: Callable[..., Awaitable[User]], status: UserStatus
+) -> None:
+    # The finding: a non-active admin row satisfied the old "an admin exists"
+    # check, so the documented recovery tool refused to help. Scoping to active
+    # admins alone is not enough either, because the clash on the email would
+    # then have aborted it.
+    admin = await make_user(
+        email="admin@example.com", is_admin=True, status=status, confirmed_at=None
+    )
+
+    await init_admin(db_session, "admin@example.com", "Admin", "User", _INIT_PASSWORD)
+
+    await db_session.refresh(admin)
+    assert admin.status == UserStatus.active
+    assert admin.is_admin is True
+    assert admin.confirmed_at is not None
+    assert verify_password(_INIT_PASSWORD, admin.password_hash)
+    # Repaired in place rather than duplicated.
+    assert await db_session.scalar(select(func.count()).select_from(User)) == 1
+
+
+async def test_init_promotes_a_surviving_non_admin(
+    db_session, make_user: Callable[..., Awaitable[User]]
+) -> None:
+    # No admin row at all (both were disabled and purged, say): an ordinary
+    # active user named on the command line becomes the way back in.
+    member = await make_user(email="member@example.com", is_admin=False)
+
+    await init_admin(db_session, "member@example.com", "Member", "User", _INIT_PASSWORD)
+
+    await db_session.refresh(member)
+    assert member.is_admin is True
+    assert member.status == UserStatus.active
+    assert verify_password(_INIT_PASSWORD, member.password_hash)
+
+
+async def test_init_does_not_duplicate_household_membership_when_restoring(
+    db_session,
+    make_user: Callable[..., Awaitable[User]],
+    make_household: Callable[..., Awaitable[Household]],
+) -> None:
+    # add_to_default_household inserts unconditionally, so the restore path must
+    # not call it: doing so would add a second household_members row.
+    member = await make_user(email="member@example.com")
+    await make_household(name="Existing", members=[member])
+
+    await init_admin(db_session, "member@example.com", "Member", "User", _INIT_PASSWORD)
+
+    rows = await db_session.scalar(
+        select(func.count())
+        .select_from(household_members)
+        .where(household_members.c.user_id == member.id)
+    )
+    assert rows == 1
+
+
+async def test_init_restore_matches_a_mixed_case_email(
+    db_session, make_user: Callable[..., Awaitable[User]]
+) -> None:
+    # users.email is a case-sensitive unique index, so a lookup that skipped the
+    # lowercasing would miss the row and create a SECOND account instead.
+    admin = await make_user(email="admin@example.com", is_admin=True, status=UserStatus.disabled)
+
+    await init_admin(db_session, "ADMIN@Example.COM", "Admin", "User", _INIT_PASSWORD)
+
+    assert await db_session.scalar(select(func.count()).select_from(User)) == 1
+    await db_session.refresh(admin)
+    assert admin.status == UserStatus.active
+
+
+async def test_init_restore_revokes_sessions_and_confirmation_links(
+    db_session, make_user: Callable[..., Awaitable[User]]
+) -> None:
+    # A session parked before the lockout must not come back as an admin session,
+    # and a still-live emailed link must not be able to set a password of its own
+    # for the account we just restored. This mirrors what update_user does on the
+    # same changes.
+    user = await make_user(email="member@example.com", status=UserStatus.waiting_confirmation)
+    db_session.add(
+        AuthToken(
+            token_hash=hash_token(generate_token()),
+            user_id=user.id,
+            expires_at=datetime.now(UTC) + timedelta(days=1),
+        )
+    )
+    db_session.add(
+        ConfirmationToken(
+            token_hash=hash_token(generate_token()),
+            user_id=user.id,
+            expires_at=datetime.now(UTC) + timedelta(days=1),
+        )
+    )
+    await db_session.commit()
+
+    await init_admin(db_session, "member@example.com", "Member", "User", _INIT_PASSWORD)
+
+    assert await db_session.scalar(select(func.count()).select_from(AuthToken)) == 0
+    assert await db_session.scalar(select(func.count()).select_from(ConfirmationToken)) == 0
+
+
+async def test_init_restore_clears_two_factor_enrolment(
+    db_session, make_user: Callable[..., Awaitable[User]], totp: str
+) -> None:
+    # Without this the recovery is a dead end: the password works but login stops
+    # at the TOTP challenge, and reset-2fa needs an admin to call it.
+    admin = await make_user(email="admin@example.com", is_admin=True, status=UserStatus.disabled)
+    admin.totp_enabled = True
+    admin.totp_secret = encrypt("JBSWY3DPEHPK3PXP")
+    db_session.add(TwoFactorRecoveryCode(user_id=admin.id, code_hash=hash_token(generate_token())))
+    await db_session.commit()
+
+    await init_admin(db_session, "admin@example.com", "Admin", "User", _INIT_PASSWORD)
+
+    await db_session.refresh(admin)
+    assert admin.totp_enabled is False
+    assert admin.totp_secret is None
+    assert await db_session.scalar(select(func.count()).select_from(TwoFactorRecoveryCode)) == 0
+
+
+async def test_init_restore_reports_every_change_and_audits_it(
+    db_session, make_user: Callable[..., Awaitable[User]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The printed list is the operator's only record when this runs from a shell,
+    # and README documents that it says exactly what changed.
+    user = await make_user(
+        email="member@example.com", status=UserStatus.waiting_confirmation, confirmed_at=None
+    )
+
+    await init_admin(db_session, "member@example.com", "Member", "User", _INIT_PASSWORD)
+
+    printed = capsys.readouterr().out
+    assert "restored admin access for 'member@example.com'" in printed
+    for expected in (
+        "promoted to admin",
+        "status waiting_confirmation -> active",
+        "marked confirmed",
+        "password reset",
+        "sessions and pending confirmation links revoked",
+    ):
+        assert expected in printed
+    # Also recorded in the audit trail, since stdout goes nowhere in a deploy script.
+    event = await db_session.scalar(select(AuditEvent).where(AuditEvent.target_user_id == user.id))
+    assert event is not None
+    assert event.action == AuditAction.user_updated
+    assert event.actor_user_id is None  # no logged-in actor, only shell access
+    assert "cli init recovery" in event.detail
+
+
+async def test_init_noop_prints_and_does_not_audit(
+    db_session, make_user: Callable[..., Awaitable[User]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    await make_user(email="admin@example.com", is_admin=True)
+
+    await init_admin(db_session, "other@example.com", "Other", "User", _INIT_PASSWORD)
+
+    assert "an active admin already exists" in capsys.readouterr().out
+    assert await db_session.scalar(select(func.count()).select_from(AuditEvent)) == 0
+
+
+async def test_init_creates_a_second_admin_under_a_fresh_email(
+    db_session, make_user: Callable[..., Awaitable[User]]
+) -> None:
+    # The other half of recovery: rather than repairing the disabled account, an
+    # operator can bring in a brand new admin. The disabled row is left alone.
+    disabled = await make_user(
+        email="old-admin@example.com", is_admin=True, status=UserStatus.disabled
+    )
+
+    await init_admin(db_session, "new-admin@example.com", "New", "Admin", _INIT_PASSWORD)
+
+    fresh = await db_session.scalar(select(User).where(User.email == "new-admin@example.com"))
+    assert fresh is not None
+    assert fresh.is_admin is True
+    assert fresh.status == UserStatus.active
+    await db_session.refresh(disabled)
+    assert disabled.status == UserStatus.disabled
+
+
+async def test_init_ignores_a_disabled_admin_when_another_is_active(
+    db_session, make_user: Callable[..., Awaitable[User]]
+) -> None:
+    # A disabled admin alongside a working one must not trigger recovery.
+    disabled = await make_user(
+        email="old-admin@example.com", is_admin=True, status=UserStatus.disabled
+    )
+    active = await make_user(email="admin@example.com", is_admin=True)
+    original_hash = active.password_hash
+    disabled_hash = disabled.password_hash
+
+    await init_admin(db_session, "old-admin@example.com", "Old", "Admin", _INIT_PASSWORD)
+
+    # Returned before touching anything: the named disabled account is NOT
+    # revived just because it was passed on the command line.
+    await db_session.refresh(disabled)
+    assert disabled.status == UserStatus.disabled
+    assert disabled.password_hash == disabled_hash
+    await db_session.refresh(active)
+    assert active.password_hash == original_hash
+    assert await db_session.scalar(select(func.count()).select_from(User)) == 2
 
 
 # --- clear_login_throttle helper ------------------------------------------
