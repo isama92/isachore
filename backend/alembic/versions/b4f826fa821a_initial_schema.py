@@ -455,6 +455,13 @@ def upgrade() -> None:
     )
     # ### end Alembic commands ###
 
+    # Seed the single settings row (get_app_settings also creates it on demand).
+    # Safe to seed here, unlike a household: app_settings has no foreign keys, so
+    # the row needs nothing that does not exist yet. It also means the row is there
+    # from the first upgrade, so two concurrent first requests cannot both try to
+    # insert this fixed primary key and hand one of them a UniqueViolation.
+    op.execute("INSERT INTO app_settings (id, require_confirmation) VALUES (1, false)")
+
 
 def downgrade() -> None:
     """Downgrade schema."""
