@@ -5,6 +5,9 @@ version: 2
 # Dockerfiles), so a base-image bump flows into CI by itself. What is left:
 #   - backend/.python-version must match docker/backend.Dockerfile's python. uv
 #     obeys it, so a mismatch breaks `uv run` inside the image; ci.yml asserts it.
+#   - @types/node (npm) must match docker/frontend.Dockerfile's node major. Nothing
+#     checks this: newer types simply describe stdlib the runtime lacks, so `tsc -b`
+#     passes and the failure waits until run time. Majors are ignored below.
 #   - ruff: .pre-commit-config.yaml's `ruff-pre-commit` rev <-> backend/uv.lock.
 #     There is no pre-commit ecosystem, and `uv` moves the lock rather than
 #     pyproject's `>=` floor, so a ruff bump lands in one file only.
@@ -42,6 +45,18 @@ updates:
       frontend-minor-patch:
         patterns: ["*"]
         update-types: [minor, patch]
+    ignore:
+      # Must track the node major in docker/frontend.Dockerfile, which is pinned
+      # to 24. Types from a newer major describe stdlib APIs the runtime does not
+      # have, so `tsc -b` would accept code that fails at run time. Bump this when
+      # the Dockerfile's node moves, not before, and not on its own.
+      - dependency-name: "@types/node"
+        update-types: [version-update:semver-major]
+      # TypeScript majors change what compiles; 7 is the native rewrite. The build
+      # runs `tsc -b`, so this gates every commit and deserves a deliberate
+      # upgrade with the suites run against it rather than a monthly PR.
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
 
   # Matches both docker/backend.Dockerfile and docker/frontend.Dockerfile: the
   # fetcher regex is /dockerfile|containerfile/i, i.e. a substring match, so the
