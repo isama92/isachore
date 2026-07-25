@@ -24,14 +24,22 @@ services:
       # but with /app read-only there is no point retrying the writes on every
       # import. (The venv's bytecode is already compiled into the image.)
       PYTHONDONTWRITEBYTECODE: "1"
+    # Pin the runtime uid:gid so a bind-mounted storage directory can be owned by
+    # an ordinary host account instead of the image's `app` user (uid 999), which
+    # is what lets an operator manage uploaded files without root. Nothing in the
+    # image needs that account: /opt/venv and /app are world-readable, and no code
+    # resolves a username or $HOME, so a uid with no /etc/passwd entry is fine.
+    user: "1000:1000"
     volumes:
-      # Named volume, not a host bind mount: the image creates /app/storage owned
-      # by the non-root `app` user, and a named volume inherits that ownership on
-      # first mount, so avatar uploads are writable. A host bind mount is created
-      # root-owned, which the app user cannot write to (the process would crash on
-      # boot creating storage/avatars).
+      # Whatever is mounted here must be writable by uid 1000 (see user: above).
+      # A host bind mount therefore has to exist and be chowned BEFORE `up`, or the
+      # backend crashes on boot creating storage/avatars. The named volume below
+      # fails later and quieter: it inherits the image's uid 999, so boot succeeds
+      # (the directory already exists) and only avatar uploads 500. Chown it once,
+      # from outside compose since cap_drop: ALL denies chown even to root:
+      #   docker run --rm -v <project>_storage:/s alpine chown -R 1000:1000 /s
       - storage:/app/storage
-    # The image already runs as the non-root `app` user and listens on 8000, so
+    # The container runs unprivileged (see user: above) and listens on 8000, so
     # it needs no Linux capabilities at all. Everything it writes is either the
     # storage volume above or /tmp below.
     security_opt:
