@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from app.api.v1 import auth as auth_module
 from app.core import security
 from app.core.assignment import initial_assignee
-from app.core.chores import first_occurrence
+from app.core.chores import RecurrenceRule, first_occurrence
 from app.core.config import settings
 from app.core.security import generate_token, hash_token
 from app.db.base import Base
@@ -321,7 +321,7 @@ def make_chore(db_session: AsyncSession) -> Callable[..., Awaitable[Chore]]:
             db_session.add(
                 ChoreOccurrence(
                     chore_id=chore.id,
-                    scheduled_for=first_occurrence(chore.start_date),
+                    scheduled_for=first_occurrence(chore.start_date, RecurrenceRule.of(repeats)),
                     assignee_id=current.id if current is not None else None,
                     status=OccurrenceStatus.open,
                 )

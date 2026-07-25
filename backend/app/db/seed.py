@@ -22,7 +22,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.assignment import initial_assignee, next_assignee, should_reassign
-from app.core.chores import first_occurrence, next_occurrence_after
+from app.core.chores import RecurrenceRule, first_occurrence, next_occurrence_after
 from app.core.households import personal_household_name
 from app.core.security import hash_password
 from app.models import (
@@ -290,7 +290,8 @@ def _seed_chore(
     session.add(chore)
 
     assignee = current if current is not None else initial_assignee(spec.assignment, pool, rng=rng)
-    scheduled: datetime | None = first_occurrence(start)
+    rule = RecurrenceRule.of(spec.repeats)
+    scheduled: datetime | None = first_occurrence(start, rule)
     counts: dict[int, int] = {}
     occurrences = 0
     today = now.date()
@@ -317,7 +318,7 @@ def _seed_chore(
         occurrences += 1
         if assignee is not None:
             counts[assignee.id] = counts.get(assignee.id, 0) + 1
-        nxt = next_occurrence_after(scheduled, completed_at, spec.repeats)
+        nxt = next_occurrence_after(scheduled, completed_at, rule)
         if nxt is None:  # a completed manual one-off has no successor
             scheduled = None
             break
