@@ -1,0 +1,68 @@
+version: 2
+
+# Version pins that are coupled across files, which Dependabot cannot know about:
+#   - Bumped by the `docker` ecosystem below, so watch for the desync:
+#       node: docker/frontend.Dockerfile `FROM node:24-alpine` <-> ci.yml
+#       `node-version`. Update the workflow in the same PR.
+#   - NOT bumped by anything, so these stay manual in every place at once:
+#       ruff: .pre-commit-config.yaml `ruff-pre-commit` rev <-> backend/uv.lock.
+#         There is no pre-commit ecosystem, and `uv` moves the lock rather than
+#         pyproject's `>=` floor, so a ruff bump lands in one file only.
+#       uv itself: docker/backend.Dockerfile pulls it with `COPY --from=...uv:0.11`,
+#         and dependabot's docker parser reads only `FROM` lines, so it never sees
+#         this. Couples to ci.yml's setup-uv `version`.
+#       python: docker/backend.Dockerfile `FROM python:3.13-slim` <-> ci.yml
+#         `python-version` and pyproject's `requires-python`.
+#       postgres/redis: pinned in compose.yml, all three docker/compose.prod.*.yml,
+#         and again as ci.yml's service container. See the docker-compose note below.
+#
+# Deliberately NOT configured: the `docker-compose` ecosystem. Its file matcher is
+# /(docker-)?compose(-[\w]+)?(?>\.[\w-]+)?\.ya?ml/i, which allows a single
+# dot-segment after "compose", so it matches compose.yml but NOT
+# docker/compose.prod.http.yml and friends. Enabling it would therefore bump
+# postgres/redis in the dev stack while leaving all three prod modes behind, and
+# silently running dev on a different major Postgres than prod is worse than
+# bumping those four files by hand, together, on purpose.
+
+updates:
+  - package-ecosystem: uv
+    directory: /backend
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      # One PR for the safe stuff, majors on their own so they get read properly.
+      backend-minor-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      frontend-minor-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # Matches both docker/backend.Dockerfile and docker/frontend.Dockerfile: the
+  # fetcher regex is /dockerfile|containerfile/i, i.e. a substring match, so the
+  # `<name>.Dockerfile` layout is picked up.
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      base-images:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ["*"]
