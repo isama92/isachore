@@ -71,9 +71,10 @@ Full reference (setup, seeding, throttle clearing, prod modes, env vars) is in
 README.md. The essentials, run inside the container so the `db` host resolves:
 
 ```bash
-docker compose up --build                           # dev stack
+docker compose up --build                           # dev stack; the backend entrypoint runs `alembic upgrade head` on boot
 docker compose exec backend alembic revision --autogenerate -m "..."
-docker compose exec backend alembic upgrade head
+docker compose exec backend alembic upgrade head    # escape hatch: boot already did this
+docker compose run --rm backend alembic upgrade head  # ...and this is the one that works when boot FAILED: no container to exec into
 docker compose exec backend python -m app.cli init --email you@example.com --first-name You --last-name Example  # first admin; no-op if an ACTIVE one exists, else recovers that email
 docker compose exec backend python -m app.cli generate-key  # fresh APP_KEY (required outside dev)
 docker compose exec backend python -m app.cli seed --fresh   # dev-only reseed (5 users, all password `password`, incl. admin@example.com)
@@ -94,7 +95,23 @@ pre-commit run --all-files                           # what the git hook runs
   deployment is a compose file, a `.env` and a `docker compose pull` with no repo
   checkout on the host. Never add `build:` back to a prod mode file: on a server
   there is no `./backend` to build from, so `up -d` would fail confusingly.
-  Three coupled details:
+  Four coupled details:
+  - **`backend/docker-entrypoint.sh` runs `alembic upgrade head` on boot**, so an
+    upgrade is `pull` + `up -d`. It is baked in as `ENTRYPOINT` in the `dev` and
+    `prod` stages, which is what keeps this out of the compose files entirely:
+    operators already hold copies of the prod mode files, and those must stay
+    `image:`-only. It installs to `/usr/local/bin`, not `/app`, because the dev
+    stage ships no source (only the bind mount) and a mount there would shadow it.
+    Two rules when touching it: it migrates **only when `$1` is `uvicorn`**, since
+    `run --rm --no-deps backend python -m app.cli generate-key` is the documented
+    way out of a deploy the startup check rejected and deliberately runs with no
+    database, so an unconditional upgrade would break exactly that recovery path;
+    and `set -e` must stay, so a failed migration crash-loops the container
+    instead of serving against a schema the code does not match.
+    `RUN_MIGRATIONS=false` opts out (shell-only, deliberately NOT a `Settings`
+    field: no Python reads it, and pydantic's `extra="ignore"` makes a stray var
+    in `.env` harmless). Concurrency is a documented operator constraint, not a
+    lock: two instances booting against one database race on `alembic_version`.
   - Build **contexts stay `./backend` and `./frontend`** even though the
     Dockerfiles moved, because every `COPY`/`--mount=source=` inside them is
     context-relative. Only a `dockerfile: ../docker/<name>.Dockerfile` was added
@@ -266,6 +283,19 @@ the negative paths (401/403/400/404/409), not just the happy one.
   monkeypatching `settings.login_*`. Coverage: add
   `--cov=app --cov-report=term-missing --cov-report=html` (report at
   `backend/htmlcov/`).
+- **The boot migration is shell, so neither suite reaches it.** After touching
+  `backend/docker-entrypoint.sh` or either `ENTRYPOINT`, verify by hand:
+  `docker compose down -v && docker compose up -d --build backend`, then
+  `docker compose logs backend | grep entrypoint:` and
+  `docker compose exec db psql -U isachore -d isachore -c 'SELECT version_num FROM alembic_version'`
+  (non-empty). Check both other paths too, which are the ones easy to break:
+  `docker compose run --rm -e RUN_MIGRATIONS=false backend uvicorn --version` must
+  log the skip (the gate matches, then `--version` exits at once), and after
+  `docker compose stop db`,
+  `docker compose run --rm --no-deps backend python -m app.cli generate-key` must
+  still print a key with no database at all. Note the opt-out only reaches the
+  container through `.env`: the backend block has just `env_file`, so a bare
+  `RUN_MIGRATIONS=false docker compose up` is silently ignored.
 - **Frontend**: `cd frontend && npm run test` (coverage -> `frontend/coverage/`).
   Use `renderWithProviders` + the `fetch` mock from `src/test/utils.tsx` and the
   synthetic fixtures in `src/test/fixtures.ts`, never real personal data.

@@ -38,10 +38,13 @@ command (see below); every other user is created by an admin in the UI under
 ```bash
 cp .env.example.dev .env                               # dev template, ready to run as-is
 docker compose up --build                              # db + redis + backend (reload) + frontend (HMR) + mailpit
-docker compose exec backend alembic upgrade head       # run migrations (inside the container so host "db" resolves)
 docker compose exec backend python -m app.cli init \
     --email you@example.com --first-name You --last-name Example   # create the first admin (prompts for a password)
 ```
+
+There is no migration step: the backend container runs `alembic upgrade head`
+itself before starting the web server, on this first run and on every later one
+that brings in new migrations. `docker compose logs backend` shows it.
 
 > **The `init` step is required on every fresh setup.** Without it there is no
 > way to log in (no self-registration). It is a one-time bootstrap: it does
@@ -159,8 +162,41 @@ you ask. Pull and recreate:
 ```bash
 docker compose -f compose.prod.tls.yml pull
 docker compose -f compose.prod.tls.yml up -d
-docker compose -f compose.prod.tls.yml exec backend alembic upgrade head
 ```
+
+That is the whole upgrade: the recreated backend container runs
+`alembic upgrade head` before starting the web server. A failed migration exits
+non-zero, so the container crash-loops with the error in
+`docker compose logs backend` rather than serving against a schema the code does
+not match.
+
+That crash-loop is deliberate, but it does mean there is nothing to `exec` into,
+so repair it the same way as a rejected startup config: with `run --rm`, which
+takes an explicit command and so does not migrate on the way in.
+
+```bash
+docker compose -f compose.prod.tls.yml run --rm backend alembic upgrade head   # see the error
+docker compose -f compose.prod.tls.yml run --rm backend alembic downgrade -1   # or step back
+```
+
+Setting `RUN_MIGRATIONS=false` in `.env` is the other way out: it gets you a
+bootable container to work from, at the cost of running on the old schema until
+you migrate by hand.
+
+> **One instance may migrate, and only one.** If you run more than one backend
+> against the same database, set `RUN_MIGRATIONS=false` in every instance's
+> `.env` except one. Two containers starting at the same moment both run
+> `alembic upgrade head` and race on the `alembic_version` row; the loser fails
+> and crash-loops. Nothing in the app serialises them, so keeping the migrating
+> instance unique is the safeguard. Only a *starting* container migrates, so a
+> rolling restart is not itself a race; its hazard is the older container serving
+> against the schema the newer one just migrated.
+
+One more consequence of migrating before serving: the backend now needs the
+database at startup, where before it would come up and answer 503s until Postgres
+appeared. Docker's restart policy does not honour `depends_on`, so after a host
+reboot the backend may crash-loop for a few seconds until Postgres accepts
+connections. It clears itself through restart backoff.
 
 In the TLS mode, re-extract `nginx.tls.conf` after an upgrade if the config
 changed.
@@ -232,14 +268,15 @@ docker compose -f compose.prod.tls.yml run --rm backend alembic upgrade head
 ```
 
 (`--no-deps` on the first only: a key needs no database, whereas the migration
-obviously does.)
+obviously does.) Neither triggers the automatic migration, which the entrypoint
+runs only when the container is starting the web server. That is deliberate:
+`generate-key` is reachable precisely because it needs no database, so an
+unconditional upgrade would fail it on a connection error just when you need it.
 
-Then, inside the running stack, run migrations and create the first admin (same
-commands as dev, they are required here too). Use the same compose file you
-deployed with (the examples use the TLS mode):
+Then create the first admin (the same command as dev, required here too). Use the
+same compose file you deployed with (the examples use the TLS mode):
 
 ```bash
-docker compose -f compose.prod.tls.yml exec backend alembic upgrade head
 docker compose -f compose.prod.tls.yml exec backend python -m app.cli init \
     --email admin@yourdomain --first-name Admin --last-name User
 ```
@@ -313,15 +350,17 @@ Prefer a throwaway hostname, or clear it afterwards at
 ## Environment variables
 
 Configured via `.env`: copy `.env.example.dev` for development or `.env.example`
-for production. All are read by `backend/app/core/config.py`, and the ones marked
-**boot-checked** are validated on startup outside a dev environment
-(`backend/app/core/startup.py`).
+for production. The ones marked **boot-checked** are validated on startup outside
+a dev environment (`backend/app/core/startup.py`). All are read by
+`backend/app/core/config.py`, with one exception: `RUN_MIGRATIONS` is read by the
+container entrypoint, before Python starts.
 
 | Variable | Default | Purpose |
 | -------- | ------- | ------- |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | dev placeholders | Postgres container credentials. Use a strong password in prod, and keep it identical in `DATABASE_URL`. |
 | `DATABASE_URL` | `postgresql+asyncpg://...@db:5432/isachore` | Async DB URL. Must use the `postgresql+asyncpg://` scheme. **Boot-checked**: refuses to start when its password is empty or a publicly known placeholder. |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis for login rate limiting (compose sets the container host). |
+| `RUN_MIGRATIONS` | `true` | Read by the container entrypoint, not the app: runs `alembic upgrade head` before the web server starts. Only the exact lowercase `false` opts out, so a typo still migrates (the safe direction). Set it in every instance but one when several back ends share a database (see [Upgrading](#upgrading)). |
 | `ENVIRONMENT` | `prod` | Deployment marker. Gates two things: the dev-only `seed` command runs only on a dev-like value (`dev`/`development`/`local`/`test`/`testing`), and the startup config check runs only when it is *not* one of those. Defaults to `prod` and anything unrecognised reads as a real deployment, so both fail safe. The prod stack forces `prod`. |
 | `COOKIES_SECURE` | `true` | Secure flag on auth cookies. Must be `false` in dev (plain HTTP); forced `true` in prod. **Boot-checked**: refuses to start when false. |
 | `APP_KEY` | unset | Fernet key encrypting secrets at rest (the 2FA seed). Generate with `python -m app.cli generate-key`. Optional in dev, where 2FA fails closed without it; **boot-checked** elsewhere, where a missing or malformed key refuses to start. Rotating it strands existing 2FA enrolments. |
@@ -366,7 +405,9 @@ docker compose exec backend python -m app.cli init \
 # Print a fresh Fernet key for APP_KEY (required outside a dev environment)
 docker compose exec backend python -m app.cli generate-key
 
-# Database migrations
+# Database migrations. `upgrade head` runs itself when the backend container
+# starts, so this is the escape hatch: after RUN_MIGRATIONS=false, or to apply a
+# migration without recreating the container.
 docker compose exec backend alembic upgrade head
 docker compose exec backend alembic revision --autogenerate -m "describe change"
 
@@ -486,10 +527,7 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
 
 ### Roadmap
 
-- [ ] Uploading a picture greater than 5MB should show an error message to the user
 - [ ] Occasional tasks should be show in another panel
-- [x] Schedule on specific weekdays
 - [ ] Add a skip button (next to complete), and change the charts to also show the skipped chores
-- [ ] creating a user shouldn't also create a household, a user can create their own household if needed
 - [ ] Live updates when a housemate completes a chore (websocket)
 - [ ] Chore change log (who changed what)

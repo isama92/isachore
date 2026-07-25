@@ -16,8 +16,7 @@ Docker and the Docker Compose plugin run the app:
 
 ```bash
 cp .env.example.dev .env      # dev template, ready to run as-is
-docker compose up --build     # foreground; the next commands want a second terminal
-docker compose exec backend alembic upgrade head
+docker compose up --build     # foreground; migrates on boot, the next command wants a second terminal
 docker compose exec backend python -m app.cli seed --fresh   # a realistic dataset
 ```
 
