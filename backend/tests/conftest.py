@@ -293,6 +293,8 @@ def make_chore(db_session: AsyncSession) -> Callable[..., Awaitable[Chore]]:
         repeats: RepeatPeriod = RepeatPeriod.weekly,
         assignment_type: AssignmentType = AssignmentType.manual,
         turn_length: int = 1,
+        repeat_interval: int = 1,
+        weekdays: list[int] | None = None,
         assignees: list[User] | None = None,
         tags: list[Tag] | None = None,
         current_assignee: User | None = None,
@@ -307,6 +309,8 @@ def make_chore(db_session: AsyncSession) -> Callable[..., Awaitable[Chore]]:
             repeats=repeats,
             assignment_type=assignment_type,
             turn_length=turn_length,
+            repeat_interval=repeat_interval,
+            weekdays=weekdays,
         )
         if pool:
             chore.assignees.extend(pool)
@@ -318,10 +322,14 @@ def make_chore(db_session: AsyncSession) -> Callable[..., Awaitable[Chore]]:
         # test wants to build a custom occurrence history itself (with_occurrence=False).
         if with_occurrence:
             current = current_assignee or initial_assignee(assignment_type, pool)
+            # Build the first slot through the real helper, rule and all: a pinned-weekday
+            # fixture placed at plain midnight-of-start-date would start off the grid and
+            # mask exactly the bugs the weekday tests exist to catch.
+            rule = RecurrenceRule.of(repeats, repeat_interval, weekdays)
             db_session.add(
                 ChoreOccurrence(
                     chore_id=chore.id,
-                    scheduled_for=first_occurrence(chore.start_date, RecurrenceRule.of(repeats)),
+                    scheduled_for=first_occurrence(chore.start_date, rule),
                     assignee_id=current.id if current is not None else None,
                     status=OccurrenceStatus.open,
                 )

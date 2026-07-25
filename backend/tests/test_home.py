@@ -366,3 +366,30 @@ async def test_home_progress_counts_completion_by_another_member(
     resp = await client.get("/api/v1/home")
     # A shared chore someone else finished today still counts toward my progress.
     assert resp.json()["progress"] == {"done_today": 1, "total_today": 1}
+
+
+async def test_home_exposes_the_recurrence_detail(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # A Home row renders "Every 2 weeks (Tue, Fri)" rather than a bare period, so it needs
+    # the interval and the weekdays alongside `repeats`.
+    user = await make_user()
+    household = await make_household(members=[user])
+    await make_chore(
+        household=household,
+        title="Start the washing machine",
+        repeats=RepeatPeriod.weekly,
+        repeat_interval=2,
+        weekdays=[1, 4],
+    )
+    client = await auth_client(user)
+
+    resp = await client.get("/api/v1/home")
+    assert resp.status_code == 200
+    item = resp.json()["items"][0]
+    assert item["repeats"] == "weekly"
+    assert item["repeat_interval"] == 2
+    assert item["weekdays"] == [1, 4]

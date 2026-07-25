@@ -2,7 +2,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import insert, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
@@ -201,3 +201,50 @@ async def test_avatar_path_allows_multiple_nulls(db_session, make_user: MakeUser
     bob = await make_user(email="bob@example.com")
     assert alice.avatar_path is None
     assert bob.avatar_path is None
+
+
+# --- chore recurrence columns ---
+
+
+async def test_chore_weekdays_round_trip_as_ints(
+    db_session, make_user: MakeUser, make_household: MakeHousehold, make_chore: MakeChore
+) -> None:
+    # The schema's first ARRAY column, so its round-trip is worth pinning: a mis-declared
+    # element type silently reads back as strings or Decimals rather than failing.
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, repeats=RepeatPeriod.weekly, weekdays=[1, 4])
+
+    db_session.expire(chore)
+    await db_session.refresh(chore)
+    assert chore.weekdays == [1, 4]
+    assert [type(day) for day in chore.weekdays] == [int, int]
+
+
+async def test_chore_recurrence_columns_fill_themselves_in(
+    db_session, make_user: MakeUser, make_household: MakeHousehold
+) -> None:
+    # Inserted through Core rather than the ORM, so the mapper's Python-side default is
+    # bypassed and the COLUMN defaults are what answer. That is the mechanism which makes
+    # every pre-existing chores row valid without a backfill, and since pytest builds the
+    # schema with create_all and never runs a migration, this is the only place either
+    # suite covers it.
+    user = await make_user()
+    household = await make_household(members=[user])
+    result = await db_session.execute(
+        insert(Chore.__table__)
+        .values(
+            household_id=household.id,
+            title="Water the plants",
+            description=None,
+            start_date=datetime.now(UTC).date(),
+            repeats=RepeatPeriod.weekly,
+            assignment_type=AssignmentType.manual,
+        )
+        .returning(Chore.__table__.c.repeat_interval, Chore.__table__.c.weekdays)
+    )
+    repeat_interval, weekdays = result.one()
+
+    assert repeat_interval == 1
+    # Unpinned: the chore keeps whatever weekday its occurrences sit on.
+    assert weekdays is None

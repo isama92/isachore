@@ -402,3 +402,164 @@ async def test_complete_least_done_gives_it_to_whoever_did_least(
     assert await _current_assignee_id(client, chore.id) == bob.id  # Anna now ahead
     await complete_as(bob.id)
     assert await _current_assignee_id(client, chore.id) == anna.id  # level -> alphabetical
+
+
+# --- recurrence interval and pinned weekdays -------------------------------
+#
+# These endpoint tests must hold whatever weekday the suite runs on, and there is no
+# freezegun/time-machine here, so the weekday sets are derived from today rather than
+# hardcoded. Picking today's weekday plus the one three days later makes the strides
+# deterministically 3 then 4 for every possible "today": when the +3 day falls later in
+# the same week it is a plain intra-week hop, and when it wraps, the week-crossing
+# formula (7 - weekday + earliest) yields the same 3. The exact date arithmetic is pinned
+# in test_chores_core.py, which is free of `now()`.
+
+
+async def test_complete_twice_a_week_alternates_between_the_two_days(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # "We start the washing machine on Tuesday and on Friday": two slots a week, so the
+    # stride alternates 3 and 4 days instead of being a flat 7.
+    user = await make_user()
+    household = await make_household(members=[user])
+    today = datetime.now(UTC).date()
+    chore = await make_chore(
+        household=household,
+        start_date=today,
+        repeats=RepeatPeriod.weekly,
+        weekdays=[today.weekday(), (today.weekday() + 3) % 7],
+    )
+    client = await auth_client(user)
+
+    first = await client.post(f"/api/v1/chores/{chore.id}/complete")
+    assert first.status_code == 201
+    assert first.json()["days_until_due"] == 3  # the second day of the week
+
+    second = await client.post(f"/api/v1/chores/{chore.id}/complete")
+    assert second.status_code == 201
+    # A stride of 4 from a slot already 3 days out, so 7 days from today: back round to
+    # the first of the two days. Two completions are needed to see this at all.
+    assert second.json()["days_until_due"] == 7
+
+
+async def test_complete_pinned_weekday_overdue_skips_the_backlog(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    # "We take out the garbage on Tuesday", three weeks neglected: one completion clears
+    # it and it lands on the same weekday next week, with nothing backfilled.
+    user = await make_user()
+    household = await make_household(members=[user])
+    today = datetime.now(UTC).date()
+    chore = await make_chore(
+        household=household,
+        start_date=today - timedelta(days=21),
+        repeats=RepeatPeriod.weekly,
+        weekdays=[today.weekday()],
+    )
+    client = await auth_client(user)
+
+    resp = await client.post(f"/api/v1/chores/{chore.id}/complete")
+    assert resp.status_code == 201
+    assert resp.json()["days_until_due"] == 7
+
+    rows = (
+        (
+            await db_session.execute(
+                select(ChoreOccurrence).where(ChoreOccurrence.chore_id == chore.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    # Exactly one done row and one open row: the three missed Tuesdays are not backfilled.
+    assert len(rows) == 2
+    assert sorted(row.status for row in rows) == [OccurrenceStatus.done, OccurrenceStatus.open]
+
+
+async def test_complete_every_two_days_marches_by_the_interval(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # "We run the dishwasher every 2 days": the interval-aware version of the
+    # march-the-due-date-forward regression test.
+    user = await make_user()
+    household = await make_household(members=[user])
+    today = datetime.now(UTC).date()
+    chore = await make_chore(
+        household=household, start_date=today, repeats=RepeatPeriod.daily, repeat_interval=2
+    )
+    client = await auth_client(user)
+
+    for expected in (2, 4, 6):
+        resp = await client.post(f"/api/v1/chores/{chore.id}/complete")
+        assert resp.status_code == 201
+        assert resp.json()["days_until_due"] == expected
+
+
+async def test_complete_fortnightly_pinned_weekday_spends_the_interval(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # A single weekday every other week: the week crossing spends the interval, so the
+    # next slot is two weeks out rather than one. Proves the interval and the weekday
+    # pinning reach the recurrence helpers together, not just one or the other.
+    user = await make_user()
+    household = await make_household(members=[user])
+    today = datetime.now(UTC).date()
+    chore = await make_chore(
+        household=household,
+        start_date=today,
+        repeats=RepeatPeriod.weekly,
+        repeat_interval=2,
+        weekdays=[today.weekday()],
+    )
+    client = await auth_client(user)
+
+    resp = await client.post(f"/api/v1/chores/{chore.id}/complete")
+    assert resp.status_code == 201
+    assert resp.json()["days_until_due"] == 14
+
+
+async def test_complete_one_off_created_with_weekdays_still_has_no_successor(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    auth_client: AuthClient,
+) -> None:
+    # Created through the API, so this proves the schema's normalisation reached the DB
+    # rather than being cosmetic in the response: a `manual` chore stays a one-off even
+    # when the payload carried weekdays and an interval.
+    user = await make_user()
+    household = await make_household(members=[user])
+    client = await auth_client(user)
+
+    created = await client.post(
+        "/api/v1/chores",
+        json={
+            "household_id": household.id,
+            "title": "Fix the shelf",
+            "start_date": datetime.now(UTC).date().isoformat(),
+            "repeats": "manual",
+            "assignment_type": "manual",
+            "repeat_interval": 4,
+            "weekdays": [1, 4],
+        },
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body["weekdays"] is None
+    assert body["repeat_interval"] == 1
+
+    chore_id = body["id"]
+    assert (await client.post(f"/api/v1/chores/{chore_id}/complete")).status_code == 201
+    assert (await client.post(f"/api/v1/chores/{chore_id}/complete")).status_code == 409

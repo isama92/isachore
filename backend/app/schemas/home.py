@@ -16,6 +16,10 @@ class DueChoreRead(BaseModel):
     id: int
     title: str
     repeats: RepeatPeriod
+    # The recurrence detail behind `repeats`, so a Home row can read "Every 2 days" or
+    # "Weekly (Tue, Fri)" rather than a bare period.
+    repeat_interval: int
+    weekdays: list[int] | None
     next_due: datetime
     days_until_due: int  # negative = overdue, 0 = today, positive = upcoming
     status: DueStatus

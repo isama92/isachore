@@ -87,6 +87,8 @@ async def get_home(
                 id=occ.chore_id,
                 title=occ.chore.title,
                 repeats=occ.chore.repeats,
+                repeat_interval=occ.chore.repeat_interval,
+                weekdays=occ.chore.weekdays,
                 next_due=occ.scheduled_for,
                 days_until_due=days,
                 status=due_status(days),
