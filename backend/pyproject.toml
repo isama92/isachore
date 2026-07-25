@@ -17,7 +17,7 @@ dependencies = [
     "pyotp>=2.9.0",
     "python-multipart>=0.0.20",
     "qrcode>=7.4.2",
-    "redis[hiredis]>=5.2.0",
+    "redis[hiredis]>=8.0.1",
     "sqlalchemy[asyncio]>=2.0,<2.1",
     "uvicorn[standard]>=0.51.0",
 ]
