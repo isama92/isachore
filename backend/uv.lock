@@ -643,7 +643,7 @@ requires-dist = [
     { name = "pyotp", specifier = ">=2.9.0" },
     { name = "python-multipart", specifier = ">=0.0.20" },
     { name = "qrcode", specifier = ">=7.4.2" },
-    { name = "redis", extras = ["hiredis"], specifier = ">=5.2.0" },
+    { name = "redis", extras = ["hiredis"], specifier = ">=8.0.1" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0,<2.1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.51.0" },
 ]
