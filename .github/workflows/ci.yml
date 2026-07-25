@@ -73,6 +73,19 @@ jobs:
       # service container's POSTGRES_USER is a superuser, so CREATE DATABASE works.
       - run: uv run pytest
 
+      # The suites build the schema with Base.metadata.create_all and never execute
+      # a migration, so a chain that cannot build an empty database is invisible to
+      # them. That is not hypothetical: a migration once seeded a household whose
+      # owner could not exist yet, which made `alembic upgrade head` fail on a
+      # virgin database and the documented production first-run impossible.
+      - name: Migrations build an empty database
+        env:
+          PGPASSWORD: isachore_ci_password
+          DATABASE_URL: postgresql+asyncpg://isachore:isachore_ci_password@localhost:5432/isachore_migrations
+        run: |
+          psql -h localhost -U isachore -d postgres -c 'CREATE DATABASE isachore_migrations'
+          uv run alembic upgrade head
+
   frontend:
     name: Frontend (eslint + prettier + tsc + vitest)
     runs-on: ubuntu-latest

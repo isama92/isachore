@@ -16,7 +16,6 @@ from app.models import (
     RepeatPeriod,
     Tag,
     User,
-    household_members,
 )
 
 MakeUser = Callable[..., Awaitable[User]]
@@ -204,54 +203,3 @@ async def test_avatar_path_allows_multiple_nulls(db_session, make_user: MakeUser
     bob = await make_user(email="bob@example.com")
     assert alice.avatar_path is None
     assert bob.avatar_path is None
-
-
-# --- auto-join on user creation ---
-
-
-async def test_new_user_joins_default_household(
-    db_session,
-    make_user: MakeUser,
-    make_household: MakeHousehold,
-    auth_client: AuthClient,
-) -> None:
-    admin = await make_user(email="admin@example.com", is_admin=True)
-    await make_household(members=[admin])
-    client = await auth_client(admin)
-
-    resp = await client.post(
-        "/api/v1/users",
-        json={
-            "email": "newbie@example.com",
-            "first_name": "New",
-            "last_name": "Bie",
-            "password": "password12345",
-        },
-    )
-    assert resp.status_code == 201
-    new_id = resp.json()["id"]
-
-    rows = (
-        await db_session.execute(
-            select(household_members).where(household_members.c.user_id == new_id)
-        )
-    ).all()
-    assert len(rows) == 1
-
-
-async def test_user_creation_without_household_is_noop(
-    make_user: MakeUser, auth_client: AuthClient
-) -> None:
-    admin = await make_user(email="admin@example.com", is_admin=True)
-    client = await auth_client(admin)
-
-    resp = await client.post(
-        "/api/v1/users",
-        json={
-            "email": "newbie@example.com",
-            "first_name": "New",
-            "last_name": "Bie",
-            "password": "password12345",
-        },
-    )
-    assert resp.status_code == 201

@@ -105,15 +105,40 @@ async def add_member(session: AsyncSession, household_id: int, user_id: int) -> 
     )
 
 
-async def add_to_default_household(session: AsyncSession, user_id: int) -> None:
-    """Add a freshly created user to the default (lowest-id) household.
+_PERSONAL_SUFFIX = "'s place"
+# Read off the column so this cannot drift if households.name is ever resized.
+_NAME_MAX = Household.__table__.c.name.type.length or 255
 
-    Best-effort: no-op when no household exists yet (e.g. in tests that don't
-    seed one). Real household management is a later feature; for now every user
-    lands in the single household created by the initial migration.
+
+def personal_household_name(first_name: str) -> str:
+    """Name for a user's own household, clipped to fit `households.name`.
+
+    `first_name` is accepted up to 255 characters (schemas/user.py), which with the
+    suffix would overflow varchar(255). Postgres raises on an over-long INSERT
+    rather than truncating, so a long first name would turn user creation into a
+    500 and roll the account back. The suffix is kept whole; the name gives.
     """
-    household_id = (
-        await session.execute(select(Household.id).order_by(Household.id).limit(1))
-    ).scalar_one_or_none()
-    if household_id is not None:
-        await add_member(session, household_id, user_id)
+    return f"{first_name[: _NAME_MAX - len(_PERSONAL_SUFFIX)]}{_PERSONAL_SUFFIX}"
+
+
+async def create_personal_household(session: AsyncSession, user: User) -> Household:
+    """Give a freshly created user a household of their own, owned by them.
+
+    Every user needs somewhere to keep chores, and this is the only way to get
+    one: `households.admin_id` is NOT NULL, so a household cannot exist before
+    its owner does, which is exactly why seeding one in a migration could never
+    work (see 0368fa9b08ba). Mirrors `create_household` in api/v1/households.py,
+    where the creator likewise becomes both owner and first member.
+
+    Replaces an earlier `add_to_default_household`, which added every new user to
+    the *lowest-id* household. That was reasonable while one seeded household was
+    all there was, but once households became user-owned it meant dropping each
+    new account into a stranger's household, chores and all.
+
+    The caller must have flushed the user, so `user.id` is populated.
+    """
+    household = Household(name=personal_household_name(user.first_name), admin_id=user.id)
+    session.add(household)
+    await session.flush()
+    await add_member(session, household.id, user.id)
+    return household

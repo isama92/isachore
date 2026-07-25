@@ -157,24 +157,6 @@ def upgrade() -> None:
     )
     # ### end Alembic commands ###
 
-    # Seed a single default household, add every existing user to it, and give it
-    # two starter tags. Real household/tag management arrives in a later step; for
-    # now this is what lets chores work out of the box. (Tests build the schema from
-    # metadata, not migrations, so this seed only affects real databases.)
-    op.execute("INSERT INTO households (name) VALUES ('Household')")
-    op.execute(
-        "INSERT INTO household_members (household_id, user_id) "
-        "SELECT h.id, u.id FROM households h CROSS JOIN users u"
-    )
-    op.execute(
-        "INSERT INTO tags (household_id, name, color) "
-        "SELECT id, 'deep-clean', '#0d9488' FROM households"
-    )
-    op.execute(
-        "INSERT INTO tags (household_id, name, color) "
-        "SELECT id, 'shared', '#7c6bf0' FROM households"
-    )
-
 
 def downgrade() -> None:
     """Downgrade schema."""

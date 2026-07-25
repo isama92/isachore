@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import generate_token, hash_token
-from app.models import AuthToken, ConfirmationToken, User, UserStatus
+from app.models import AuthToken, ConfirmationToken, Household, User, UserStatus, household_members
 from app.models.app_settings import APP_SETTINGS_ID, AppSettings
 
 Login = Callable[..., Awaitable[User]]
@@ -297,6 +297,96 @@ async def test_create_user(make_user: Login, auth_client: AuthClient) -> None:
         json={"email": "newbie@example.com", "password": "password12345"},
     )
     assert login.status_code == 200
+
+
+async def _household_ids(session: AsyncSession, user_id: int) -> list[int]:
+    result = await session.execute(
+        select(household_members.c.household_id).where(household_members.c.user_id == user_id)
+    )
+    return list(result.scalars().all())
+
+
+async def test_create_user_gives_them_their_own_household(
+    make_user: Login,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+    make_household: Callable[..., Awaitable[Household]],
+) -> None:
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    admin_household = await make_household(name="Admin's place", members=[admin])
+    client = await auth_client(admin)
+
+    resp = await client.post(
+        "/api/v1/users",
+        json={
+            "email": "newbie@example.com",
+            "first_name": "New",
+            "last_name": "Member",
+            "password": "password12345",
+        },
+    )
+
+    assert resp.status_code == 201
+    new_id = resp.json()["id"]
+    memberships = await _household_ids(db_session, new_id)
+    assert len(memberships) == 1
+    # Emphatically NOT the admin's household: the previous behaviour joined the
+    # lowest-id one, which would expose a stranger's chores to every new account.
+    assert memberships[0] != admin_household.id
+    household = await db_session.get(Household, memberships[0])
+    assert household is not None
+    assert household.admin_id == new_id
+    assert household.name == "New's place"
+    # The admin's own household gained nobody.
+    assert await _household_ids(db_session, admin.id) == [admin_household.id]
+
+
+async def test_create_user_waiting_confirmation_still_gets_a_household(
+    make_user: Login, auth_client: AuthClient, db_session: AsyncSession, smtp: list
+) -> None:
+    # The household is created with the account, not at confirmation time, so a
+    # user who has not clicked the link yet still owns one.
+    await _enable_confirmation(db_session)
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    client = await auth_client(admin)
+
+    resp = await client.post(
+        "/api/v1/users",
+        json={"email": "newbie@example.com", "first_name": "New", "last_name": "Member"},
+    )
+
+    assert resp.status_code == 201
+    assert resp.json()["status"] == "waiting_confirmation"
+    memberships = await _household_ids(db_session, resp.json()["id"])
+    assert len(memberships) == 1
+
+
+async def test_create_user_with_a_very_long_first_name(
+    make_user: Login, auth_client: AuthClient, db_session: AsyncSession
+) -> None:
+    # The generated household name appends "'s place" to the first name, and
+    # households.name is varchar(255) while first_name is accepted up to 255. An
+    # unclipped name would overflow and turn this 201 into a 500, rolling back the
+    # account too.
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    client = await auth_client(admin)
+
+    resp = await client.post(
+        "/api/v1/users",
+        json={
+            "email": "long@example.com",
+            "first_name": "N" * 255,
+            "last_name": "Member",
+            "password": "password12345",
+        },
+    )
+
+    assert resp.status_code == 201
+    memberships = await _household_ids(db_session, resp.json()["id"])
+    household = await db_session.get(Household, memberships[0])
+    assert household is not None
+    assert len(household.name) <= 255
+    assert household.name.endswith("'s place")
 
 
 async def test_create_user_duplicate_email(make_user: Login, auth_client: AuthClient) -> None:

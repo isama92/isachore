@@ -158,6 +158,17 @@ pre-commit run --all-files                           # what the git hook runs
   `confirmed_at` timestamp. Only `active` users can log in or be impersonated;
   deactivation is a soft delete (`status=disabled`). Login and impersonation gate
   on `status == UserStatus.active`.
+- **Every user gets their own household at creation**, owned by them, via
+  `create_personal_household` (`app/core/households.py`), called from `cli init` and
+  `POST /users`. That includes a `waiting_confirmation` user: the household belongs
+  to the account, not to confirming it. (`seed` is the exception, building its own
+  solo plus shared households; it shares only the naming helper.) Recovery
+  (`_restore_admin`) deliberately does not call it, because recovery restores access
+  and does not provision. Do NOT seed a household in a migration:
+  `households.admin_id` is NOT NULL, so a household cannot exist before its owner,
+  and an owner-less row is what used to make `alembic upgrade head` unrunnable on an
+  empty database. Nothing assumes a user has exactly one household, or any: leaving
+  or deleting one is allowed and the UI has copy for zero.
 - **Email confirmation**: server-wide `app_settings.require_confirmation`
   (single-row table, `get_app_settings`) toggles it. When on, creating a user
   emails a `confirmation_tokens` link (same hashed-opaque-token pattern as auth
@@ -243,7 +254,12 @@ the negative paths (401/403/400/404/409), not just the happy one.
 - **Backend**: `docker compose exec backend uv run pytest` (in the container so
   `db` resolves). Fixtures spin up a throwaway `isachore_test` DB and roll each
   test back via a SAVEPOINT; build cases with `client` / `make_user` /
-  `auth_client` from `tests/conftest.py`. Redis is faked with `fakeredis` (the
+  `auth_client` from `tests/conftest.py`. Note the schema comes from
+  `Base.metadata.create_all`, so **pytest never executes a migration**: a broken
+  chain passes both suites. `ci.yml`'s "Migrations build an empty database" step is
+  the only guard. After touching `alembic/`, run it by hand against a scratch DB:
+  `docker compose exec db psql -U isachore -d postgres -c 'CREATE DATABASE scratch'`
+  then `docker compose exec -e DATABASE_URL=postgresql+asyncpg://isachore:<pw>@db:5432/scratch backend alembic upgrade head`. Redis is faked with `fakeredis` (the
   `fake_redis` fixture overrides `get_redis`); tune the login throttle per-test by
   monkeypatching `settings.login_*`. Coverage: add
   `--cov=app --cov-report=term-missing --cov-report=html` (report at
