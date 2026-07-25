@@ -30,6 +30,19 @@ updates:
     schedule:
       interval: monthly
     open-pull-requests-limit: 5
+    # Move uv.lock only, never pyproject.toml. This is an application that ships a
+    # lockfile and CI runs `uv sync --frozen`, so the lock decides what is actually
+    # installed; the specifiers are deliberate ranges, not a record of whatever
+    # resolved last. Without this, each lock bump also arrives as an "Update <dep>
+    # requirement" PR raising the floor to the just-resolved version, which changes
+    # nothing here and conflicts with the grouped PR that moved the lock.
+    #
+    # The trade: two deps carry deliberate upper bounds, `apscheduler<4` and
+    # `sqlalchemy<2.1`. Crossing either needs a manifest edit, so Dependabot will
+    # now stay silent when apscheduler 4 or sqlalchemy 2.1 ships rather than
+    # offering to widen. Both are breaking-change boundaries that want a deliberate
+    # upgrade anyway, but nothing will remind you: check on them yourself.
+    versioning-strategy: lockfile-only
     groups:
       # One PR for the safe stuff, majors on their own so they get read properly.
       backend-minor-patch:
