@@ -9,7 +9,7 @@ dependencies = [
     "apscheduler>=3.11,<4",
     "asyncpg>=0.31.0",
     "cryptography>=43.0.0",
-    "fastapi>=0.139.0",
+    "fastapi>=0.140.0",
     "pillow>=11.0.0",
     "pwdlib[argon2]>=0.3.0",
     "pydantic-settings>=2.14.2",
@@ -24,12 +24,12 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "fakeredis>=2.26.0",
+    "fakeredis>=2.37.0",
     "httpx>=0.28.1",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",
-    "ruff>=0.15.21",
+    "ruff>=0.16.0",
 ]
 
 [tool.ruff]
