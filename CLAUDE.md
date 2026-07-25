@@ -291,11 +291,14 @@ the negative paths (401/403/400/404/409), not just the happy one.
 - Changing `POSTGRES_*` in `.env` after first boot needs `docker compose down -v`.
 - Keep the ruff version in `.pre-commit-config.yaml` (`ruff-pre-commit` rev) in
   sync with the ruff dev dependency in `backend/pyproject.toml`.
-- `.github/workflows/ci.yml` restates two toolchain versions that the Dockerfiles
-  own: uv (`docker/backend.Dockerfile`'s `ghcr.io/astral-sh/uv` tag) and node
-  (`docker/frontend.Dockerfile`'s base image). CI installs them directly rather
-  than running the suites inside the images, so bumping either Dockerfile means
-  bumping `ci.yml` too or CI silently tests on a different toolchain.
+- **The Dockerfiles own the toolchain versions.** CI installs python, uv and node
+  on the runner rather than running the suites inside the images, but it `sed`s the
+  versions out of `docker/*.Dockerfile` instead of restating them, so a base-image
+  bump reaches CI on its own. Do not reintroduce a literal pin in `ci.yml`: it used
+  to have them, and a Dependabot bump to `python:3.14-slim` left CI testing 3.13
+  while the published image shipped 3.14. `backend/.python-version` is the one
+  remaining mirror, since uv obeys it and a mismatch means `uv run` finds no
+  interpreter inside the image; CI asserts it matches.
 - Never commit `.env`. Two templates, both committed: `.env.example.dev` (dev,
   ready to run) and `.env.example` (the prod reference, placeholders only). Note
   `.gitignore`'s `.env.*` line means any further template needs its own `!`
