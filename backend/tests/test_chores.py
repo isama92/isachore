@@ -1,5 +1,5 @@
 from collections.abc import Awaitable, Callable
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 
 from httpx import AsyncClient
 from sqlalchemy import select
@@ -21,7 +21,11 @@ MakeUser = Callable[..., Awaitable[User]]
 MakeHousehold = Callable[..., Awaitable[Household]]
 MakeTag = Callable[..., Awaitable[Tag]]
 MakeChore = Callable[..., Awaitable[Chore]]
+MakeOccurrence = Callable[..., Awaitable[ChoreOccurrence]]
 AuthClient = Callable[[User], Awaitable[AsyncClient]]
+
+# Monday-first weekday ordinals, as `date.weekday()` numbers them (NOT ISO-8601's 1..7).
+MON, TUE, WED, THU, FRI, SAT, SUN = range(7)
 
 
 def _payload(**overrides: object) -> dict[str, object]:
@@ -33,6 +37,19 @@ def _payload(**overrides: object) -> dict[str, object]:
     }
     base.update(overrides)
     return base
+
+
+async def _open_slot(session: AsyncSession, chore_id: int) -> datetime:
+    """The `scheduled_for` of the chore's single open occurrence."""
+    occ = (
+        await session.execute(
+            select(ChoreOccurrence).where(
+                ChoreOccurrence.chore_id == chore_id,
+                ChoreOccurrence.status == OccurrenceStatus.open,
+            )
+        )
+    ).scalar_one()
+    return occ.scheduled_for
 
 
 # --- create ---
@@ -845,6 +862,394 @@ async def test_update_chore_requires_auth(
 
     resp = await client.patch(f"/api/v1/chores/{chore.id}", json=_payload(title="Nope"))
     assert resp.status_code == 401
+
+
+# --- recurrence interval and weekdays ---
+#
+# Every date here is fixed rather than relative to today, because `_payload` and
+# `make_chore` both pin start_date. For reference: 16 Jul 2026 is a Thursday, so that
+# week's Tuesday is the 14th and its Friday the 17th; 1 Aug 2026 is a Saturday.
+
+
+async def test_create_chore_with_interval_and_weekdays(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    client = await auth_client(user)
+
+    resp = await client.post(
+        "/api/v1/chores",
+        json=_payload(household_id=household.id, repeat_interval=2, weekdays=[TUE, FRI]),
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["repeat_interval"] == 2
+    assert body["weekdays"] == [TUE, FRI]
+    # The 16th is a Thursday, so the first occurrence snaps forward to Friday the 17th.
+    assert await _open_slot(db_session, body["id"]) == datetime(2026, 7, 17, tzinfo=UTC)
+
+
+async def test_create_chore_sorts_and_deduplicates_weekdays(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    client = await auth_client(user)
+
+    resp = await client.post(
+        "/api/v1/chores", json=_payload(household_id=household.id, weekdays=[FRI, TUE, TUE])
+    )
+    assert resp.status_code == 201
+    assert resp.json()["weekdays"] == [TUE, FRI]
+
+
+async def test_create_chore_empty_weekdays_reads_back_as_null(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    # An empty selection means what NULL means - unpinned - so it collapses to null.
+    user = await make_user()
+    household = await make_household(members=[user])
+    client = await auth_client(user)
+
+    resp = await client.post(
+        "/api/v1/chores", json=_payload(household_id=household.id, weekdays=[])
+    )
+    assert resp.status_code == 201
+    assert resp.json()["weekdays"] is None
+
+
+async def test_create_chore_drops_weekdays_for_a_non_weekly_period(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    # Normalised, not rejected: the form would otherwise 422 every time someone flipped
+    # the period from weekly to daily before clearing the weekday list.
+    user = await make_user()
+    household = await make_household(members=[user])
+    client = await auth_client(user)
+
+    resp = await client.post(
+        "/api/v1/chores",
+        json=_payload(household_id=household.id, repeats="daily", weekdays=[TUE, FRI]),
+    )
+    assert resp.status_code == 201
+    assert resp.json()["weekdays"] is None
+
+
+async def test_create_chore_forces_interval_to_one_for_a_one_off(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    # A `manual` chore never recurs, so repeat_interval > 1 in the DB always implies
+    # "recurring".
+    user = await make_user()
+    household = await make_household(members=[user])
+    client = await auth_client(user)
+
+    resp = await client.post(
+        "/api/v1/chores",
+        json=_payload(household_id=household.id, repeats="manual", repeat_interval=5),
+    )
+    assert resp.status_code == 201
+    assert resp.json()["repeat_interval"] == 1
+
+
+async def test_create_chore_defaults_the_recurrence_fields(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    # A payload predating these fields still works and behaves exactly as before.
+    user = await make_user()
+    household = await make_household(members=[user])
+    client = await auth_client(user)
+
+    resp = await client.post("/api/v1/chores", json=_payload(household_id=household.id))
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["repeat_interval"] == 1
+    assert body["weekdays"] is None
+
+
+async def test_create_chore_rejects_bad_recurrence_values(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    client = await auth_client(user)
+
+    for bad in ({"repeat_interval": 0}, {"repeat_interval": 366}, {"repeat_interval": "x"}):
+        resp = await client.post("/api/v1/chores", json=_payload(household_id=household.id, **bad))
+        assert resp.status_code == 422, bad
+    for bad_days in ([7], [-1], ["mon"], [1.5]):
+        resp = await client.post(
+            "/api/v1/chores", json=_payload(household_id=household.id, weekdays=bad_days)
+        )
+        assert resp.status_code == 422, bad_days
+
+
+async def test_get_and_list_expose_the_recurrence_fields(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(
+        household=household, repeats=RepeatPeriod.weekly, repeat_interval=2, weekdays=[TUE, FRI]
+    )
+    client = await auth_client(user)
+
+    one = await client.get(f"/api/v1/chores/{chore.id}")
+    assert one.status_code == 200
+    assert one.json()["repeat_interval"] == 2
+    assert one.json()["weekdays"] == [TUE, FRI]
+
+    listed = await client.get("/api/v1/chores")
+    assert listed.status_code == 200
+    assert listed.json()["items"][0]["weekdays"] == [TUE, FRI]
+
+
+async def test_update_chore_pinning_weekdays_moves_the_open_slot_forward(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    # Pinning weekdays on a chore with history redefines its grid, so the open row snaps
+    # onto it: forward only, and by days rather than a whole cycle.
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, with_occurrence=False)
+    done = await make_occurrence(
+        chore=chore,
+        scheduled_for=datetime(2026, 7, 15, tzinfo=UTC),
+        status=OccurrenceStatus.done,
+        completed_at=datetime(2026, 7, 15, 9, 0, tzinfo=UTC),
+    )
+    await make_occurrence(chore=chore, scheduled_for=datetime(2026, 7, 22, tzinfo=UTC))
+    client = await auth_client(user)
+
+    resp = await client.patch(f"/api/v1/chores/{chore.id}", json=_payload(weekdays=[TUE]))
+    assert resp.status_code == 200
+    # Wed 22 Jul -> Tue 28 Jul, the nearest Tuesday forward.
+    assert await _open_slot(db_session, chore.id) == datetime(2026, 7, 28, tzinfo=UTC)
+    # History is a record of what happened and is never re-gridded.
+    await db_session.refresh(done)
+    assert done.scheduled_for == datetime(2026, 7, 15, tzinfo=UTC)
+
+
+async def test_update_chore_pinning_can_push_a_barely_overdue_chore_into_the_future(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    # The snap moves forward by up to six days, so a chore overdue by fewer than that can
+    # leave the overdue bucket. Deliberate rather than a bug - the edit just declared which
+    # weekdays the chore happens on - but worth pinning so it cannot change unnoticed.
+    user = await make_user()
+    household = await make_household(members=[user])
+    today = datetime.now(UTC).date()
+    yesterday = today - timedelta(days=1)
+    chore = await make_chore(household=household, with_occurrence=False)
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=datetime.combine(yesterday - timedelta(days=7), time(), tzinfo=UTC),
+        status=OccurrenceStatus.done,
+        completed_at=datetime.combine(yesterday - timedelta(days=7), time(9), tzinfo=UTC),
+    )
+    await make_occurrence(
+        chore=chore, scheduled_for=datetime.combine(yesterday, time(), tzinfo=UTC)
+    )
+    client = await auth_client(user)
+
+    # Pin to tomorrow's weekday: the only slot forward of yesterday is two days on.
+    resp = await client.patch(
+        f"/api/v1/chores/{chore.id}",
+        json=_payload(weekdays=[(today + timedelta(days=1)).weekday()]),
+    )
+    assert resp.status_code == 200
+    assert await _open_slot(db_session, chore.id) == datetime.combine(
+        today + timedelta(days=1), time(), tzinfo=UTC
+    )
+
+
+async def test_update_chore_pinning_keeps_an_already_selected_slot(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, with_occurrence=False)
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=datetime(2026, 7, 14, tzinfo=UTC),
+        status=OccurrenceStatus.done,
+        completed_at=datetime(2026, 7, 14, 9, 0, tzinfo=UTC),
+    )
+    await make_occurrence(chore=chore, scheduled_for=datetime(2026, 7, 21, tzinfo=UTC))
+    client = await auth_client(user)
+
+    resp = await client.patch(f"/api/v1/chores/{chore.id}", json=_payload(weekdays=[TUE]))
+    assert resp.status_code == 200
+    # The 21st is already a Tuesday, so snapping is a no-op.
+    assert await _open_slot(db_session, chore.id) == datetime(2026, 7, 21, tzinfo=UTC)
+
+
+async def test_update_chore_interval_change_leaves_the_open_slot_alone(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    # The new stride takes effect from the next completion, so the date shown on Home does
+    # not jump just because someone edited the interval.
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, with_occurrence=False)
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=datetime(2026, 7, 15, tzinfo=UTC),
+        status=OccurrenceStatus.done,
+        completed_at=datetime(2026, 7, 15, 9, 0, tzinfo=UTC),
+    )
+    await make_occurrence(chore=chore, scheduled_for=datetime(2026, 7, 22, tzinfo=UTC))
+    client = await auth_client(user)
+
+    resp = await client.patch(f"/api/v1/chores/{chore.id}", json=_payload(repeat_interval=3))
+    assert resp.status_code == 200
+    assert resp.json()["repeat_interval"] == 3
+    assert await _open_slot(db_session, chore.id) == datetime(2026, 7, 22, tzinfo=UTC)
+
+
+async def test_update_chore_start_date_and_weekdays_move_the_first_slot(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    # Before any completion the open row is still the chore's first occurrence, so it
+    # follows a start_date edit and a weekday edit together.
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, repeats=RepeatPeriod.weekly)
+    client = await auth_client(user)
+
+    resp = await client.patch(
+        f"/api/v1/chores/{chore.id}", json=_payload(start_date="2026-08-01", weekdays=[TUE])
+    )
+    assert resp.status_code == 200
+    # 1 Aug 2026 is a Saturday, so the first Tuesday on or after it is the 4th.
+    assert await _open_slot(db_session, chore.id) == datetime(2026, 8, 4, tzinfo=UTC)
+
+
+async def test_update_chore_weekly_to_manual_keeps_the_slot_and_completes_once(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(
+        household=household, repeats=RepeatPeriod.weekly, weekdays=[TUE], with_occurrence=False
+    )
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=datetime(2026, 7, 14, tzinfo=UTC),
+        status=OccurrenceStatus.done,
+        completed_at=datetime(2026, 7, 14, 9, 0, tzinfo=UTC),
+    )
+    await make_occurrence(chore=chore, scheduled_for=datetime(2026, 7, 21, tzinfo=UTC))
+    client = await auth_client(user)
+
+    resp = await client.patch(f"/api/v1/chores/{chore.id}", json=_payload(repeats="manual"))
+    assert resp.status_code == 200
+    assert resp.json()["weekdays"] is None
+    # A one-off keeps the due date it already had, then dies after a single completion.
+    assert await _open_slot(db_session, chore.id) == datetime(2026, 7, 21, tzinfo=UTC)
+    assert (await client.post(f"/api/v1/chores/{chore.id}/complete")).status_code == 201
+    assert (await client.post(f"/api/v1/chores/{chore.id}/complete")).status_code == 409
+
+
+async def test_update_chore_full_replace_resets_the_recurrence_fields(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # ChoreUpdate is a full replace, so a payload omitting these fields resets them. This
+    # is the trap any client has to send them to avoid.
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(
+        household=household, repeats=RepeatPeriod.weekly, repeat_interval=2, weekdays=[TUE, FRI]
+    )
+    client = await auth_client(user)
+
+    resp = await client.patch(f"/api/v1/chores/{chore.id}", json=_payload())
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["repeat_interval"] == 1
+    assert body["weekdays"] is None
+
+
+async def test_update_chore_rejects_bad_recurrence_values(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household)
+    client = await auth_client(user)
+
+    for bad in ({"repeat_interval": 0}, {"repeat_interval": 366}, {"weekdays": [7]}):
+        resp = await client.patch(f"/api/v1/chores/{chore.id}", json=_payload(**bad))
+        assert resp.status_code == 422, bad
+
+
+async def test_update_chore_slot_collision_is_a_conflict_not_a_crash(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    # Snapping is forward-only, and an open row's slot is always later than every done row's,
+    # so this cannot happen through the API. Nothing in the schema enforces that invariant
+    # though, so the commit is guarded: a collision must read as 409, never 500.
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, with_occurrence=False)
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=datetime(2026, 7, 28, tzinfo=UTC),  # deliberately after the open row
+        status=OccurrenceStatus.done,
+        completed_at=datetime(2026, 7, 28, 9, 0, tzinfo=UTC),
+    )
+    await make_occurrence(chore=chore, scheduled_for=datetime(2026, 7, 22, tzinfo=UTC))
+    client = await auth_client(user)
+
+    # Wed 22 Jul snaps to Tue 28 Jul, which the done row already occupies.
+    resp = await client.patch(f"/api/v1/chores/{chore.id}", json=_payload(weekdays=[TUE]))
+    assert resp.status_code == 409
 
 
 # --- delete (soft) ---

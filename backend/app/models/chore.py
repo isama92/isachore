@@ -2,7 +2,7 @@ import enum
 from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Column, Date, DateTime, ForeignKey, String, Table, func
+from sqlalchemy import ARRAY, Column, Date, DateTime, ForeignKey, SmallInteger, String, Table, func
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -67,6 +67,19 @@ class Chore(Base):
     # person (the strategy picks who). 1 = hand off every completion; "take turns" in
     # the UI sets a larger value. Only meaningful for the auto-rotating strategies.
     turn_length: Mapped[int] = mapped_column(default=1, server_default="1")
+    # How many periods pass between occurrences: 1 = every period, 2 = every other, and so
+    # on. Not meaningful for `manual`, which never recurs (stored as 1). A plain int with
+    # the >= 1 bound enforced at the schema layer, like turn_length.
+    repeat_interval: Mapped[int] = mapped_column(default=1, server_default="1")
+    # Which weekdays a `weekly` chore falls on, as Monday-first ordinals from Python's
+    # `date.weekday()` (0 = Monday .. 6 = Sunday), sorted and deduplicated. NOT ISO-8601,
+    # which numbers weekdays 1..7. NULL means unpinned: the chore keeps whatever weekday
+    # its occurrences already sit on, which is how every chore predating this column
+    # behaves - hence no backfill. Non-NULL only for `weekly`.
+    #
+    # Note the SQLAlchemy footgun: in-place mutation of an ARRAY value is not change
+    # tracked. Every write path here assigns a whole new list, so it does not bite.
+    weekdays: Mapped[list[int] | None] = mapped_column(ARRAY(SmallInteger), default=None)
     # Soft delete: NULL means active, a timestamp means the chore is deleted and
     # hidden from the list (mirrors households; recoverable only via the DB).
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)

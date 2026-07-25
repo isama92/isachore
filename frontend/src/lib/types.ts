@@ -69,6 +69,10 @@ export type ServerSettings = {
 
 export type RepeatPeriod = 'manual' | 'daily' | 'weekly' | 'monthly' | 'yearly'
 
+// Every period except `manual`, which never recurs and so has neither an interval
+// nor weekdays. The interval/weekday translation keys only exist for these four.
+export type RecurringPeriod = Exclude<RepeatPeriod, 'manual'>
+
 export type AssignmentType = 'manual' | 'alphabetical' | 'random' | 'least_done'
 
 export type Tag = {
@@ -87,6 +91,13 @@ export type Chore = {
   // Completions one assignee holds before the chore hands off (1 = every
   // completion; "take turns" in the form sets a larger value).
   turn_length: number
+  // Periods between occurrences (1 = every period). Not applicable to `manual`.
+  repeat_interval: number
+  // Which weekdays a weekly chore lands on, as Monday-first indexes 0-6 (the
+  // backend's date.weekday(), NOT ISO-8601's 1-7, and NOT JS getDay(), which
+  // starts at Sunday: index a Monday-first array instead of calling it). null
+  // means unpinned, and only `weekly` carries a value.
+  weekdays: number[] | null
   created_at: string
   // The household the chore belongs to (fixed at creation). Drives the list's
   // household column/filter and the edit form's read-only household.
@@ -158,6 +169,10 @@ export type DueChore = {
   id: number
   title: string
   repeats: RepeatPeriod
+  // The detail behind `repeats`, so a row reads "Every 2 days" or "Weekly (Tue,
+  // Fri)" rather than a bare period.
+  repeat_interval: number
+  weekdays: number[] | null
   next_due: string
   days_until_due: number
   status: DueStatus
@@ -183,6 +198,10 @@ export type ChoreCloneState = {
   repeats: RepeatPeriod
   assignment_type: AssignmentType
   turn_length: number
+  repeat_interval: number
+  // Normalised to [] (like `description` above) so router state stays plain. Must be
+  // carried, or cloning an "every 2 days" chore silently produces a plain daily one.
+  weekdays: number[]
   assignee_ids: number[]
   tag_ids: number[]
 }

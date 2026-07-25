@@ -7,7 +7,7 @@ import { CopyPlusIcon, SquarePenIcon, Trash2Icon } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
 import { routes } from '../lib/routes'
-import { formatDate } from '../lib/chores'
+import { formatDate, repeatLabel } from '../lib/chores'
 import type { Chore, ChoreCloneState, Household, Page } from '../lib/types'
 import { DataTable } from '@/components/data-table/DataTable'
 import { useServerTable } from '@/components/data-table/useServerTable'
@@ -148,6 +148,8 @@ export default function Chores() {
         repeats: chore.repeats,
         assignment_type: chore.assignment_type,
         turn_length: chore.turn_length,
+        repeat_interval: chore.repeat_interval,
+        weekdays: chore.weekdays ?? [],
         assignee_ids: chore.assignees.map((a) => a.id),
         tag_ids: chore.tags.map((tag) => tag.id),
       },
@@ -268,7 +270,7 @@ export default function Chores() {
       enableSorting: false,
       cell: ({ row }) => (
         <Badge variant="secondary" className="text-primary">
-          {t(`options.repeat.${row.original.repeats}`)}
+          {repeatLabel(t, row.original)}
         </Badge>
       ),
     },

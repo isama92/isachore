@@ -3,8 +3,9 @@
 Populates a realistic dataset so every feature can be exercised by hand: five users,
 a solo household each plus one shared household, tags, and many chores covering the whole
 option matrix (0/1/many assignees, all four assignment strategies, all five repeat
-periods, turn lengths 1..7, every due bucket) with completion history. Invoked via
-`python -m app.cli seed [--fresh]`; the CLI entry refuses to run outside a dev
+periods, repeat intervals, pinned weekdays, turn lengths 1..7, every due bucket) with
+completion history. Invoked via `python -m app.cli seed [--fresh]`; the CLI entry refuses
+to run outside a dev
 environment. `seed --fresh` wipes all app data first, which also makes it a reliable way
 to reset test data.
 
@@ -22,7 +23,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.assignment import initial_assignee, next_assignee, should_reassign
-from app.core.chores import first_occurrence, next_occurrence_after
+from app.core.chores import RecurrenceRule, first_occurrence, next_occurrence_after
 from app.core.households import personal_household_name
 from app.core.security import hash_password
 from app.models import (
@@ -66,7 +67,11 @@ class ChoreSpec:
     """One chore to seed. `start_days_ago` sets the first occurrence (negative = starts
     in the future, for due-soon/far chores); `completions` is how many past occurrences
     to mark done (capped so a future occurrence is never completed). `current_email` sets
-    an explicit starting assignee (used by `manual`); otherwise the strategy derives it."""
+    an explicit starting assignee (used by `manual`); otherwise the strategy derives it.
+    `weekdays` pins a `weekly` chore to Monday-first weekdays (0 = Mon .. 6 = Sun) and is
+    ignored for every other period. Note that pinning weekdays or raising
+    `repeat_interval` fits fewer slots into the same window, so such specs need a larger
+    `start_days_ago` to seed any history."""
 
     title: str
     repeats: RepeatPeriod
@@ -75,6 +80,8 @@ class ChoreSpec:
     start_days_ago: int
     completions: int = 0
     turn_length: int = 1
+    repeat_interval: int = 1
+    weekdays: list[int] | None = None
     current_email: str | None = None
     tags: list[str] = field(default_factory=list)
 
@@ -125,8 +132,9 @@ _SHARED_CHORES = [
         RepeatPeriod.weekly,
         AssignmentType.random,
         ["bram@example.com", "cara@example.com"],
-        start_days_ago=35,
+        start_days_ago=70,  # 10 Tuesdays back, so all 10 completions below fit
         completions=10,
+        weekdays=[1],  # Tuesdays only
         tags=["outdoor"],
     ),
     ChoreSpec(
@@ -203,6 +211,78 @@ _SHARED_CHORES = [
         completions=12,
         tags=["kitchen"],
     ),
+    # Interval and weekday-pinned recurrence (weekdays are Monday-first: 0 = Mon .. 6 = Sun).
+    ChoreSpec(
+        "Start the washing machine",
+        RepeatPeriod.weekly,
+        AssignmentType.least_done,
+        ["cara@example.com", "dan@example.com"],
+        start_days_ago=42,
+        completions=11,
+        weekdays=[1, 4],  # twice a week: Tuesdays and Fridays, so the stride alternates 3/4
+    ),
+    ChoreSpec(
+        "Run the dishwasher",
+        RepeatPeriod.daily,
+        AssignmentType.alphabetical,
+        [e for e, *_ in _USERS],
+        start_days_ago=30,
+        completions=13,
+        repeat_interval=2,  # every other day
+        tags=["kitchen"],
+    ),
+    ChoreSpec(
+        "Scrub the shower",
+        RepeatPeriod.weekly,
+        AssignmentType.random,
+        ["admin@example.com", "eve@example.com"],
+        start_days_ago=84,
+        completions=5,
+        repeat_interval=2,
+        weekdays=[5],  # every other Saturday: interval and pinning together
+        tags=["cleaning"],
+    ),
+    ChoreSpec(
+        "Change the bedsheets",
+        RepeatPeriod.weekly,
+        AssignmentType.manual,
+        ["bram@example.com"],
+        start_days_ago=63,
+        completions=2,
+        repeat_interval=3,  # an interval with no pinning, so weekdays stay NULL
+        current_email="bram@example.com",
+    ),
+    ChoreSpec(
+        "Sort the recycling",
+        RepeatPeriod.weekly,
+        AssignmentType.alphabetical,
+        ["dan@example.com", "eve@example.com"],
+        start_days_ago=28,
+        completions=18,
+        weekdays=[0, 1, 2, 3, 4],  # weekdays only, never the weekend
+        tags=["outdoor"],
+    ),
+    ChoreSpec(
+        "Deep clean the oven",
+        RepeatPeriod.monthly,
+        AssignmentType.manual,
+        ["cara@example.com"],
+        start_days_ago=200,
+        completions=2,
+        repeat_interval=3,  # quarterly
+        current_email="cara@example.com",
+        tags=["kitchen"],
+    ),
+    ChoreSpec(
+        "Service the boiler",
+        RepeatPeriod.yearly,
+        AssignmentType.manual,
+        ["admin@example.com"],
+        start_days_ago=900,
+        completions=1,
+        repeat_interval=2,  # every other year
+        current_email="admin@example.com",
+    ),
 ]
 
 
@@ -274,6 +354,10 @@ def _seed_chore(
     """Create the chore and its occurrence chain (history + one open row). Returns the
     chore and how many occurrences were written."""
     start = now.date() - timedelta(days=spec.start_days_ago)
+    # Store what the rule normalised rather than the raw spec, so a spec cannot seed a
+    # weekday set on a non-weekly chore, or an unsorted one, and diverge from what the API
+    # would have written.
+    rule = RecurrenceRule.of(spec.repeats, spec.repeat_interval, spec.weekdays)
     chore = Chore(
         household_id=household_id,
         title=spec.title,
@@ -282,6 +366,8 @@ def _seed_chore(
         repeats=spec.repeats,
         assignment_type=spec.assignment,
         turn_length=spec.turn_length,
+        repeat_interval=rule.interval,
+        weekdays=list(rule.weekdays) or None,
     )
     if pool:
         chore.assignees.extend(pool)
@@ -290,7 +376,7 @@ def _seed_chore(
     session.add(chore)
 
     assignee = current if current is not None else initial_assignee(spec.assignment, pool, rng=rng)
-    scheduled: datetime | None = first_occurrence(start)
+    scheduled: datetime | None = first_occurrence(start, rule)
     counts: dict[int, int] = {}
     occurrences = 0
     today = now.date()
@@ -317,7 +403,7 @@ def _seed_chore(
         occurrences += 1
         if assignee is not None:
             counts[assignee.id] = counts.get(assignee.id, 0) + 1
-        nxt = next_occurrence_after(scheduled, completed_at, spec.repeats)
+        nxt = next_occurrence_after(scheduled, completed_at, rule)
         if nxt is None:  # a completed manual one-off has no successor
             scheduled = None
             break

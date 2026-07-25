@@ -99,6 +99,60 @@ describe('ChoreEdit', () => {
     expect(screen.getByLabelText('Turn length')).toHaveValue(3)
   })
 
+  it('pre-fills the interval and the pinned weekdays, and saves them untouched', async () => {
+    const pinned = makeChore({
+      id: 7,
+      title: 'Washing machine',
+      repeats: 'weekly',
+      repeat_interval: 2,
+      weekdays: [1, 4],
+      household: { id: 4, name: 'Beach House' },
+    })
+    const fetchMock = mockFetch([
+      { path: '/api/v1/chores/7', method: 'GET', body: pinned },
+      { path: MEMBERS, method: 'GET', body: page([]) },
+      { path: TAGS, method: 'GET', body: page([]) },
+      { path: '/api/v1/chores/7', method: 'PATCH', body: pinned },
+    ])
+    renderEdit()
+
+    expect(await screen.findByDisplayValue('Washing machine')).toBeInTheDocument()
+    expect(screen.getByLabelText('Repeat every')).toHaveValue(2)
+    expect(screen.getByRole('button', { name: 'Tuesday' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Friday' })).toHaveAttribute('aria-pressed', 'true')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('chores-list')
+    // ChoreUpdate is a full replace, so an untouched save must resend both fields.
+    expect(patchBody(fetchMock)).toMatchObject({ repeat_interval: 2, weekdays: [1, 4] })
+  })
+
+  it('unpins a chore when every weekday is cleared', async () => {
+    const pinned = makeChore({
+      id: 7,
+      title: 'Washing machine',
+      repeats: 'weekly',
+      weekdays: [1],
+      household: { id: 4, name: 'Beach House' },
+    })
+    const fetchMock = mockFetch([
+      { path: '/api/v1/chores/7', method: 'GET', body: pinned },
+      { path: MEMBERS, method: 'GET', body: page([]) },
+      { path: TAGS, method: 'GET', body: page([]) },
+      { path: '/api/v1/chores/7', method: 'PATCH', body: pinned },
+    ])
+    renderEdit()
+
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    await screen.findByDisplayValue('Washing machine')
+    await user.click(screen.getByRole('button', { name: 'Tuesday' }))
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    await screen.findByText('chores-list')
+    // An empty selection is the form's way of sending "unpinned".
+    expect(patchBody(fetchMock)).toMatchObject({ weekdays: null })
+  })
+
   it('pre-fills the current assignee for a manual chore', async () => {
     const jo = makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' })
     const manual = makeChore({

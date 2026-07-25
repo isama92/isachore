@@ -9,7 +9,14 @@ from sqlalchemy.orm import contains_eager, selectinload
 from app.api.deps import CurrentUser, SessionDep
 from app.api.v1.households import SortDir
 from app.core.assignment import initial_assignee, next_assignee, should_reassign
-from app.core.chores import days_until_due, due_status, first_occurrence, next_occurrence_after
+from app.core.chores import (
+    RecurrenceRule,
+    days_until_due,
+    due_status,
+    first_occurrence,
+    next_occurrence_after,
+    snap_to_slot,
+)
 from app.core.households import escape_like, get_member_household, member_household_ids
 from app.models import (
     AssignmentType,
@@ -187,6 +194,11 @@ def _resolve_current_assignee(pool: list[User], current_assignee_id: int | None)
     return match
 
 
+def _rule(chore: Chore) -> RecurrenceRule:
+    """The chore's recurrence rule, as the pure `core.chores` helpers want it."""
+    return RecurrenceRule.of(chore.repeats, chore.repeat_interval, chore.weekdays)
+
+
 async def _completion_counts(session: SessionDep, chore_id: int) -> dict[int, int]:
     """Completions of this chore per crediting member (done occurrences grouped by
     completed_by_user_id). Used only by the `least_done` strategy."""
@@ -242,9 +254,11 @@ async def _reconcile_open_occurrence(
       a still-manual completed one-off stays done.
     - An open, never-completed occurrence: keep its due date aligned to `start_date`
       (it is still the chore's first occurrence) and reconcile its assignee.
-    - An open occurrence past at least one completion: its `scheduled_for` sits on the
-      recurrence grid, so leave it; only reconcile the assignee.
+    - An open occurrence past at least one completion: its `scheduled_for` sits on the grid
+      the chore had when the row was written, and an edit can redefine that grid, so snap it
+      onto the new one; also reconcile the assignee.
     """
+    rule = _rule(chore)
     occ = await _open_occurrence(session, chore.id)
     latest_done = (
         await session.execute(
@@ -259,14 +273,19 @@ async def _reconcile_open_occurrence(
     ).scalar_one_or_none()
 
     if occ is None:
-        if chore.repeats == RepeatPeriod.manual:
+        if rule.repeats == RepeatPeriod.manual:
             return  # a completed one-off stays done
         scheduled = (
+            # `completed_at` is nullable on the model; no production path writes a done row
+            # without it, so fall back to the slot rather than carrying an Optional through
+            # the pure helpers.
             next_occurrence_after(
-                latest_done.scheduled_for, latest_done.completed_at, chore.repeats
+                latest_done.scheduled_for,
+                latest_done.completed_at or latest_done.scheduled_for,
+                rule,
             )
             if latest_done is not None
-            else first_occurrence(payload.start_date)
+            else first_occurrence(payload.start_date, rule)
         )
         if scheduled is None:
             return
@@ -294,7 +313,18 @@ async def _reconcile_open_occurrence(
     # Before any completion the open occurrence is the first one, so its due date must
     # follow a start_date edit (mirrors the old never-completed next_due behaviour).
     if latest_done is None:
-        occ.scheduled_for = first_occurrence(payload.start_date)
+        occ.scheduled_for = first_occurrence(payload.start_date, rule)
+    else:
+        # The row sits on the grid the chore had when it was written, which this edit may
+        # have redefined. `snap_to_slot` is idempotent and moves it by days rather than
+        # weeks (at most six, never backwards), so pinning weekdays re-dates the chore
+        # without spending a whole cycle. Note a chore overdue by less than that can land
+        # in the future and leave the overdue bucket - reasonable, since the edit just
+        # declared which weekdays it happens on. Only pinning moves anything: every other
+        # rule accepts any datetime, because its phase lives in the occurrence chain.
+        # The new slot cannot collide with a `done` row, because movement is forward and an
+        # open row's slot is always later than every done row's (see update_chore).
+        occ.scheduled_for = snap_to_slot(occ.scheduled_for, rule)
 
 
 @router.post("", response_model=ChoreRead, status_code=status.HTTP_201_CREATED)
@@ -310,6 +340,8 @@ async def create_chore(payload: ChoreCreate, user: CurrentUser, session: Session
         repeats=payload.repeats,
         assignment_type=payload.assignment_type,
         turn_length=payload.turn_length,
+        repeat_interval=payload.repeat_interval,
+        weekdays=payload.weekdays,
         assignees=assignees,
         tags=tags,
     )
@@ -323,7 +355,7 @@ async def create_chore(payload: ChoreCreate, user: CurrentUser, session: Session
     session.add(
         ChoreOccurrence(
             chore_id=chore.id,
-            scheduled_for=first_occurrence(payload.start_date),
+            scheduled_for=first_occurrence(payload.start_date, _rule(chore)),
             assignee_id=current.id if current is not None else None,
             status=OccurrenceStatus.open,
         )
@@ -398,10 +430,24 @@ async def update_chore(
     chore.repeats = payload.repeats
     chore.assignment_type = payload.assignment_type
     chore.turn_length = payload.turn_length
+    chore.repeat_interval = payload.repeat_interval
+    chore.weekdays = payload.weekdays
     chore.assignees = assignees
     chore.tags = tags
+    # Must run after the recurrence fields are assigned: it builds the rule from the chore.
     await _reconcile_open_occurrence(session, chore, payload, assignees)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        # Reconcile computes an occurrence slot, so it can collide with a slot a concurrent
+        # POST /complete just wrote. Forward-only movement keeps it off this chore's `done`
+        # rows (their scheduled_for is always earlier than the open one's), but nothing in
+        # the schema enforces that invariant, so fail cleanly rather than 500.
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This chore changed while you were editing it. Please try again.",
+        ) from None
     return await _load_chore(session, chore.id)
 
 
@@ -462,7 +508,7 @@ async def complete_chore(
 
     # Anchor the successor to the occurrence just cleared (skip-missed applied), so its
     # due date advances one interval on the grid rather than from the completion time.
-    upcoming = next_occurrence_after(scheduled_for, now, chore.repeats)
+    upcoming = next_occurrence_after(scheduled_for, now, _rule(chore))
     if upcoming is not None:
         next_person = await _successor_assignee(
             session, chore, occ.assignee_id, list(chore.assignees)

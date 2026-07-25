@@ -230,6 +230,9 @@
     "assigneesEmpty": "Nessun membro trovato.",
     "assignment": "Assegnazione",
     "repeats": "Ripetizione",
+    "repeatInterval": "Ripeti ogni",
+    "weekdays": "Nei giorni",
+    "weekdaysHint": "Lascia vuoto per ripetere ogni settimana senza fissare un giorno. Cambiare i giorni sposta in avanti la prossima ricorrenza al primo giorno selezionato.",
     "takeTurns": "A turno",
     "turnLength": "Durata del turno",
     "turnLengthHint": "Completamenti prima che la faccenda passi alla persona successiva.",
@@ -560,6 +563,45 @@
       "weekly": "Ogni settimana",
       "monthly": "Ogni mese",
       "yearly": "Ogni anno"
+    },
+    "repeatEvery": {
+      "daily_one": "Ogni giorno",
+      "daily_other": "Ogni {{count}} giorni",
+      "weekly_one": "Ogni settimana",
+      "weekly_other": "Ogni {{count}} settimane",
+      "monthly_one": "Ogni mese",
+      "monthly_other": "Ogni {{count}} mesi",
+      "yearly_one": "Ogni anno",
+      "yearly_other": "Ogni {{count}} anni"
+    },
+    "repeatUnit": {
+      "daily_one": "giorno",
+      "daily_other": "giorni",
+      "weekly_one": "settimana",
+      "weekly_other": "settimane",
+      "monthly_one": "mese",
+      "monthly_other": "mesi",
+      "yearly_one": "anno",
+      "yearly_other": "anni"
+    },
+    "repeatOnDays": "{{schedule}} ({{days}})",
+    "weekday": {
+      "mon": "lunedì",
+      "tue": "martedì",
+      "wed": "mercoledì",
+      "thu": "giovedì",
+      "fri": "venerdì",
+      "sat": "sabato",
+      "sun": "domenica"
+    },
+    "weekdayShort": {
+      "mon": "lun",
+      "tue": "mar",
+      "wed": "mer",
+      "thu": "gio",
+      "fri": "ven",
+      "sat": "sab",
+      "sun": "dom"
     },
     "assignment": {
       "manual": "Manuale",
