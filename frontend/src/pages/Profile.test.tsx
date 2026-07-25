@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import Profile from './Profile'
@@ -212,7 +212,44 @@ describe('Profile', () => {
     )
   })
 
-  it('shows an inline error when the upload is rejected', async () => {
+  it('rejects a photo over the size cap without uploading it, and recovers', async () => {
+    const fetchMock = mockFetch([
+      {
+        path: '/api/v1/profile/avatar',
+        method: 'PUT',
+        body: makeUser({ avatar_url: '/api/v1/media/avatars/x.webp' }),
+      },
+    ])
+    const { container, value } = renderWithProviders(<Profile />, {
+      authValue: { user: makeUser({ avatar_url: null }) },
+    })
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+    const huge = new File(['x'], 'huge.png', { type: 'image/png' })
+    // Fake the size rather than allocating 6 MB of jsdom heap per run.
+    Object.defineProperty(huge, 'size', { value: 6 * 1024 * 1024 })
+    await userEvent.upload(input, huge)
+
+    expect(
+      await screen.findByText('That photo is larger than 5 MB. Pick a smaller one.'),
+    ).toBeInTheDocument()
+    // The point of the client-side check: nothing was sent.
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    // Picking a valid one must still work, which pins the two orderings that make
+    // this handler fragile: returning before setAvatarBusy(true) (or the button
+    // sticks on "Working…" for good) and clearing the error before the size check
+    // (or the rejection message outlives it).
+    await userEvent.upload(input, new File(['ok'], 'small.png', { type: 'image/png' }))
+
+    await waitFor(() => expect(value.refresh).toHaveBeenCalled())
+    expect(
+      screen.queryByText('That photo is larger than 5 MB. Pick a smaller one.'),
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Change photo' })).toBeEnabled()
+  })
+
+  it('translates a 413 from the server rather than echoing its English detail', async () => {
     mockFetch([
       {
         path: '/api/v1/profile/avatar',
@@ -228,7 +265,57 @@ describe('Profile', () => {
     const input = container.querySelector('input[type="file"]') as HTMLInputElement
     await userEvent.upload(input, new File(['x'], 'big.png', { type: 'image/png' }))
 
-    expect(await screen.findByText('Image is too large')).toBeInTheDocument()
+    // No figure in this one: the server's cap is env-tunable, so quoting 5 MB
+    // here could be a lie. See AVATAR_MAX_MB in Profile.tsx.
+    expect(
+      await screen.findByText('That photo is too large. Pick a smaller one.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('Image is too large')).not.toBeInTheDocument()
+  })
+
+  it('translates a 413 whose body is not JSON (nginx rejecting the body itself)', async () => {
+    // Past client_max_body_size nginx answers with its own HTML page, so the api
+    // wrapper has no `detail` and ApiError carries the bare status text. The
+    // backend never sees the request, which is why this cannot happen in dev.
+    const nginx413 = {
+      ok: false,
+      status: 413,
+      statusText: 'Request Entity Too Large',
+      json: async () => {
+        throw new Error('not json')
+      },
+    } as unknown as Response
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(nginx413))
+    const { container } = renderWithProviders(<Profile />, {
+      authValue: { user: makeUser({ avatar_url: null }) },
+    })
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+    await userEvent.upload(input, new File(['x'], 'big.png', { type: 'image/png' }))
+
+    expect(
+      await screen.findByText('That photo is too large. Pick a smaller one.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('Request Entity Too Large')).not.toBeInTheDocument()
+  })
+
+  it('still shows the server detail for a non-413 upload failure', async () => {
+    mockFetch([
+      {
+        path: '/api/v1/profile/avatar',
+        method: 'PUT',
+        status: 400,
+        body: { detail: 'That file is not a valid image' },
+      },
+    ])
+    const { container } = renderWithProviders(<Profile />, {
+      authValue: { user: makeUser({ avatar_url: null }) },
+    })
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+    await userEvent.upload(input, new File(['x'], 'notes.png', { type: 'image/png' }))
+
+    expect(await screen.findByText('That file is not a valid image')).toBeInTheDocument()
   })
 
   it('removes the picture via DELETE /profile/avatar (only shown with a photo)', async () => {

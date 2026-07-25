@@ -33,6 +33,17 @@ import {
 // scroll-spy tracks. Module-scoped so it is a stable IntersectionObserver input.
 const SECTION_IDS = ['photo', 'name', 'appearance', 'security'] as const
 
+// The cap this page enforces and advertises, mirroring the default of
+// settings.avatar_max_bytes (backend/app/core/config.py) so the hint and the
+// pre-upload check quote one figure. Unlike MAX_PENDING in HouseholdInvitations,
+// which mirrors a plain module constant, this one mirrors an env-tunable setting
+// (AVATAR_MAX_BYTES), so it CAN silently disagree with the server. That is why
+// only the client-side rejection names a number: a 413 means the server refused
+// the upload on a limit we may not know, so its message stays cap-agnostic
+// rather than confidently quoting a figure that could be wrong.
+const AVATAR_MAX_MB = 5
+const AVATAR_MAX_BYTES = AVATAR_MAX_MB * 1024 * 1024
+
 export default function Profile() {
   const { user, refresh } = useAuth()
   const { t } = useTranslation()
@@ -160,6 +171,10 @@ export default function Profile() {
     if (fileRef.current) fileRef.current.value = ''
     if (!file) return
     setAvatarError(null)
+    if (file.size > AVATAR_MAX_BYTES) {
+      setAvatarError(t('profile.photoTooLarge', { max: AVATAR_MAX_MB }))
+      return
+    }
     setAvatarBusy(true)
     try {
       const data = new FormData()
@@ -168,7 +183,15 @@ export default function Profile() {
       toast.success(t('profile.photoUpdated'))
       await refresh()
     } catch (err) {
-      setAvatarError(err instanceof ApiError ? err.message : t('profile.photoUploadError'))
+      // A 413 can come from three places with three different bodies: the
+      // endpoint's own cap, the app-wide body limit, and nginx, whose HTML page
+      // leaves ApiError carrying the bare status text. Translate all of them
+      // rather than showing whichever English string arrived.
+      if (err instanceof ApiError && err.status === 413) {
+        setAvatarError(t('profile.photoTooLargeServer'))
+      } else {
+        setAvatarError(err instanceof ApiError ? err.message : t('profile.photoUploadError'))
+      }
     } finally {
       setAvatarBusy(false)
     }
@@ -299,7 +322,7 @@ export default function Profile() {
                   )}
                 </div>
                 <p className="text-xs font-medium text-muted-foreground">
-                  {t('profile.photoHint')}
+                  {t('profile.photoHint', { max: AVATAR_MAX_MB })}
                 </p>
               </div>
             </div>

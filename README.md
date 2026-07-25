@@ -373,7 +373,7 @@ container entrypoint, before Python starts.
 | `TOTP_ISSUER` | `isachore` | Label shown beside the account in authenticator apps (cosmetic). |
 | `TEST_EMAIL_COOLDOWN` | `10` | Seconds between admin test-email sends, per admin. |
 | `STORAGE_DIR` | `storage` | Where uploaded avatars are written (relative to the backend workdir). |
-| `AVATAR_MAX_BYTES` | `5242880` | Max raw upload size (~5 MB). |
+| `AVATAR_MAX_BYTES` | `5242880` | Max raw upload size (~5 MB). The Profile page mirrors the default to reject an oversized pick before uploading and to word its hint, so change `AVATAR_MAX_MB` in `frontend/src/pages/Profile.tsx` to match, or the UI keeps advertising 5 MB. |
 | `AVATAR_MAX_PIXELS` | `50000000` | Max decoded pixel count (guards decompression bombs). |
 | `AVATAR_PX` | `512` | Side length of the stored square avatar. |
 | `MAX_REQUEST_BYTES` | `6291456` | App-level cap on any request body (~6 MB, 413 past it). Defence in depth behind nginx's `client_max_body_size`; keep the two in sync. |
