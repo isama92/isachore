@@ -2,7 +2,6 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 import pytest
-from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
@@ -22,7 +21,6 @@ MakeUser = Callable[..., Awaitable[User]]
 MakeHousehold = Callable[..., Awaitable[Household]]
 MakeTag = Callable[..., Awaitable[Tag]]
 MakeChore = Callable[..., Awaitable[Chore]]
-AuthClient = Callable[[User], Awaitable[AsyncClient]]
 
 
 # --- relationships ---
