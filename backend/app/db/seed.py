@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.assignment import initial_assignee, next_assignee, should_reassign
 from app.core.chores import first_occurrence, next_occurrence_after
+from app.core.households import personal_household_name
 from app.core.security import hash_password
 from app.models import (
     AssignmentType,
@@ -378,7 +379,11 @@ async def seed(session: AsyncSession, *, fresh: bool = False) -> SeedSummary:
 
     for user in users:
         add_household(
-            f"solo:{user.email}", f"{user.first_name}'s place", user, [user], ["home", "errands"]
+            f"solo:{user.email}",
+            personal_household_name(user.first_name),
+            user,
+            [user],
+            ["home", "errands"],
         )
     add_household(
         _SHARED,

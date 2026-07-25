@@ -59,10 +59,13 @@ async def test_init_creates_the_first_admin_on_an_empty_db(db_session) -> None:
     assert verify_password(_INIT_PASSWORD, user.password_hash)
 
 
-async def test_init_joins_the_new_admin_to_the_default_household(
+async def test_init_gives_the_new_admin_their_own_household(
     db_session, make_household: Callable[..., Awaitable[Household]]
 ) -> None:
-    household = await make_household(name="Existing")
+    # A pre-existing household belonging to someone else must NOT be joined: the
+    # old behaviour picked the lowest-id household, which once households became
+    # user-owned meant dropping the new admin into a stranger's chores.
+    other = await make_household(name="Someone else's")
 
     await init_admin(db_session, "owner@example.com", "Owner", "User", _INIT_PASSWORD)
 
@@ -78,7 +81,14 @@ async def test_init_joins_the_new_admin_to_the_default_household(
         .scalars()
         .all()
     )
-    assert memberships == [household.id]
+    assert len(memberships) == 1
+    assert memberships[0] != other.id
+    household = await db_session.get(Household, memberships[0])
+    assert household is not None
+    # Owned by the new admin, so they can actually manage it, and named off their
+    # first name the same way the seeder names a solo household.
+    assert household.admin_id == user.id
+    assert household.name == "Owner's place"
 
 
 async def test_init_is_a_noop_when_an_active_admin_exists(
@@ -139,8 +149,8 @@ async def test_init_does_not_duplicate_household_membership_when_restoring(
     make_user: Callable[..., Awaitable[User]],
     make_household: Callable[..., Awaitable[Household]],
 ) -> None:
-    # add_to_default_household inserts unconditionally, so the restore path must
-    # not call it: doing so would add a second household_members row.
+    # The restore path must not create a household: the account already has one,
+    # so doing so would leave a stray household behind on every recovery run.
     member = await make_user(email="member@example.com")
     await make_household(name="Existing", members=[member])
 
@@ -152,6 +162,9 @@ async def test_init_does_not_duplicate_household_membership_when_restoring(
         .where(household_members.c.user_id == member.id)
     )
     assert rows == 1
+    # And no stray household either, which is what the membership count implies
+    # but does not actually assert.
+    assert await db_session.scalar(select(func.count()).select_from(Household)) == 1
 
 
 async def test_init_restore_matches_a_mixed_case_email(

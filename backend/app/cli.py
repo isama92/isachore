@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import record_event
 from app.core.config import is_dev_environment, settings
 from app.core.crypto import generate_key
-from app.core.households import add_to_default_household
+from app.core.households import create_personal_household
 from app.core.invitations import run_expire_invitations
 from app.core.rate_limit import clear_login_throttle
 from app.core.security import hash_password
@@ -71,7 +71,7 @@ async def init_admin(
     )
     session.add(user)
     await session.flush()
-    await add_to_default_household(session, user.id)
+    await create_personal_household(session, user)
     await session.commit()
     print(f"admin user {email!r} created")
 
@@ -117,9 +117,9 @@ async def _restore_admin(session: AsyncSession, user: User, password: str) -> No
     await session.execute(delete(AuthToken).where(AuthToken.user_id == user.id))
     await session.execute(delete(ConfirmationToken).where(ConfirmationToken.user_id == user.id))
     changes.append("sessions and pending confirmation links revoked")
-    # Deliberately not add_to_default_household: an existing user already has its
-    # memberships, and that helper inserts unconditionally rather than checking,
-    # so calling it here would duplicate a household_members row.
+    # Deliberately not create_personal_household: recovery is about restoring
+    # access to an existing account, which already has its households. Creating
+    # another would leave a stray one behind on every recovery run.
     #
     # No actor_id: there is no logged-in admin, only whoever holds shell access,
     # the same "no known actor" case as login_failed. user_updated is reused
