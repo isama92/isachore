@@ -306,14 +306,17 @@ async def _household_ids(session: AsyncSession, user_id: int) -> list[int]:
     return list(result.scalars().all())
 
 
-async def test_create_user_gives_them_their_own_household(
+async def test_create_user_creates_no_household(
     make_user: Login,
     auth_client: AuthClient,
     db_session: AsyncSession,
     make_household: Callable[..., Awaitable[Household]],
 ) -> None:
+    # Creating an account provisions nothing: people make their own household or
+    # accept an invitation to one.
     admin = await make_user(email="admin@example.com", is_admin=True)
     admin_household = await make_household(name="Admin's place", members=[admin])
+    before = await db_session.scalar(select(func.count()).select_from(Household))
     client = await auth_client(admin)
 
     resp = await client.post(
@@ -327,25 +330,18 @@ async def test_create_user_gives_them_their_own_household(
     )
 
     assert resp.status_code == 201
-    new_id = resp.json()["id"]
-    memberships = await _household_ids(db_session, new_id)
-    assert len(memberships) == 1
-    # Emphatically NOT the admin's household: the previous behaviour joined the
-    # lowest-id one, which would expose a stranger's chores to every new account.
-    assert memberships[0] != admin_household.id
-    household = await db_session.get(Household, memberships[0])
-    assert household is not None
-    assert household.admin_id == new_id
-    assert household.name == "New's place"
-    # The admin's own household gained nobody.
+    assert await _household_ids(db_session, resp.json()["id"]) == []
+    assert await db_session.scalar(select(func.count()).select_from(Household)) == before
+    # And emphatically not joined to somebody else's, which would hand a stranger's
+    # chores to every new account.
     assert await _household_ids(db_session, admin.id) == [admin_household.id]
 
 
-async def test_create_user_waiting_confirmation_still_gets_a_household(
+async def test_create_user_waiting_confirmation_creates_no_household_either(
     make_user: Login, auth_client: AuthClient, db_session: AsyncSession, smtp: list
 ) -> None:
-    # The household is created with the account, not at confirmation time, so a
-    # user who has not clicked the link yet still owns one.
+    # Confirming does not provision one either, so this stays empty for the whole
+    # lifetime of the account until the user acts.
     await _enable_confirmation(db_session)
     admin = await make_user(email="admin@example.com", is_admin=True)
     client = await auth_client(admin)
@@ -357,17 +353,14 @@ async def test_create_user_waiting_confirmation_still_gets_a_household(
 
     assert resp.status_code == 201
     assert resp.json()["status"] == "waiting_confirmation"
-    memberships = await _household_ids(db_session, resp.json()["id"])
-    assert len(memberships) == 1
+    assert await _household_ids(db_session, resp.json()["id"]) == []
 
 
 async def test_create_user_with_a_very_long_first_name(
     make_user: Login, auth_client: AuthClient, db_session: AsyncSession
 ) -> None:
-    # The generated household name appends "'s place" to the first name, and
-    # households.name is varchar(255) while first_name is accepted up to 255. An
-    # unclipped name would overflow and turn this 201 into a 500, rolling back the
-    # account too.
+    # first_name is accepted up to 255 characters (schemas/user.py), so check the
+    # column really takes it rather than turning this 201 into a 500.
     admin = await make_user(email="admin@example.com", is_admin=True)
     client = await auth_client(admin)
 
@@ -382,11 +375,7 @@ async def test_create_user_with_a_very_long_first_name(
     )
 
     assert resp.status_code == 201
-    memberships = await _household_ids(db_session, resp.json()["id"])
-    household = await db_session.get(Household, memberships[0])
-    assert household is not None
-    assert len(household.name) <= 255
-    assert household.name.endswith("'s place")
+    assert resp.json()["first_name"] == "N" * 255
 
 
 async def test_create_user_duplicate_email(make_user: Login, auth_client: AuthClient) -> None:

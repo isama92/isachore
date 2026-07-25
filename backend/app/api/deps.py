@@ -82,10 +82,14 @@ Impersonator = Annotated[User | None, Depends(get_impersonator)]
 
 
 async def get_current_household(user: CurrentUser, session: SessionDep) -> Household:
-    """The current user's active household (lowest id while a user has just one).
+    """The current user's active household, lowest id first, as a fallback for
+    callers that take no explicit household_id.
 
-    Excludes soft-deleted households so the fallback stays consistent with
-    get_member_household and the /households list (which both hide deleted ones)."""
+    Being a member of none is a normal state (nothing provisions a household), so
+    the 404 below is a routine answer rather than an anomaly, and callers with a UI
+    are expected to check first. Excludes soft-deleted households so the fallback
+    stays consistent with get_member_household and the /households list (which both
+    hide deleted ones)."""
     result = await session.execute(
         select(Household)
         .join(household_members, household_members.c.household_id == Household.id)

@@ -26,6 +26,9 @@ There is **no self-registration**. The first admin is created with the `init`
 command (see below); every other user is created by an admin in the UI under
 **Admin > Users**.
 
+A new account starts with no household. Creating one is the user's own first step,
+under **Households**, or they accept an invitation to somebody else's.
+
 ## Development
 
 ### Prerequisites

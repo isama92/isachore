@@ -59,36 +59,27 @@ async def test_init_creates_the_first_admin_on_an_empty_db(db_session) -> None:
     assert verify_password(_INIT_PASSWORD, user.password_hash)
 
 
-async def test_init_gives_the_new_admin_their_own_household(
+async def test_init_creates_no_household(
     db_session, make_household: Callable[..., Awaitable[Household]]
 ) -> None:
-    # A pre-existing household belonging to someone else must NOT be joined: the
-    # old behaviour picked the lowest-id household, which once households became
+    # The bootstrap admin provisions nothing either, so a fresh install starts with
+    # an empty Households page and the admin creates their own. In particular a
+    # pre-existing household belonging to someone else must NOT be joined: an
+    # earlier version picked the lowest-id household, which once households became
     # user-owned meant dropping the new admin into a stranger's chores.
-    other = await make_household(name="Someone else's")
+    await make_household(name="Someone else's")
 
     await init_admin(db_session, "owner@example.com", "Owner", "User", _INIT_PASSWORD)
 
     user = await db_session.scalar(select(User).where(User.email == "owner@example.com"))
-    memberships = (
-        (
-            await db_session.execute(
-                select(household_members.c.household_id).where(
-                    household_members.c.user_id == user.id
-                )
-            )
-        )
-        .scalars()
-        .all()
+    memberships = await db_session.scalar(
+        select(func.count())
+        .select_from(household_members)
+        .where(household_members.c.user_id == user.id)
     )
-    assert len(memberships) == 1
-    assert memberships[0] != other.id
-    household = await db_session.get(Household, memberships[0])
-    assert household is not None
-    # Owned by the new admin, so they can actually manage it, and named off their
-    # first name the same way the seeder names a solo household.
-    assert household.admin_id == user.id
-    assert household.name == "Owner's place"
+    assert memberships == 0
+    # The one household is still the pre-existing one, untouched.
+    assert await db_session.scalar(select(func.count()).select_from(Household)) == 1
 
 
 async def test_init_is_a_noop_when_an_active_admin_exists(

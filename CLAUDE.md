@@ -177,17 +177,29 @@ pre-commit run --all-files                           # what the git hook runs
   `confirmed_at` timestamp. Only `active` users can log in or be impersonated;
   deactivation is a soft delete (`status=disabled`). Login and impersonation gate
   on `status == UserStatus.active`.
-- **Every user gets their own household at creation**, owned by them, via
-  `create_personal_household` (`app/core/households.py`), called from `cli init` and
-  `POST /users`. That includes a `waiting_confirmation` user: the household belongs
-  to the account, not to confirming it. (`seed` is the exception, building its own
-  solo plus shared households; it shares only the naming helper.) Recovery
-  (`_restore_admin`) deliberately does not call it, because recovery restores access
-  and does not provision. Do NOT seed a household in a migration:
-  `households.admin_id` is NOT NULL, so a household cannot exist before its owner,
-  and an owner-less row is what used to make `alembic upgrade head` unrunnable on an
-  empty database. Nothing assumes a user has exactly one household, or any: leaving
-  or deleting one is allowed and the UI has copy for zero.
+- **NOTHING provisions a household.** Not `POST /users`, not `cli init`, not
+  confirming an account: a new user, the bootstrap admin included, starts a member
+  of none and creates their own through `POST /households` (open to any
+  authenticated user) or accepts an invitation. Do not reintroduce an automatic one
+  anywhere, including in the confirmation flow; it was removed because it left
+  every account owning a household it never asked for. `seed` is the exception,
+  building its own solo plus shared households, and is now the only consumer of
+  `personal_household_name` (`app/core/households.py`), the naming helper that
+  survives for it. Two consequences to keep in mind:
+  - **Zero households is a normal, reachable state**, not an edge case, and it is
+    the state every fresh install and every new account begins in. Nothing may
+    assume a user has any household, let alone exactly one, and leaving or deleting
+    the last one is allowed. `Households` has a first-run empty state; the three
+    pages carrying `noHouseholds` copy do so for two different reasons, so do not
+    treat them as one guard: `Tags` because its list call omits `household_id` and
+    so hits `get_current_household` (`api/deps.py`), which 404s for a member of
+    none and is the only endpoint that hard-fails; `ChoreCreate` and `TagCreate`
+    because their forms have no `household_id` to submit at all. Everything else
+    (Home, Chores, History, Statistics) scopes through `member_household_ids` and
+    simply returns nothing.
+  - Do NOT seed a household in a migration: `households.admin_id` is NOT NULL, so
+    a household cannot exist before its owner, and an owner-less row is what used
+    to make `alembic upgrade head` unrunnable on an empty database.
 - **Email confirmation**: server-wide `app_settings.require_confirmation`
   (single-row table, `get_app_settings`) toggles it. When on, creating a user
   emails a `confirmation_tokens` link (same hashed-opaque-token pattern as auth

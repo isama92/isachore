@@ -122,6 +122,20 @@ export default function Households() {
     )
   }
 
+  // The first-run state, now that nothing provisions a household on sign-up. Both
+  // guards earn their place, because an empty page is not the same as an empty
+  // account: with a name filter typed in it means no matches, and with `total`
+  // above zero it means an out-of-range page (useServerTable deliberately does not
+  // clamp `page`, so deleting the last row of page 2 lands here). Claiming "no
+  // households yet" above a footer reading "10 total" would be a plain lie.
+  const emptyMessage =
+    table.filters.name || table.total > 0 ? undefined : (
+      <div className="flex flex-col gap-1">
+        <span className="font-semibold text-foreground">{t('households.emptyTitle')}</span>
+        <span>{t('households.emptyHint')}</span>
+      </div>
+    )
+
   const columns: ColumnDef<Household>[] = [
     {
       accessorKey: 'id',
@@ -198,7 +212,12 @@ export default function Households() {
           />
         </div>
 
-        <DataTable columns={columns} table={table} minWidthClassName="min-w-[720px]" />
+        <DataTable
+          columns={columns}
+          table={table}
+          emptyMessage={emptyMessage}
+          minWidthClassName="min-w-[720px]"
+        />
       </main>
     </TooltipProvider>
   )

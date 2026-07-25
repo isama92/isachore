@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   flexRender,
   getCoreRowModel,
@@ -52,7 +52,9 @@ type DataTableProps<Row, Filters extends FilterSet> = {
   columns: ColumnDef<Row>[]
   table: UseServerTableResult<Row, Filters>
   pageSizeOptions?: number[]
-  emptyMessage?: string
+  // A node, not just a string, so a first-run empty state can be more than one
+  // line. Every string caller keeps working, a string being a ReactNode.
+  emptyMessage?: ReactNode
   // Minimum table width so columns don't crush on narrow viewports; the card
   // scrolls horizontally instead (matches the app's other tables).
   minWidthClassName?: string

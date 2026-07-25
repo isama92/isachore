@@ -111,33 +111,15 @@ _NAME_MAX = Household.__table__.c.name.type.length or 255
 
 
 def personal_household_name(first_name: str) -> str:
-    """Name for a user's own household, clipped to fit `households.name`.
+    """Name for a household belonging to one person, clipped to fit `households.name`.
 
-    `first_name` is accepted up to 255 characters (schemas/user.py), which with the
-    suffix would overflow varchar(255). Postgres raises on an over-long INSERT
-    rather than truncating, so a long first name would turn user creation into a
-    500 and roll the account back. The suffix is kept whole; the name gives.
+    Only `db/seed.py` uses this, for the solo household it gives each seeded user;
+    nothing provisions a household automatically any more, so a real user names
+    their own. The clipping is therefore defensive rather than load-bearing today,
+    since seed's first names are short: `households.name` is varchar(255) and
+    Postgres rejects an over-long INSERT outright instead of truncating, so any
+    caller passing a 255-character first name (the schema limit, should one ever
+    exist again) would get an error rather than a shortened name. The suffix is
+    kept whole; the name gives.
     """
     return f"{first_name[: _NAME_MAX - len(_PERSONAL_SUFFIX)]}{_PERSONAL_SUFFIX}"
-
-
-async def create_personal_household(session: AsyncSession, user: User) -> Household:
-    """Give a freshly created user a household of their own, owned by them.
-
-    Every user needs somewhere to keep chores, and this is the only way to get
-    one: `households.admin_id` is NOT NULL, so a household cannot exist before its
-    owner does, which is why a migration cannot provide it. Mirrors
-    `create_household` in api/v1/households.py, where the creator likewise becomes
-    both owner and first member.
-
-    Note this must give the user their OWN household rather than adding them to an
-    existing one: with households user-owned, joining the lowest-id household would
-    drop each new account into a stranger's household, chores and all.
-
-    The caller must have flushed the user, so `user.id` is populated.
-    """
-    household = Household(name=personal_household_name(user.first_name), admin_id=user.id)
-    session.add(household)
-    await session.flush()
-    await add_member(session, household.id, user.id)
-    return household

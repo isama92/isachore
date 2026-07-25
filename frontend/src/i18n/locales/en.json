@@ -261,6 +261,8 @@
   "households": {
     "loadError": "Failed to load households",
     "title": "Households",
+    "emptyTitle": "No households yet",
+    "emptyHint": "Create one to start adding chores, or wait for an invitation.",
     "add": "Add household",
     "new": "New household",
     "edit": "Edit household",

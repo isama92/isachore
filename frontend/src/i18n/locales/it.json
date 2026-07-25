@@ -261,6 +261,8 @@
   "households": {
     "loadError": "Impossibile caricare i nuclei domestici",
     "title": "Nuclei domestici",
+    "emptyTitle": "Nessun nucleo domestico",
+    "emptyHint": "Creane uno per iniziare ad aggiungere faccende, oppure attendi un invito.",
     "add": "Aggiungi nucleo domestico",
     "new": "Nuovo nucleo domestico",
     "edit": "Modifica nucleo domestico",
