@@ -9,7 +9,6 @@ from app.api.deps import AdminUser, Impersonator, SessionDep, get_request_token
 from app.core.app_settings import get_app_settings
 from app.core.audit import record_event
 from app.core.email import NO_SMTP_DETAIL, send_confirmation_email, smtp_configured
-from app.core.households import create_personal_household
 from app.core.rate_limit import client_ip
 from app.core.security import (
     ADMIN_COOKIE_NAME,
@@ -213,7 +212,9 @@ async def create_user(
 
     session.add(user)
     await session.flush()
-    await create_personal_household(session, user)
+    # No household is provisioned here: people create or are invited to their own
+    # (POST /households is open to any authenticated user). Guessing wrong left
+    # every account owning a household it never asked for.
     if app_settings.require_confirmation:
         confirm_token = await _issue_confirmation_token(session, user.id)
     await record_event(

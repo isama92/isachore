@@ -132,7 +132,7 @@ describe('Households', () => {
     expect(await screen.findByText('Failed to load households')).toBeInTheDocument()
   })
 
-  it('shows the empty state when there are no households', async () => {
+  it('shows a first-run empty state when the user has no households', async () => {
     stubFetch({ households: [] })
     renderWithProviders(
       <Routes>
@@ -141,6 +141,46 @@ describe('Households', () => {
       { authValue: { user: me }, route: '/' },
     )
 
+    // Nothing provisions a household on sign-up, so this is what a brand-new
+    // account sees; the generic "No results." would read like a loading bug.
+    expect(await screen.findByText('No households yet')).toBeInTheDocument()
+    expect(
+      screen.getByText('Create one to start adding chores, or wait for an invitation.'),
+    ).toBeInTheDocument()
+  })
+
+  it('falls back to the generic empty message when a name filter matches nothing', async () => {
+    const user = userEvent.setup()
+    stubFetch({ households: [] })
+    renderWithProviders(
+      <Routes>
+        <Route path="/" element={<Households />} />
+      </Routes>,
+      { authValue: { user: me }, route: '/' },
+    )
+    await screen.findByText('No households yet')
+
+    await user.type(screen.getByPlaceholderText('Filter by name'), 'zzz')
+
+    // With a filter active, an empty table means no matches, so inviting the user
+    // to create their first household would be wrong.
     expect(await screen.findByText('No results.')).toBeInTheDocument()
+    expect(screen.queryByText('No households yet')).not.toBeInTheDocument()
+  })
+
+  it('falls back to the generic empty message on an out-of-range page', async () => {
+    // useServerTable does not clamp `page`, so deleting the last row of page 2
+    // leaves an empty item list with a non-zero total. The user owns 10
+    // households; telling them they have none would be flatly wrong.
+    stubFetch({ households: [], total: 10 })
+    renderWithProviders(
+      <Routes>
+        <Route path="/" element={<Households />} />
+      </Routes>,
+      { authValue: { user: me }, route: '/' },
+    )
+
+    expect(await screen.findByText('No results.')).toBeInTheDocument()
+    expect(screen.queryByText('No households yet')).not.toBeInTheDocument()
   })
 })

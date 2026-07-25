@@ -5,12 +5,29 @@ from httpx import AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.households import personal_household_name
 from app.models import Chore, Household, User, UserStatus, household_members
 
 MakeUser = Callable[..., Awaitable[User]]
 MakeHousehold = Callable[..., Awaitable[Household]]
 MakeChore = Callable[..., Awaitable[Chore]]
 AuthClient = Callable[[User], Awaitable[AsyncClient]]
+
+
+# --- naming helper ------------------------------------------------------
+
+
+def test_personal_household_name_fits_the_column() -> None:
+    # Only `seed` names a household this way now, and its first names are short, so
+    # nothing exercises the clipping in practice. Pin it anyway: households.name is
+    # varchar(255) and Postgres rejects an over-long INSERT outright rather than
+    # truncating, so an unclipped 255-character first name would turn seeding into
+    # an error instead of a slightly shortened name.
+    name = personal_household_name("N" * 255)
+    assert len(name) <= 255
+    assert name.endswith("'s place")
+    # A normal name is untouched.
+    assert personal_household_name("Alex") == "Alex's place"
 
 
 # --- list ---------------------------------------------------------------

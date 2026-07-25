@@ -78,7 +78,12 @@ class Settings(BaseSettings):
     # mount in dev and a named volume in prod so they survive restarts.
     storage_dir: str = "storage"
     # Upper bound on the raw uploaded bytes, checked before decoding (bounds the
-    # compressed upload). ~5 MB.
+    # compressed upload). ~5 MB. The Profile page mirrors this default in
+    # AVATAR_MAX_MB to reject an oversized pick without uploading it and to word
+    # its size hint, so lowering this here alone leaves the UI advertising 5 MB;
+    # move both together. Nothing breaks if they disagree (the server still
+    # rejects, and its 413 message deliberately quotes no figure), the hint just
+    # becomes a lie.
     avatar_max_bytes: int = 5 * 1024 * 1024
     # Upper bound on the decoded pixel count, checked from the image header
     # before allocating the bitmap (bounds memory / decompression bombs). 50 MP

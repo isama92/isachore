@@ -16,7 +16,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --frozen --no-install-project
+# After the sync so editing the entrypoint doesn't invalidate the dependency
+# layer. Installed to /usr/local/bin, not /app, because this stage ships no
+# source at all: at /app the ./backend bind mount would be its only source.
+# --chmod so the exec bit cannot be lost with the image still building green: an
+# unexecutable entrypoint kills every container in every mode at once.
+COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 EXPOSE 8000
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
 FROM base AS builder
@@ -33,8 +40,14 @@ COPY --from=builder --chown=app:app /app /app
 # Create the avatars storage dir owned by the non-root app user so the mounted
 # named volume inherits writable ownership on first mount.
 RUN mkdir -p /app/storage/avatars && chown -R app:app /app/storage
+# Straight from the build context (the same ./backend), which also leaves an
+# inert copy at /app via the COPY above; /usr/local/bin is the one ENTRYPOINT
+# names, so a future bind mount over /app cannot shadow it. See the dev stage for
+# why the mode is set here rather than inherited from the checkout.
+COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 ENV PATH="/opt/venv/bin:$PATH"
 WORKDIR /app
 USER app
 EXPOSE 8000
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

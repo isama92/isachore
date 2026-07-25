@@ -306,6 +306,11 @@ async def test_upload_avatar_too_large(
         "/api/v1/profile/avatar", files={"file": ("big.png", _png_bytes(), "image/png")}
     )
     assert res.status_code == 413
+    # 413 rather than the 400 the other rejections use, because the frontend
+    # branches on the status to show its own translated message and must not
+    # confuse "too big" with "not a valid image".
+    assert res.json()["detail"] == "Image is too large"
+    assert list(avatar_storage.glob("*")) == []
 
 
 async def test_upload_avatar_too_many_pixels(

@@ -71,9 +71,10 @@ Full reference (setup, seeding, throttle clearing, prod modes, env vars) is in
 README.md. The essentials, run inside the container so the `db` host resolves:
 
 ```bash
-docker compose up --build                           # dev stack
+docker compose up --build                           # dev stack; the backend entrypoint runs `alembic upgrade head` on boot
 docker compose exec backend alembic revision --autogenerate -m "..."
-docker compose exec backend alembic upgrade head
+docker compose exec backend alembic upgrade head    # escape hatch: boot already did this
+docker compose run --rm backend alembic upgrade head  # ...and this is the one that works when boot FAILED: no container to exec into
 docker compose exec backend python -m app.cli init --email you@example.com --first-name You --last-name Example  # first admin; no-op if an ACTIVE one exists, else recovers that email
 docker compose exec backend python -m app.cli generate-key  # fresh APP_KEY (required outside dev)
 docker compose exec backend python -m app.cli seed --fresh   # dev-only reseed (5 users, all password `password`, incl. admin@example.com)
@@ -94,7 +95,23 @@ pre-commit run --all-files                           # what the git hook runs
   deployment is a compose file, a `.env` and a `docker compose pull` with no repo
   checkout on the host. Never add `build:` back to a prod mode file: on a server
   there is no `./backend` to build from, so `up -d` would fail confusingly.
-  Three coupled details:
+  Four coupled details:
+  - **`backend/docker-entrypoint.sh` runs `alembic upgrade head` on boot**, so an
+    upgrade is `pull` + `up -d`. It is baked in as `ENTRYPOINT` in the `dev` and
+    `prod` stages, which is what keeps this out of the compose files entirely:
+    operators already hold copies of the prod mode files, and those must stay
+    `image:`-only. It installs to `/usr/local/bin`, not `/app`, because the dev
+    stage ships no source (only the bind mount) and a mount there would shadow it.
+    Two rules when touching it: it migrates **only when `$1` is `uvicorn`**, since
+    `run --rm --no-deps backend python -m app.cli generate-key` is the documented
+    way out of a deploy the startup check rejected and deliberately runs with no
+    database, so an unconditional upgrade would break exactly that recovery path;
+    and `set -e` must stay, so a failed migration crash-loops the container
+    instead of serving against a schema the code does not match.
+    `RUN_MIGRATIONS=false` opts out (shell-only, deliberately NOT a `Settings`
+    field: no Python reads it, and pydantic's `extra="ignore"` makes a stray var
+    in `.env` harmless). Concurrency is a documented operator constraint, not a
+    lock: two instances booting against one database race on `alembic_version`.
   - Build **contexts stay `./backend` and `./frontend`** even though the
     Dockerfiles moved, because every `COPY`/`--mount=source=` inside them is
     context-relative. Only a `dockerfile: ../docker/<name>.Dockerfile` was added
@@ -160,17 +177,29 @@ pre-commit run --all-files                           # what the git hook runs
   `confirmed_at` timestamp. Only `active` users can log in or be impersonated;
   deactivation is a soft delete (`status=disabled`). Login and impersonation gate
   on `status == UserStatus.active`.
-- **Every user gets their own household at creation**, owned by them, via
-  `create_personal_household` (`app/core/households.py`), called from `cli init` and
-  `POST /users`. That includes a `waiting_confirmation` user: the household belongs
-  to the account, not to confirming it. (`seed` is the exception, building its own
-  solo plus shared households; it shares only the naming helper.) Recovery
-  (`_restore_admin`) deliberately does not call it, because recovery restores access
-  and does not provision. Do NOT seed a household in a migration:
-  `households.admin_id` is NOT NULL, so a household cannot exist before its owner,
-  and an owner-less row is what used to make `alembic upgrade head` unrunnable on an
-  empty database. Nothing assumes a user has exactly one household, or any: leaving
-  or deleting one is allowed and the UI has copy for zero.
+- **NOTHING provisions a household.** Not `POST /users`, not `cli init`, not
+  confirming an account: a new user, the bootstrap admin included, starts a member
+  of none and creates their own through `POST /households` (open to any
+  authenticated user) or accepts an invitation. Do not reintroduce an automatic one
+  anywhere, including in the confirmation flow; it was removed because it left
+  every account owning a household it never asked for. `seed` is the exception,
+  building its own solo plus shared households, and is now the only consumer of
+  `personal_household_name` (`app/core/households.py`), the naming helper that
+  survives for it. Two consequences to keep in mind:
+  - **Zero households is a normal, reachable state**, not an edge case, and it is
+    the state every fresh install and every new account begins in. Nothing may
+    assume a user has any household, let alone exactly one, and leaving or deleting
+    the last one is allowed. `Households` has a first-run empty state; the three
+    pages carrying `noHouseholds` copy do so for two different reasons, so do not
+    treat them as one guard: `Tags` because its list call omits `household_id` and
+    so hits `get_current_household` (`api/deps.py`), which 404s for a member of
+    none and is the only endpoint that hard-fails; `ChoreCreate` and `TagCreate`
+    because their forms have no `household_id` to submit at all. Everything else
+    (Home, Chores, History, Statistics) scopes through `member_household_ids` and
+    simply returns nothing.
+  - Do NOT seed a household in a migration: `households.admin_id` is NOT NULL, so
+    a household cannot exist before its owner, and an owner-less row is what used
+    to make `alembic upgrade head` unrunnable on an empty database.
 - **Email confirmation**: server-wide `app_settings.require_confirmation`
   (single-row table, `get_app_settings`) toggles it. When on, creating a user
   emails a `confirmation_tokens` link (same hashed-opaque-token pattern as auth
@@ -266,6 +295,19 @@ the negative paths (401/403/400/404/409), not just the happy one.
   monkeypatching `settings.login_*`. Coverage: add
   `--cov=app --cov-report=term-missing --cov-report=html` (report at
   `backend/htmlcov/`).
+- **The boot migration is shell, so neither suite reaches it.** After touching
+  `backend/docker-entrypoint.sh` or either `ENTRYPOINT`, verify by hand:
+  `docker compose down -v && docker compose up -d --build backend`, then
+  `docker compose logs backend | grep entrypoint:` and
+  `docker compose exec db psql -U isachore -d isachore -c 'SELECT version_num FROM alembic_version'`
+  (non-empty). Check both other paths too, which are the ones easy to break:
+  `docker compose run --rm -e RUN_MIGRATIONS=false backend uvicorn --version` must
+  log the skip (the gate matches, then `--version` exits at once), and after
+  `docker compose stop db`,
+  `docker compose run --rm --no-deps backend python -m app.cli generate-key` must
+  still print a key with no database at all. Note the opt-out only reaches the
+  container through `.env`: the backend block has just `env_file`, so a bare
+  `RUN_MIGRATIONS=false docker compose up` is silently ignored.
 - **Frontend**: `cd frontend && npm run test` (coverage -> `frontend/coverage/`).
   Use `renderWithProviders` + the `fetch` mock from `src/test/utils.tsx` and the
   synthetic fixtures in `src/test/fixtures.ts`, never real personal data.
