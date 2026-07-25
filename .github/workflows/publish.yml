@@ -12,6 +12,8 @@ on:
     paths-ignore:
       - README.md
       - CLAUDE.md
+      - CONTRIBUTING.md
+      - SECURITY.md
       - COPYING
       - docs/**
   workflow_dispatch:
