@@ -86,6 +86,21 @@ describe('Chores', () => {
     expect(within(row).getByText('Least done')).toBeInTheDocument()
   })
 
+  it('spells out the interval and pinned weekdays in the repeats column', async () => {
+    const chore = makeChore({
+      id: 9,
+      title: 'Washing machine',
+      repeats: 'weekly',
+      repeat_interval: 2,
+      weekdays: [1, 4],
+    })
+    stubFetch({ chores: [chore] })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+
+    const row = (await screen.findByText('Washing machine')).closest('tr')!
+    expect(within(row).getByText('Every 2 weeks (Tue, Fri)')).toBeInTheDocument()
+  })
+
   it('shows the current assignee next to the assignment strategy', async () => {
     const robin = makeUser({ id: 2, first_name: 'Robin', last_name: 'Doe' })
     const chore = makeChore({
@@ -158,7 +173,11 @@ describe('Chores', () => {
       id: 7,
       title: 'Scrub the tub',
       description: 'Do it well',
-      repeats: 'daily',
+      // Non-default recurrence, so a hardcoded 1 / [] in cloneState would fail here
+      // rather than coinciding with the fixture defaults.
+      repeats: 'weekly',
+      repeat_interval: 3,
+      weekdays: [1, 4],
       assignment_type: 'least_done',
       household: { id: 4, name: 'Beach House' },
       assignees: [makeUser({ id: 2 }), makeUser({ id: 3 })],
@@ -186,10 +205,13 @@ describe('Chores', () => {
       household_id: 4,
       title: 'Scrub the tub',
       description: 'Do it well',
-      repeats: 'daily',
+      repeats: 'weekly',
       assignment_type: 'least_done',
       assignee_ids: [2, 3],
       tag_ids: [9],
+      // Carried, or the copy silently loses its schedule.
+      repeat_interval: 3,
+      weekdays: [1, 4],
     })
   })
 

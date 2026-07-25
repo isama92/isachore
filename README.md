@@ -486,5 +486,10 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
 
 ### Roadmap
 
+- [ ] Uploading a picture greater than 5MB should show an error message to the user
+- [ ] Occasional tasks should be show in another panel
+- [x] Schedule on specific weekdays
+- [ ] Add a skip button (next to complete), and change the charts to also show the skipped chores
+- [ ] creating a user shouldn't also create a household, a user can create their own household if needed
 - [ ] Live updates when a housemate completes a chore (websocket)
 - [ ] Chore change log (who changed what)

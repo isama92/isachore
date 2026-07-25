@@ -230,6 +230,9 @@
     "assigneesEmpty": "No members found.",
     "assignment": "Assignment",
     "repeats": "Repeats",
+    "repeatInterval": "Repeat every",
+    "weekdays": "On these days",
+    "weekdaysHint": "Leave empty to repeat weekly without pinning a day. Changing the days moves the next occurrence forward to the nearest selected one.",
     "takeTurns": "Take turns",
     "turnLength": "Turn length",
     "turnLengthHint": "Completions before the chore hands off to the next person.",
@@ -560,6 +563,45 @@
       "weekly": "Weekly",
       "monthly": "Monthly",
       "yearly": "Yearly"
+    },
+    "repeatEvery": {
+      "daily_one": "Daily",
+      "daily_other": "Every {{count}} days",
+      "weekly_one": "Weekly",
+      "weekly_other": "Every {{count}} weeks",
+      "monthly_one": "Monthly",
+      "monthly_other": "Every {{count}} months",
+      "yearly_one": "Yearly",
+      "yearly_other": "Every {{count}} years"
+    },
+    "repeatUnit": {
+      "daily_one": "day",
+      "daily_other": "days",
+      "weekly_one": "week",
+      "weekly_other": "weeks",
+      "monthly_one": "month",
+      "monthly_other": "months",
+      "yearly_one": "year",
+      "yearly_other": "years"
+    },
+    "repeatOnDays": "{{schedule}} ({{days}})",
+    "weekday": {
+      "mon": "Monday",
+      "tue": "Tuesday",
+      "wed": "Wednesday",
+      "thu": "Thursday",
+      "fri": "Friday",
+      "sat": "Saturday",
+      "sun": "Sunday"
+    },
+    "weekdayShort": {
+      "mon": "Mon",
+      "tue": "Tue",
+      "wed": "Wed",
+      "thu": "Thu",
+      "fri": "Fri",
+      "sat": "Sat",
+      "sun": "Sun"
     },
     "assignment": {
       "manual": "Manual",

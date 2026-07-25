@@ -5,6 +5,7 @@ import { CheckIcon } from 'lucide-react'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
+import { repeatLabel } from '../lib/chores'
 import { formatDateTime } from '../lib/format'
 import { dueDotClass, relativeDueLabel, sortByDue } from '../lib/home'
 import { fullName } from '../lib/user'
@@ -90,7 +91,7 @@ function DueRow({
               {' · '}
               {formatDateTime(chore.next_due)}
               {' · '}
-              {t(`options.repeat.${chore.repeats}`)}
+              {repeatLabel(t, chore)}
             </p>
             {/* On mobile the right-hand column is too cramped, so the assignee
                 (and household, for multi-household users) stack here under the

@@ -124,6 +124,8 @@ export default function ChoreCreate() {
     repeats: clone?.repeats ?? 'weekly',
     assignment_type: clone?.assignment_type ?? 'manual',
     turn_length: clone?.turn_length ?? 1,
+    repeat_interval: clone?.repeat_interval ?? 1,
+    weekdays: clone?.weekdays ?? [],
     assignee_ids: clone?.assignee_ids ?? [],
     // A fresh chore derives its own starting assignee (manual lets you pick one).
     current_assignee_id: null,

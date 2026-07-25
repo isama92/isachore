@@ -53,6 +53,7 @@ describe('Home', () => {
             status: 'overdue',
             days_until_due: -3,
             repeats: 'weekly',
+            weekdays: [1, 4],
             next_due: '2026-07-15T00:00:00Z',
             assignees: [makeHouseholdMember({ id: 2, first_name: 'Anna', last_name: 'Aardvark' })],
           }),
@@ -62,6 +63,7 @@ describe('Home', () => {
             status: 'today',
             days_until_due: 0,
             repeats: 'daily',
+            repeat_interval: 2,
             next_due: '2026-07-18T00:00:00Z',
             assignees: [],
           }),
@@ -78,11 +80,13 @@ describe('Home', () => {
     const overdue = screen.getByText('Clean the bathroom').closest('li')!
     expect(overdue.querySelector('.bg-due-overdue')).toBeTruthy()
     expect(overdue.textContent).toContain('3 days overdue')
-    expect(overdue.textContent).toContain('Weekly')
+    // The row spells out the whole schedule, not just the period.
+    expect(overdue.textContent).toContain('Weekly (Tue, Fri)')
     expect(overdue.textContent).toContain('Anna Aardvark')
 
     const unassigned = screen.getByText('Do the dishes').closest('li')!
     expect(unassigned.querySelector('.bg-due-today')).toBeTruthy()
+    expect(unassigned.textContent).toContain('Every 2 days')
     expect(unassigned.textContent).toContain('Unassigned')
   })
 

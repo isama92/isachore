@@ -68,6 +68,8 @@ function cloneState(overrides: Record<string, unknown> = {}) {
       assignment_type: 'least_done',
       assignee_ids: [2],
       tag_ids: [3],
+      repeat_interval: 1,
+      weekdays: [],
       ...overrides,
     },
   }
@@ -138,7 +140,116 @@ describe('ChoreCreate', () => {
       assignment_type: 'least_done',
       assignee_ids: [2],
       tag_ids: [3],
+      // Unset recurrence detail: every period, unpinned.
+      repeat_interval: 1,
+      weekdays: null,
     })
+  })
+
+  it('pins the selected weekdays, reporting them Monday-first', async () => {
+    const fetchMock = singleHouseholdMocks()
+    withRoutes()
+
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    await user.type(await screen.findByLabelText('Title'), 'Washing machine')
+    // Weekly is the default, so the weekday row already shows. Click out of order.
+    await user.click(screen.getByRole('button', { name: 'Friday' }))
+    await user.click(screen.getByRole('button', { name: 'Tuesday' }))
+    await user.click(screen.getByRole('button', { name: 'Add chore' }))
+
+    await screen.findByText('chores-list')
+    expect(postBody(fetchMock)).toMatchObject({ repeats: 'weekly', weekdays: [1, 4] })
+  })
+
+  it('submits a typed interval and names the period beside it', async () => {
+    const fetchMock = singleHouseholdMocks()
+    withRoutes()
+
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    await user.type(await screen.findByLabelText('Title'), 'Dishwasher')
+    await user.click(screen.getByRole('combobox', { name: 'Repeats' }))
+    await user.click(await screen.findByRole('option', { name: 'Daily' }))
+    // The unit agrees with the number in the box, singular at one.
+    expect(screen.getByText('day')).toBeInTheDocument()
+    await user.clear(screen.getByLabelText('Repeat every'))
+    await user.type(screen.getByLabelText('Repeat every'), '14')
+    expect(screen.getByLabelText('Repeat every')).toHaveValue(14)
+    expect(screen.getByText('days')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Add chore' }))
+
+    await screen.findByText('chores-list')
+    expect(postBody(fetchMock)).toMatchObject({ repeats: 'daily', repeat_interval: 14 })
+  })
+
+  it('hides both recurrence controls for a one-off and submits them unset', async () => {
+    const fetchMock = singleHouseholdMocks()
+    withRoutes()
+
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    await user.type(await screen.findByLabelText('Title'), 'Fix the shelf')
+    await user.click(screen.getByRole('combobox', { name: 'Repeats' }))
+    await user.click(await screen.findByRole('option', { name: 'Manual' }))
+
+    expect(screen.queryByLabelText('Repeat every')).not.toBeInTheDocument()
+    expect(screen.queryByRole('toolbar', { name: 'On these days' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/without pinning a day/)).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Add chore' }))
+
+    await screen.findByText('chores-list')
+    expect(postBody(fetchMock)).toMatchObject({ repeat_interval: 1, weekdays: null })
+  })
+
+  it('drops pinned weekdays when the period stops being weekly, keeping the interval', async () => {
+    const fetchMock = singleHouseholdMocks()
+    withRoutes()
+
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    await user.type(await screen.findByLabelText('Title'), 'Deep clean')
+    await user.click(screen.getByRole('button', { name: 'Tuesday' }))
+    await user.clear(screen.getByLabelText('Repeat every'))
+    await user.type(screen.getByLabelText('Repeat every'), '3')
+    // Monthly cannot be pinned, so the row goes away and the stale day must not be sent.
+    await user.click(screen.getByRole('combobox', { name: 'Repeats' }))
+    await user.click(await screen.findByRole('option', { name: 'Monthly' }))
+    expect(screen.queryByRole('toolbar', { name: 'On these days' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Add chore' }))
+
+    await screen.findByText('chores-list')
+    expect(postBody(fetchMock)).toMatchObject({
+      repeats: 'monthly',
+      repeat_interval: 3,
+      weekdays: null,
+    })
+  })
+
+  it('falls back to an interval of one when the field is cleared', async () => {
+    // Only the cleared case is worth testing: min={1} makes 0 a native constraint
+    // violation, so the click might never reach the submit handler at all.
+    const fetchMock = singleHouseholdMocks()
+    withRoutes()
+
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    await user.type(await screen.findByLabelText('Title'), 'Bins')
+    await user.clear(screen.getByLabelText('Repeat every'))
+    await user.click(screen.getByRole('button', { name: 'Add chore' }))
+
+    await screen.findByText('chores-list')
+    expect(postBody(fetchMock)).toMatchObject({ repeat_interval: 1 })
+  })
+
+  it('bounds the interval to what the API accepts', async () => {
+    // The bound mirrors the backend's MAX_INTERVAL. It matters because an over-cap value
+    // comes back as a pydantic 422 whose `detail` is a list, which the api wrapper cannot
+    // translate, so the form would surface the browser's own untranslated status text.
+    // Asserted as the attribute rather than by typing 9999 and submitting: `max` makes
+    // that a native constraint violation, so the click never reaches the submit handler
+    // (the same reason there is no "typing 0" case for `min`).
+    singleHouseholdMocks()
+    withRoutes()
+
+    const field = await screen.findByLabelText('Repeat every')
+    expect(field).toHaveAttribute('min', '1')
+    expect(field).toHaveAttribute('max', '365')
   })
 
   it('shows take turns only for auto strategies and the current-assignee picker only for manual', async () => {
@@ -305,6 +416,22 @@ describe('ChoreCreate', () => {
 
     await screen.findByText('chores-list')
     expect(String(postBody(fetchMock).start_date)).toMatch(/-15$/)
+  })
+
+  it('carries the recurrence detail through a clone', async () => {
+    const fetchMock = singleHouseholdMocks()
+    withRoutes(cloneState({ repeats: 'weekly', repeat_interval: 3, weekdays: [1, 4] }))
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    await screen.findByLabelText('Title')
+    expect(screen.getByLabelText('Repeat every')).toHaveValue(3)
+    expect(screen.getByRole('button', { name: 'Tuesday' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Friday' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Monday' })).toHaveAttribute('aria-pressed', 'false')
+
+    await user.click(screen.getByRole('button', { name: 'Add chore' }))
+    await screen.findByText('chores-list')
+    expect(postBody(fetchMock)).toMatchObject({ repeat_interval: 3, weekdays: [1, 4] })
   })
 
   it('prefills the form from clone state and creates a faithful copy in the same household', async () => {
