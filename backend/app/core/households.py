@@ -125,15 +125,14 @@ async def create_personal_household(session: AsyncSession, user: User) -> Househ
     """Give a freshly created user a household of their own, owned by them.
 
     Every user needs somewhere to keep chores, and this is the only way to get
-    one: `households.admin_id` is NOT NULL, so a household cannot exist before
-    its owner does, which is exactly why seeding one in a migration could never
-    work (see 0368fa9b08ba). Mirrors `create_household` in api/v1/households.py,
-    where the creator likewise becomes both owner and first member.
+    one: `households.admin_id` is NOT NULL, so a household cannot exist before its
+    owner does, which is why a migration cannot provide it. Mirrors
+    `create_household` in api/v1/households.py, where the creator likewise becomes
+    both owner and first member.
 
-    Replaces an earlier `add_to_default_household`, which added every new user to
-    the *lowest-id* household. That was reasonable while one seeded household was
-    all there was, but once households became user-owned it meant dropping each
-    new account into a stranger's household, chores and all.
+    Note this must give the user their OWN household rather than adding them to an
+    existing one: with households user-owned, joining the lowest-id household would
+    drop each new account into a stranger's household, chores and all.
 
     The caller must have flushed the user, so `user.id` is populated.
     """
