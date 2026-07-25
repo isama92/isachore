@@ -58,11 +58,34 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Read the toolchain out of the Dockerfile rather than restating it here, so
+      # a base-image bump reaches CI on its own. This file used to pin the versions,
+      # and a Dependabot bump to python:3.14-slim left CI testing on 3.13 while the
+      # published image shipped 3.14. Both captures are digits-and-dots only, so
+      # nothing from the file can smuggle anything into the output.
+      - id: toolchain
+        working-directory: .
+        run: |
+          {
+            echo "python=$(sed -n 's|^FROM python:\([0-9.]*\)-slim.*|\1|p' docker/backend.Dockerfile | head -1)"
+            echo "uv=$(sed -n 's|^COPY --from=ghcr.io/astral-sh/uv:\([0-9.]*\) .*|\1|p' docker/backend.Dockerfile | head -1)"
+          } >> "$GITHUB_OUTPUT"
+
+      # uv obeys this file, so a mismatch means `uv run` cannot find an interpreter
+      # inside the image. Assert it here for a legible message instead.
+      - name: backend/.python-version agrees with the image
+        working-directory: .
+        env:
+          IMAGE_PYTHON: ${{ steps.toolchain.outputs.python }}
+        run: |
+          pinned=$(cat backend/.python-version)
+          echo "image=$IMAGE_PYTHON  .python-version=$pinned"
+          test "$pinned" = "$IMAGE_PYTHON"
+
       - uses: astral-sh/setup-uv@v7
         with:
-          # Keep in sync with the uv version in docker/backend.Dockerfile
-          version: "0.11"
-          python-version: "3.13"
+          version: ${{ steps.toolchain.outputs.uv }}
+          python-version: ${{ steps.toolchain.outputs.python }}
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
 
@@ -103,10 +126,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Derived, not restated: see the backend job. Testing on a different node
+      # than the image builds with is how node 26 slipped through, where vitest
+      # collects 0 tests but lint, tsc and the vite build all still pass.
+      - id: toolchain
+        working-directory: .
+        run: |
+          echo "node=$(sed -n 's|^FROM node:\([0-9]*\)-alpine.*|\1|p' docker/frontend.Dockerfile | head -1)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-node@v7
         with:
-          # Keep in sync with the node image in docker/frontend.Dockerfile
-          node-version: 24
+          node-version: ${{ steps.toolchain.outputs.node }}
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 

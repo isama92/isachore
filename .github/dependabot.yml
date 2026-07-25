@@ -1,20 +1,17 @@
 version: 2
 
-# Version pins that are coupled across files, which Dependabot cannot know about:
-#   - Bumped by the `docker` ecosystem below, so watch for the desync:
-#       node: docker/frontend.Dockerfile `FROM node:24-alpine` <-> ci.yml
-#       `node-version`. Update the workflow in the same PR.
-#   - NOT bumped by anything, so these stay manual in every place at once:
-#       ruff: .pre-commit-config.yaml `ruff-pre-commit` rev <-> backend/uv.lock.
-#         There is no pre-commit ecosystem, and `uv` moves the lock rather than
-#         pyproject's `>=` floor, so a ruff bump lands in one file only.
-#       uv itself: docker/backend.Dockerfile pulls it with `COPY --from=...uv:0.11`,
-#         and dependabot's docker parser reads only `FROM` lines, so it never sees
-#         this. Couples to ci.yml's setup-uv `version`.
-#       python: docker/backend.Dockerfile `FROM python:3.13-slim` <-> ci.yml
-#         `python-version` and pyproject's `requires-python`.
-#       postgres/redis: pinned in compose.yml, all three docker/compose.prod.*.yml,
-#         and again as ci.yml's service container. See the docker-compose note below.
+# Version pins that are coupled across files, which Dependabot cannot know about.
+# ci.yml no longer restates the toolchain (it seds python, uv and node out of the
+# Dockerfiles), so a base-image bump flows into CI by itself. What is left:
+#   - backend/.python-version must match docker/backend.Dockerfile's python. uv
+#     obeys it, so a mismatch breaks `uv run` inside the image; ci.yml asserts it.
+#   - ruff: .pre-commit-config.yaml's `ruff-pre-commit` rev <-> backend/uv.lock.
+#     There is no pre-commit ecosystem, and `uv` moves the lock rather than
+#     pyproject's `>=` floor, so a ruff bump lands in one file only.
+#   - uv itself: pulled by `COPY --from=ghcr.io/astral-sh/uv:...`, and dependabot's
+#     docker parser reads only `FROM` lines, so it never proposes that bump at all.
+#   - postgres/redis: pinned in compose.yml, all three docker/compose.prod.*.yml,
+#     and again as ci.yml's service container. See the docker-compose note below.
 #
 # Deliberately NOT configured: the `docker-compose` ecosystem. Its file matcher is
 # /(docker-)?compose(-[\w]+)?(?>\.[\w-]+)?\.ya?ml/i, which allows a single
@@ -57,6 +54,13 @@ updates:
     groups:
       base-images:
         patterns: ["*"]
+    ignore:
+      # Node 26 ships a native experimental `localStorage` that shadows jsdom's,
+      # so vitest collects 0 tests from every file while lint, tsc and the vite
+      # build all still pass. Staying on the LTS line until that is handled;
+      # drop this entry to move deliberately, not by monthly PR.
+      - dependency-name: node
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: github-actions
     directory: /

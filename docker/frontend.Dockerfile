@@ -1,5 +1,9 @@
 # syntax=docker/dockerfile:1
-FROM node:26-alpine AS base
+# Pinned to 24 (LTS). Node 26 ships a native experimental `localStorage`
+# global that shadows jsdom's, so vitest collects 0 tests from every file
+# while lint, tsc and the vite build all still pass. Recheck when vitest or
+# jsdom handles it; keep .github/workflows/ci.yml's node-version in step.
+FROM node:24-alpine AS base
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
