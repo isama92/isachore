@@ -157,6 +157,23 @@ Needs `compose.prod.http.yml` and `.env`:
 docker compose -f compose.prod.http.yml up -d
 ```
 
+### Install it on a phone
+
+The app is a PWA, so it can be added to a phone's home screen and runs without
+browser chrome. On Android, Chrome offers an install prompt; on iOS, use
+**Share > Add to Home Screen** (Safari gives no prompt).
+
+This needs **HTTPS with a certificate the phone trusts**, so it works in modes 1
+and 2 above but not in the plain-HTTP mode, and not with a self-signed
+certificate. Offline, the app opens and renders, but anything needing the API
+shows its usual error state: nothing from `/api/` is ever cached, so no household
+data is stored on the device.
+
+A manifest cannot follow a per-user setting, so the Android splash screen is
+always the light (Latte) background even for someone using a dark flavour. The
+status bar corrects itself as soon as the app has loaded. Not a bug, just the
+one thing that cannot be themed.
+
 ### Upgrading
 
 `latest` moves on every merge to `main`, but nothing on the host follows it until
@@ -523,7 +540,7 @@ docker build -f docker/frontend.Dockerfile --target prod \
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers the process: branching, tests, and what
 CI checks. Conventions, architecture notes, and gotchas for working in this
-codebase live in [CLAUDE.md](CLAUDE.md). UI mockups are in `../isachore-design/`.
+codebase live in [CLAUDE.md](CLAUDE.md).
 
 Security issues go through [SECURITY.md](SECURITY.md), privately, not a public
 issue. isachore is GPLv3, see [COPYING](COPYING).
@@ -531,6 +548,9 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
 ### Roadmap
 
 - [ ] Occasional tasks should be show in another panel
+- [ ] Add the created at field in the Chores table and automatically sort the table by that value (desc), so users can see chores ordered by creation instead of start at
+- [ ] Save tables settings (pagination, filters, sorting) in storage so when page is refreshed/changed they will still be set
+- [ ] Allow changing current assignee of a chore from the chore edit page
 - [ ] Add a skip button (next to complete), and change the charts to also show the skipped chores
 - [ ] Live updates when a housemate completes a chore (websocket)
 - [ ] Chore change log (who changed what)

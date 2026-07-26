@@ -225,6 +225,64 @@ pre-commit run --all-files                           # what the git hook runs
   `--color-*` names and the legacy isachore aliases) under `@theme inline`.
   Tailwind v4 is CSS-first: there is NO `tailwind.config.js` and none should be
   added.
+- **Brand artwork**: the logo is a traced whiteboard drawing of a cat, living in
+  `frontend/src/components/brand/` as `BrandMark` (the head knocked out of a
+  `bg-primary` tile) and `BrandCaption` (the handwritten "Do task!"). The mark is in
+  the sidebar header and on Login; the caption is on Login ONLY, because at the width
+  the sidebar header allows it shrinks to an illegible smudge (it is nearly 2:1, so
+  always size it by width). The path data in `paths.ts` and in `public/favicon.svg`
+  is machine-traced from a photo of the drawing, and the two carry the same artwork
+  under the same `MARK_VIEWBOX`: never hand-edit either, and if the artwork is ever
+  re-traced, replace both together or the tab icon stops matching the app. The
+  tracing pipeline is not kept anywhere; treat the committed paths as the artwork.
+  The favicon is the only place the teal is hardcoded, carrying its own
+  `prefers-color-scheme` block because a browser tab cannot read the app theme;
+  everything in-app goes through `--primary` and so tracks the user's accent. Note
+  the sidebar's brand `<Link>` needs its own `aria-label`: in icon mode the wordmark
+  is `display:none`, which also drops it from the accessibility tree.
+- **PWA**: installable to a phone home screen. `public/manifest.webmanifest`,
+  `public/sw.js` and the four PNG icons; `src/pwa.ts` does the registration,
+  called from `main.tsx`. Like `theme-init.js`, the two `public/` files are
+  outside eslint/tsc (`eslint.config.js` only matches `**/*.{ts,tsx}`), so
+  `src/pwaManifest.test.ts` is what guards them. Five things not to undo:
+  - **Registration is `import.meta.env.PROD`-only.** A worker in dev intercepts
+    the requests Vite's HMR needs and you get stale modules with no clue why. It
+    also registers immediately when `document.readyState === 'complete'` rather
+    than only on `load`: `main.tsx` is a deferred module, so `load` may already
+    have fired, and waiting for it would mean never registering.
+  - **`sw.js` must never cache `/api/`** (nor anything non-GET). Those responses
+    are authenticated household data and the app has no offline write model, so
+    caching them would put personal data on the device for nothing. It also means
+    logging out leaves nothing behind. Bump `CACHE` when editing the worker, but
+    note that does not prune anything on an ordinary deploy: the worker is
+    byte-identical across them, so none activates and each deploy's hashed
+    `/assets/` accumulate, which is left to the browser's storage eviction.
+    `src/serviceWorker.test.ts` runs the worker in a `node:vm` sandbox against a
+    fake `self` rather than grepping its source, so these rules are enforced;
+    only a 200, non-redirected, `text/html` navigation may become the shell (a
+    502 from the proxy mid-deploy resolves normally and would otherwise be pinned
+    as the offline shell). When adding a rule there, **delete it and check the
+    test actually fails**: a request shape matching no branch (say a `no-cors`
+    `/api/` GET) falls through whether or not the guard exists, so a test built
+    on one asserts the fall-through and pins nothing. Give it a shape that
+    reaches a branch which does intercept.
+  - **The maskable icon needs MORE padding than the favicon, not less.** Android
+    crops it to the launcher's shape and only guarantees the inner ~80%, so it is
+    a full-bleed teal square with the head at ~75% width, while the `any` icons
+    keep the tight rounded-tile crop. iOS ignores manifest icons entirely and
+    uses `apple-touch-icon.png`, which must be opaque (transparency renders
+    black) and square (iOS applies its own squircle).
+  - **nginx (`nginx-common.conf`) uses `expires -1` for `/sw.js`, not
+    `add_header Cache-Control`**: nginx *replaces* inherited `add_header`
+    directives instead of merging, so an `add_header` there silently drops the
+    CSP and the four other security headers from that response. For the same
+    reason the manifest's type comes from `default_type` in its own `location`,
+    not a `types` block, which would replace the whole inherited MIME map.
+    Without it the manifest is `application/octet-stream`, and `nosniff` then
+    makes the browser reject it and the app is not installable.
+  - **HTTPS is required**, so this only works in the tls/traefik modes or behind
+    a TLS-terminating proxy. No CSP change was needed: `worker-src` and
+    `manifest-src` both fall back to `default-src 'self'`.
 - Import routing from `react-router` (v8), never `react-router-dom`.
 - **UI components**: shadcn/ui (radix-nova) live in `frontend/src/components/ui/`,
   config in `components.json`. Import via the `@/` alias and compose classes with
@@ -266,15 +324,14 @@ pre-commit run --all-files                           # what the git hook runs
     optimistically on Profile then PATCHed with rollback. Dates: `formatDate` in
     `lib/chores.ts` uses `localeFor(i18n.language)`.
   - Not translated (deliberate): the brand name `isachore`, the Catppuccin flavour
-    names, the 14 accent colour names.
+    names, the 14 accent colour names, and the handwritten `BrandCaption`
+    ("Do task!") since it is artwork rather than a string.
   - Gotcha: a handler closure captures the render-time `t`, so a toast fired right
     after switching language would show the OLD language. The Profile
     language-save success toast reads via the `i18n` singleton (`i18n.t(...)`) so
     it confirms in the just-selected language; rollback/error paths keep the
     closure `t`.
 - Pages in `frontend/src/pages/`, one component per route.
-- UI mockups: `../isachore-design/Choreo Screens.dc.html` (login = variant 1a,
-  add chore = variant 2a; variants are anchor ids).
 
 ## Verification
 

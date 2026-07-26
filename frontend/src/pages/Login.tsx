@@ -4,6 +4,8 @@ import { Navigate, useLocation } from 'react-router'
 import { useAuth } from '../auth/useAuth'
 import { ApiError } from '../lib/api'
 import { routes } from '../lib/routes'
+import BrandCaption from '../components/brand/BrandCaption'
+import BrandMark from '../components/brand/BrandMark'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -68,11 +70,16 @@ export default function Login() {
   return (
     <main className="flex min-h-dvh items-center justify-center px-7 py-10">
       <div className="w-full max-w-sm">
+        {/* The login screen has the room the sidebar header does not, so this is
+            where the handwritten caption lives. */}
         <div className="mb-10 flex items-center gap-2.5">
-          <div className="grid size-10 place-items-center rounded-xl bg-primary text-[22px] font-extrabold text-primary-foreground shadow-logo">
-            ✓
-          </div>
-          <span className="font-display text-[22px] font-extrabold tracking-tight">isachore</span>
+          <BrandMark className="size-11 rounded-xl" />
+          <span className="flex flex-col items-start gap-1">
+            <BrandCaption className="w-24" />
+            <span className="font-display text-[22px] leading-none font-extrabold tracking-tight">
+              isachore
+            </span>
+          </span>
         </div>
 
         {step === 'password' ? (
