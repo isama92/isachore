@@ -40,6 +40,15 @@ export default function ThemeProvider({ children }: { children: ReactNode }) {
     // Keep the .dark class in step with the flavour's group so the `dark:`
     // Tailwind variant and shadcn dark styles still work.
     root.classList.toggle('dark', isDark(theme))
+    // public/theme-init.js sets theme-color once before first paint; without
+    // this the status bar would keep the old flavour's colour until a reload.
+    // Invisible in a browser tab, obvious once installed, where the status bar
+    // is the app's own chrome. Read the value back out of the cascade rather
+    // than keeping a hex map here: the flavour bases live in index.css, and
+    // themes.ts deliberately holds no colours.
+    const meta = document.querySelector('meta[name="theme-color"]')
+    const background = getComputedStyle(root).getPropertyValue('--background').trim()
+    if (meta && background) meta.setAttribute('content', background)
   }, [theme])
 
   useEffect(() => {

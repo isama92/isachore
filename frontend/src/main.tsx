@@ -10,6 +10,9 @@ import AuthProvider from './auth/AuthProvider'
 import ThemeProvider from './theme/ThemeProvider'
 import ErrorBoundary from './components/ErrorBoundary'
 import { Toaster } from './components/ui/sonner'
+import { registerServiceWorker } from './pwa'
+
+registerServiceWorker()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

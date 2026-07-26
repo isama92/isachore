@@ -6,6 +6,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#eff1f5" />
     <title>isachore</title>
+
+    <!-- Installable to a phone home screen. iOS ignores the manifest's icons
+         entirely and uses apple-touch-icon, which is why both exist; it also
+         needs its own capable/title tags. status-bar-style stays `default` so
+         iOS keeps reserving the status bar, which avoids having to deal with
+         safe-area insets. theme-color is updated at runtime by ThemeProvider,
+         since in standalone mode the status bar is the app's own chrome. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="isachore" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <!-- Pre-paint theme guard; lives in public/theme-init.js so the CSP can
          keep script-src 'self' (no inline script). -->
     <script src="/theme-init.js"></script>
