@@ -253,7 +253,15 @@ pre-commit run --all-files                           # what the git hook runs
   - **`sw.js` must never cache `/api/`** (nor anything non-GET). Those responses
     are authenticated household data and the app has no offline write model, so
     caching them would put personal data on the device for nothing. It also means
-    logging out leaves nothing behind. Bump `CACHE` when editing the worker.
+    logging out leaves nothing behind. Bump `CACHE` when editing the worker, but
+    note that does not prune anything on an ordinary deploy: the worker is
+    byte-identical across them, so none activates and each deploy's hashed
+    `/assets/` accumulate, which is left to the browser's storage eviction.
+    `src/serviceWorker.test.ts` runs the worker in a `node:vm` sandbox against a
+    fake `self` rather than grepping its source, so these rules are enforced;
+    only a 200, non-redirected, `text/html` navigation may become the shell (a
+    502 from the proxy mid-deploy resolves normally and would otherwise be pinned
+    as the offline shell).
   - **The maskable icon needs MORE padding than the favicon, not less.** Android
     crops it to the launcher's shape and only guarantees the inner ~80%, so it is
     a full-bleed teal square with the head at ~75% width, while the `any` icons

@@ -169,6 +169,11 @@ certificate. Offline, the app opens and renders, but anything needing the API
 shows its usual error state: nothing from `/api/` is ever cached, so no household
 data is stored on the device.
 
+A manifest cannot follow a per-user setting, so the Android splash screen is
+always the light (Latte) background even for someone using a dark flavour. The
+status bar corrects itself as soon as the app has loaded. Not a bug, just the
+one thing that cannot be themed.
+
 ### Upgrading
 
 `latest` moves on every merge to `main`, but nothing on the host follows it until

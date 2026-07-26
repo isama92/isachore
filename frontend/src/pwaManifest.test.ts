@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { HEAD_D, MARK_VIEWBOX } from './components/brand/paths'
 
 // The manifest and the icons are static files outside tsc's and eslint's reach,
 // so nothing else would notice a typo'd filename -- the app would simply stop
@@ -60,17 +61,26 @@ describe('index.html', () => {
   })
 })
 
-describe('the service worker', () => {
-  const sw = readFileSync(join(publicDir, 'sw.js'), 'utf8')
+describe('favicon.svg and paths.ts stay the same image', () => {
+  // CLAUDE.md, paths.ts, BrandMark.tsx and favicon.svg all insist these two carry
+  // the same artwork under the same viewBox, and until now nothing checked it.
+  // The favicon is a static file tsc and eslint never see, so a drift would only
+  // show up as a browser tab that quietly stopped matching the app.
+  const favicon = readFileSync(join(publicDir, 'favicon.svg'), 'utf8')
 
-  it('never caches API responses', () => {
-    // Every /api/ response is authenticated household data, and the app has no
-    // offline write model, so caching it would put personal data on the device
-    // for no benefit. This guard is the only thing enforcing that.
-    expect(sw).toContain("url.pathname.startsWith('/api/')")
+  it('draws the same path', () => {
+    expect(favicon).toContain(`d="${HEAD_D}"`)
   })
 
-  it('only handles GET, so nothing state-changing is intercepted', () => {
-    expect(sw).toContain("request.method !== 'GET'")
+  it('frames it with the same viewBox', () => {
+    expect(favicon).toContain(`viewBox="${MARK_VIEWBOX}"`)
+  })
+
+  it('sizes the tile to that viewBox, so the mark is not cropped or floating', () => {
+    const [x, y, w, h] = MARK_VIEWBOX.split(' ')
+    expect(favicon).toContain(`x="${x}" y="${y}" width="${w}" height="${h}"`)
   })
 })
+
+// The worker's own behaviour is covered by serviceWorker.test.ts, which runs it
+// rather than grepping it.

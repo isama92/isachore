@@ -10,9 +10,30 @@
 // consequence worth knowing: logging out leaves nothing behind, because nothing
 // personal was ever stored.
 //
-// Bump CACHE when this file changes; `activate` deletes every other cache.
+// Bump CACHE when this file changes: `activate` then drops every other cache.
+//
+// Note what that does NOT cover. This file is byte-identical across ordinary
+// deploys, so no new worker activates and nothing is ever pruned, which means
+// each deploy's hashed /assets/ accumulate in the one cache. That is left to the
+// browser's storage eviction on purpose: it is roughly a megabyte per deploy
+// against an origin quota in the hundreds, and pruning it properly needs the
+// build integration this worker exists to avoid.
 const CACHE = 'isachore-shell-v1'
 const SHELL = '/index.html'
+
+// Cache writes are fire-and-forget as far as the response is concerned, but they
+// still have to be handed to waitUntil, or the worker can be terminated before
+// the write lands. The catch matters too: a rejection (storage quota, or a
+// response the Cache API refuses to store) would otherwise surface as an
+// unhandled rejection inside the worker.
+function cachePut(event, key, response) {
+  event.waitUntil(
+    caches
+      .open(CACHE)
+      .then((cache) => cache.put(key, response))
+      .catch(() => {}),
+  )
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -47,8 +68,17 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          const copy = response.clone()
-          caches.open(CACHE).then((cache) => cache.put(SHELL, copy))
+          // Only a good HTML response is allowed to become the offline shell.
+          // fetch() rejects on a network error but NOT on an HTTP error, so a 502
+          // from the proxy during a rolling restart resolves normally, and without
+          // this it would be pinned as the shell until the next successful
+          // navigation. The content-type check covers navigating straight to an
+          // asset URL, and `redirected` has to be excluded because replaying a
+          // redirected response for a navigation makes the browser fail it.
+          const type = response.headers.get('content-type') || ''
+          if (response.ok && !response.redirected && type.includes('text/html')) {
+            cachePut(event, SHELL, response.clone())
+          }
           return response
         })
         .catch(() => caches.match(SHELL).then((hit) => hit || Response.error())),
@@ -64,10 +94,7 @@ self.addEventListener('fetch', (event) => {
         (hit) =>
           hit ||
           fetch(request).then((response) => {
-            if (response.ok) {
-              const copy = response.clone()
-              caches.open(CACHE).then((cache) => cache.put(request, copy))
-            }
+            if (response.ok) cachePut(event, request, response.clone())
             return response
           }),
       ),
