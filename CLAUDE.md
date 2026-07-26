@@ -225,6 +225,21 @@ pre-commit run --all-files                           # what the git hook runs
   `--color-*` names and the legacy isachore aliases) under `@theme inline`.
   Tailwind v4 is CSS-first: there is NO `tailwind.config.js` and none should be
   added.
+- **Brand artwork**: the logo is a traced whiteboard drawing of a cat, living in
+  `frontend/src/components/brand/` as `BrandMark` (the head knocked out of a
+  `bg-primary` tile) and `BrandCaption` (the handwritten "Do task!"). The mark is in
+  the sidebar header and on Login; the caption is on Login ONLY, because at the width
+  the sidebar header allows it shrinks to an illegible smudge (it is nearly 2:1, so
+  always size it by width). The path data in `paths.ts` and in `public/favicon.svg`
+  is machine-traced from a photo of the drawing, and the two carry the same artwork
+  under the same `MARK_VIEWBOX`: never hand-edit either, and if the artwork is ever
+  re-traced, replace both together or the tab icon stops matching the app. The
+  tracing pipeline is not kept anywhere; treat the committed paths as the artwork.
+  The favicon is the only place the teal is hardcoded, carrying its own
+  `prefers-color-scheme` block because a browser tab cannot read the app theme;
+  everything in-app goes through `--primary` and so tracks the user's accent. Note
+  the sidebar's brand `<Link>` needs its own `aria-label`: in icon mode the wordmark
+  is `display:none`, which also drops it from the accessibility tree.
 - Import routing from `react-router` (v8), never `react-router-dom`.
 - **UI components**: shadcn/ui (radix-nova) live in `frontend/src/components/ui/`,
   config in `components.json`. Import via the `@/` alias and compose classes with
@@ -266,15 +281,14 @@ pre-commit run --all-files                           # what the git hook runs
     optimistically on Profile then PATCHed with rollback. Dates: `formatDate` in
     `lib/chores.ts` uses `localeFor(i18n.language)`.
   - Not translated (deliberate): the brand name `isachore`, the Catppuccin flavour
-    names, the 14 accent colour names.
+    names, the 14 accent colour names, and the handwritten `BrandCaption`
+    ("Do task!") since it is artwork rather than a string.
   - Gotcha: a handler closure captures the render-time `t`, so a toast fired right
     after switching language would show the OLD language. The Profile
     language-save success toast reads via the `i18n` singleton (`i18n.t(...)`) so
     it confirms in the just-selected language; rollback/error paths keep the
     closure `t`.
 - Pages in `frontend/src/pages/`, one component per route.
-- UI mockups: `../isachore-design/Choreo Screens.dc.html` (login = variant 1a,
-  add chore = variant 2a; variants are anchor ids).
 
 ## Verification
 

@@ -523,7 +523,7 @@ docker build -f docker/frontend.Dockerfile --target prod \
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers the process: branching, tests, and what
 CI checks. Conventions, architecture notes, and gotchas for working in this
-codebase live in [CLAUDE.md](CLAUDE.md). UI mockups are in `../isachore-design/`.
+codebase live in [CLAUDE.md](CLAUDE.md).
 
 Security issues go through [SECURITY.md](SECURITY.md), privately, not a public
 issue. isachore is GPLv3, see [COPYING](COPYING).

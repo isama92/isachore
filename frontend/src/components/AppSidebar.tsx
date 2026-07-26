@@ -17,6 +17,7 @@ import {
 import { useAuth } from '../auth/useAuth'
 import { routes } from '../lib/routes'
 import { fullName, initials } from '../lib/user'
+import BrandMark from './brand/BrandMark'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import {
   Sidebar,
@@ -71,14 +72,16 @@ export default function AppSidebar() {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="gap-2">
+        {/* The wordmark is display:none in icon mode, which also takes it out of the
+            accessibility tree, so the link carries its own name. "isachore" is
+            deliberately untranslated, like everywhere else it appears. */}
         <Link
           to={routes.home}
           onClick={closeMobile}
+          aria-label="isachore"
           className="flex items-center gap-2 px-1 py-1 outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring rounded-md"
         >
-          <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-primary text-sm font-extrabold text-primary-foreground shadow-logo">
-            ✓
-          </span>
+          <BrandMark />
           <span className="font-display text-lg font-extrabold tracking-tight group-data-[collapsible=icon]:hidden">
             isachore
           </span>

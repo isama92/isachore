@@ -35,6 +35,24 @@ describe('AppSidebar', () => {
     expect(screen.getByText('ada@example.com')).toBeInTheDocument()
   })
 
+  it('renders the brand mark beside the wordmark', () => {
+    const { container } = renderSidebar({ user: makeUser() })
+    const brand = screen.getByRole('link', { name: 'isachore' })
+    expect(brand).toHaveAttribute('href', '/')
+    expect(brand).toHaveTextContent('isachore')
+    // Just the tiled head here — the handwritten caption belongs to the login page,
+    // where there is room for it.
+    expect(brand.querySelectorAll('svg[aria-hidden="true"]')).toHaveLength(1)
+    expect(container.querySelector('.bg-primary.shadow-logo')).toBeInTheDocument()
+  })
+
+  it('labels the brand link so it keeps a name when the wordmark is hidden', () => {
+    // In icon mode the wordmark is display:none, which also removes it from the
+    // accessibility tree; without the label the link would have no name at all.
+    renderSidebar({ user: makeUser() })
+    expect(screen.getByRole('link', { name: 'isachore' })).toHaveAttribute('aria-label', 'isachore')
+  })
+
   it('renders the core nav items with the right destinations', () => {
     renderSidebar({ user: makeUser() })
     expect(screen.getByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument()

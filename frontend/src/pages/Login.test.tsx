@@ -6,12 +6,26 @@ import Login from './Login'
 import { ApiError } from '../lib/api'
 import { renderWithProviders } from '../test/utils'
 import { makeUser } from '../test/fixtures'
+import { CAPTION_D, HEAD_D } from '../components/brand/paths'
 
 describe('Login', () => {
   it('renders the sign-in form', () => {
     renderWithProviders(<Login />, { route: '/login' })
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument()
     expect(screen.getByText('Welcome back.')).toBeInTheDocument()
+  })
+
+  it('shows the brand lockup, including the handwritten caption', () => {
+    // The caption was taken out of the sidebar header, so this page is the only
+    // place it still appears; losing it here loses it everywhere.
+    const { container } = renderWithProviders(<Login />, { route: '/login' })
+    expect(screen.getByText('isachore')).toBeInTheDocument()
+    expect(container.querySelector('.bg-primary.shadow-logo')).toBeInTheDocument()
+    // Assert on the artwork itself rather than counting SVGs: other icons on the
+    // page (the remember-me checkbox's tick) would make a count drift.
+    const drawn = [...container.querySelectorAll('path')].map((p) => p.getAttribute('d'))
+    expect(drawn).toContain(HEAD_D)
+    expect(drawn).toContain(CAPTION_D)
   })
 
   it('renders nothing while auth is loading', () => {
