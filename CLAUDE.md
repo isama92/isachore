@@ -261,7 +261,11 @@ pre-commit run --all-files                           # what the git hook runs
     fake `self` rather than grepping its source, so these rules are enforced;
     only a 200, non-redirected, `text/html` navigation may become the shell (a
     502 from the proxy mid-deploy resolves normally and would otherwise be pinned
-    as the offline shell).
+    as the offline shell). When adding a rule there, **delete it and check the
+    test actually fails**: a request shape matching no branch (say a `no-cors`
+    `/api/` GET) falls through whether or not the guard exists, so a test built
+    on one asserts the fall-through and pins nothing. Give it a shape that
+    reaches a branch which does intercept.
   - **The maskable icon needs MORE padding than the favicon, not less.** Android
     crops it to the launcher's shape and only guarantees the inner ~80%, so it is
     a full-bleed teal square with the head at ~75% width, while the `any` icons

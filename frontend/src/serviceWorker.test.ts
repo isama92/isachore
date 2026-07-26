@@ -131,6 +131,24 @@ const shellIn = (store: Map<string, Map<string, FakeResponse>>) =>
 
 describe('the service worker leaves alone what it must not touch', () => {
   it('never intercepts /api/, so no authenticated response can be cached', async () => {
+    // mode: 'navigate' on purpose. A no-cors /api/ request matches no branch and
+    // falls through whether or not the guard is there, so asserting on it pins
+    // nothing -- it tests the fall-through, not the rule. A navigation is the one
+    // shape that reaches a branch which does intercept, so this fails if the
+    // guard is removed. What the guard really defends against is someone later
+    // adding a broader caching branch, which is precisely the regression the
+    // "never cache /api/" rule exists to prevent.
+    const { handlers } = await boot()
+    const event = fetchEvent(request('/api/v1/chores', { mode: 'navigate' }))
+
+    handlers.fetch(event)
+
+    expect(event.responded).toBeUndefined()
+  })
+
+  it('leaves an ordinary /api/ fetch to the network untouched', async () => {
+    // The everyday case: an XHR from the app. It matches no branch either way,
+    // so this documents the fall-through rather than pinning the guard above.
     const { handlers } = await boot()
     const event = fetchEvent(request('/api/v1/chores'))
 
