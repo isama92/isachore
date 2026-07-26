@@ -531,6 +531,8 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
 ### Roadmap
 
 - [ ] Occasional tasks should be show in another panel
+- [ ] Add the created at field in the Chores table and automatically sort the table by that value (desc), so users can see chores ordered by creation instead of start at
+- [ ] Save tables settings (pagination, filters, sorting) in storage so when page is refreshed/changed they will still be set
 - [ ] Add a skip button (next to complete), and change the charts to also show the skipped chores
 - [ ] Live updates when a housemate completes a chore (websocket)
 - [ ] Chore change log (who changed what)
