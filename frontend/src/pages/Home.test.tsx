@@ -33,6 +33,18 @@ const MULTI_OPTIONS: HistoryFilterOptions = {
   ],
 }
 
+// A due chore for the section tests, keeping next_due and days_until_due in
+// step (the server derives both from the same value).
+function nextDue(id: number, title: string, days: number, date: string): DueChore {
+  return makeDueChore({
+    id,
+    title,
+    days_until_due: days,
+    next_due: `${date}T09:00:00Z`,
+    status: days < 0 ? 'overdue' : days === 0 ? 'today' : 'soon',
+  })
+}
+
 function homeGets(fetchMock: ReturnType<typeof mockFetch>): string[] {
   return fetchMock.mock.calls
     .filter(([url, init]) => HOME.test(String(url)) && (init?.method ?? 'GET') === 'GET')
@@ -112,6 +124,122 @@ describe('Home', () => {
     const row = (await screen.findByText('Descale the kettle')).closest('li')!
     expect(row.querySelector('.bg-due-later')).toBeTruthy()
     expect(row.querySelector('.bg-due-soon')).toBeNull()
+  })
+
+  it('rules off the three due sections, with no rule above the first', async () => {
+    mockFetch([
+      { path: FILTERS, method: 'GET', body: SOLO_OPTIONS },
+      {
+        path: HOME,
+        method: 'GET',
+        body: homeBody(0, 0, [
+          // next_due agrees with days_until_due, so the rendered order is the
+          // one the sections are cut on rather than an id tie-break.
+          nextDue(1, 'Bins', -1, '2026-07-17'),
+          nextDue(2, 'Dishes', 0, '2026-07-18'),
+          nextDue(3, 'Plants', 3, '2026-07-21'),
+          nextDue(4, 'Oven', 12, '2026-07-30'),
+        ]),
+      },
+    ])
+    const { container } = renderWithProviders(<Home />, {
+      authValue: { user: makeUser({ id: 1 }) },
+    })
+
+    await screen.findByText('Bins')
+    // The rules are aria-hidden, so they are invisible to role queries.
+    expect(container.querySelectorAll('li[aria-hidden]')).toHaveLength(2)
+
+    // Position, not just count: a rule opens each later section and nothing
+    // sits above the very first row.
+    const row = (title: string) => screen.getByText(title).closest('li')!
+    expect(row('Bins').previousElementSibling).toBeNull()
+    expect(row('Dishes').previousElementSibling).toBe(row('Bins'))
+    expect(row('Plants').previousElementSibling).toHaveAttribute('aria-hidden')
+    expect(row('Oven').previousElementSibling).toHaveAttribute('aria-hidden')
+    // It has to be a rule, not blank space: without the border the sections
+    // would still be spaced apart and every other assertion here would pass.
+    expect(row('Plants').previousElementSibling).toHaveClass('border-t')
+  })
+
+  it('collapses a rule when the section it divides empties out', async () => {
+    let homeCalls = 0
+    const items = [
+      nextDue(1, 'Bins', -1, '2026-07-17'),
+      nextDue(2, 'Plants', 2, '2026-07-20'),
+      nextDue(3, 'Oven', 12, '2026-07-30'),
+    ]
+    mockFetch([
+      { path: FILTERS, method: 'GET', body: SOLO_OPTIONS },
+      {
+        path: HOME,
+        method: 'GET',
+        body: () => {
+          homeCalls += 1
+          return homeCalls === 1 ? homeBody(0, 1, items) : homeBody(1, 1, [items[0], items[2]])
+        },
+      },
+      { path: COMPLETE, method: 'POST', status: 201, body: {} },
+    ])
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    const { container } = renderWithProviders(<Home />, {
+      authValue: { user: makeUser({ id: 1 }) },
+    })
+
+    const done = await screen.findByRole('button', { name: /Plants/ })
+    const rules = () => [...container.querySelectorAll('li[aria-hidden]')]
+    expect(rules().map((r) => r.hasAttribute('data-exiting'))).toEqual([false, false])
+
+    // Completing the sole chore due this week empties the middle section, so
+    // both rules lose what they divide: the one above it via its own group, the
+    // one below it via the preceding group. Each pins a different clause.
+    await user.click(done)
+    expect(rules().map((r) => r.hasAttribute('data-exiting'))).toEqual([true, true])
+  })
+
+  it('leaves the rule alone while its section still has other chores', async () => {
+    mockFetch([
+      { path: FILTERS, method: 'GET', body: SOLO_OPTIONS },
+      {
+        path: HOME,
+        method: 'GET',
+        body: homeBody(0, 2, [
+          nextDue(1, 'Bins', 0, '2026-07-18'),
+          nextDue(2, 'Dishes', 0, '2026-07-18'),
+          nextDue(3, 'Plants', 2, '2026-07-20'),
+        ]),
+      },
+      { path: COMPLETE, method: 'POST', status: 201, body: {} },
+    ])
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    const { container } = renderWithProviders(<Home />, {
+      authValue: { user: makeUser({ id: 1 }) },
+    })
+
+    // One of two chores due today: the section survives, so the rule must stay
+    // put. This is what makes the guard `every` rather than `some`.
+    await user.click(await screen.findByRole('button', { name: /Bins/ }))
+    expect(container.querySelector('li[aria-hidden]')).not.toHaveAttribute('data-exiting')
+  })
+
+  it('draws no rule when every chore falls in one section', async () => {
+    mockFetch([
+      { path: FILTERS, method: 'GET', body: SOLO_OPTIONS },
+      {
+        path: HOME,
+        method: 'GET',
+        body: homeBody(0, 0, [
+          nextDue(1, 'Plants', 2, '2026-07-20'),
+          nextDue(2, 'Bins', 4, '2026-07-22'),
+        ]),
+      },
+    ])
+    const { container } = renderWithProviders(<Home />, {
+      authValue: { user: makeUser({ id: 1 }) },
+    })
+
+    await screen.findByText('Plants')
+    expect(container.querySelectorAll('li[aria-hidden]')).toHaveLength(0)
   })
 
   it('seeds the default query with the current user (your chores + shared)', async () => {
