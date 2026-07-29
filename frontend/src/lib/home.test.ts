@@ -1,9 +1,26 @@
 import { describe, expect, it } from 'vitest'
 import i18n from '../i18n/i18n'
-import { dueDotClass, relativeDueLabel, sortByDue } from './home'
+import { dueDotClass, groupByDue, relativeDueLabel, sortByDue } from './home'
 import { makeDueChore } from '../test/fixtures'
+import type { DueChore } from './types'
 
 const t = i18n.getFixedT('en')
+
+const TODAY = Date.parse('2026-07-18T09:00:00Z')
+const DAY_MS = 86_400_000
+
+// A chore whose next_due agrees with its days_until_due, so the sort inside
+// groupByDue orders by the same thing the sections are cut on. The status is
+// filled in the way the server would, which is what makes "now == overdue +
+// today" visible in the fixtures rather than only in the assertions.
+function dueIn(id: number, days: number): DueChore {
+  return makeDueChore({
+    id,
+    days_until_due: days,
+    next_due: new Date(TODAY + days * DAY_MS).toISOString(),
+    status: days < 0 ? 'overdue' : days === 0 ? 'today' : 'soon',
+  })
+}
 
 describe('sortByDue', () => {
   it('orders most overdue first (earliest next_due)', () => {
@@ -48,6 +65,37 @@ describe('dueDotClass', () => {
     expect(dueDotClass(makeDueChore({ status: 'soon', days_until_due: 7 }))).toBe('bg-due-soon')
     expect(dueDotClass(makeDueChore({ status: 'soon', days_until_due: 8 }))).toBe('bg-due-later')
     expect(dueDotClass(makeDueChore({ status: 'soon', days_until_due: 30 }))).toBe('bg-due-later')
+  })
+})
+
+describe('groupByDue', () => {
+  it('breaks between today and tomorrow, keeping overdue with today', () => {
+    const groups = groupByDue([dueIn(1, -2), dueIn(2, 0), dueIn(3, 1)])
+    expect(groups.map((g) => g.key)).toEqual(['now', 'week'])
+    expect(groups[0].items.map((c) => c.id)).toEqual([1, 2])
+    expect(groups[1].items.map((c) => c.id)).toEqual([3])
+  })
+
+  it('breaks at the week edge, where the dot turns grey', () => {
+    // Deliberately the same 7/8 pair as the dueDotClass test above: the rule and
+    // the grey dot read one threshold, so moving it has to break both.
+    const groups = groupByDue([dueIn(1, 7), dueIn(2, 8)])
+    expect(groups.map((g) => g.key)).toEqual(['week', 'later'])
+    expect(groups[0].items.map((c) => c.id)).toEqual([1])
+    expect(groups[1].items.map((c) => c.id)).toEqual([2])
+  })
+
+  it('drops empty sections', () => {
+    expect(groupByDue([dueIn(1, 3), dueIn(2, 5)]).map((g) => g.key)).toEqual(['week'])
+    expect(groupByDue([])).toEqual([])
+    // Non-contiguous: something overdue plus a monthly chore, nothing this week.
+    expect(groupByDue([dueIn(1, -1), dueIn(2, 20)]).map((g) => g.key)).toEqual(['now', 'later'])
+  })
+
+  it('orders the sections, and sorts by due date within each', () => {
+    const groups = groupByDue([dueIn(5, 30), dueIn(2, 0), dueIn(3, 5), dueIn(1, -3), dueIn(4, 12)])
+    expect(groups.map((g) => g.key)).toEqual(['now', 'week', 'later'])
+    expect(groups.map((g) => g.items.map((c) => c.id))).toEqual([[1, 2], [3], [4, 5]])
   })
 })
 

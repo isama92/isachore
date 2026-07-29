@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { CheckIcon } from 'lucide-react'
@@ -7,7 +7,7 @@ import { api, ApiError } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
 import { repeatLabel } from '../lib/chores'
 import { formatDateTime } from '../lib/format'
-import { dueDotClass, relativeDueLabel, sortByDue } from '../lib/home'
+import { dueDotClass, groupByDue, relativeDueLabel } from '../lib/home'
 import { fullName } from '../lib/user'
 import type { DueChore, HistoryFilterOptions, HomeData } from '../lib/types'
 import { AssigneeMultiSelect } from '@/components/home/AssigneeMultiSelect'
@@ -342,17 +342,48 @@ export default function Home() {
           )}
 
           {data.items.length > 0 ? (
+            /* One list, not one per section: it stays a single list to a screen
+               reader (the sections carry no heading to be labelled by), and
+               DueRow's `last:mb-0` keeps resolving against the real final row. */
             <ul className="mt-6 flex flex-col">
-              {sortByDue(data.items).map((chore) => (
-                <DueRow
-                  key={chore.id}
-                  chore={chore}
-                  t={t}
-                  showHousehold={multiHousehold}
-                  exiting={exiting.has(chore.id)}
-                  onComplete={requestComplete}
-                />
-              ))}
+              {groupByDue(data.items).map((group, i, all) => {
+                // A section keeps its rows until the post-completion refetch, so
+                // emptying one leaves the rule with nothing to divide for the
+                // length of the animation. Collapse it alongside whichever side
+                // is going away, or completing the only chore due today strands a
+                // hairline above the first visible row and then snaps.
+                const ruleExiting =
+                  i > 0 &&
+                  (all[i - 1].items.every((c) => exiting.has(c.id)) ||
+                    group.items.every((c) => exiting.has(c.id)))
+                return (
+                  <Fragment key={group.key}>
+                    {/* The rule between sections. Decoration, so aria-hidden
+                        keeps it out of the list; margins rather than a flex gap,
+                        because a gap is not animated away (see DueRow). */}
+                    {i > 0 && (
+                      <li
+                        aria-hidden
+                        data-exiting={ruleExiting || undefined}
+                        className={cn(
+                          'mt-2 mb-4 border-t border-border transition-[margin,opacity] duration-[420ms] ease-out motion-reduce:transition-none',
+                          'data-[exiting]:mt-0 data-[exiting]:mb-0 data-[exiting]:opacity-0',
+                        )}
+                      />
+                    )}
+                    {group.items.map((chore) => (
+                      <DueRow
+                        key={chore.id}
+                        chore={chore}
+                        t={t}
+                        showHousehold={multiHousehold}
+                        exiting={exiting.has(chore.id)}
+                        onComplete={requestComplete}
+                      />
+                    ))}
+                  </Fragment>
+                )
+              })}
             </ul>
           ) : (
             <div className="mt-10 text-center">
