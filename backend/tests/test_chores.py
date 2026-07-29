@@ -834,6 +834,50 @@ async def test_completing_after_an_override_re_derives_the_next_assignee(
     assert after.json()["current_assignee"]["id"] == anna.id
 
 
+async def test_an_override_holds_for_the_rest_of_a_multi_completion_turn(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # With turn_length > 1 the hint's "applies to the current turn" is doing real work:
+    # the override survives a completion, because should_reassign counts the chore's
+    # total completions rather than counting from the override. Getting this wrong in
+    # either direction (handing off immediately, or sticking forever) would make the
+    # copy a lie, so pin the boundary from both sides.
+    anna = await make_user(email="anna@example.com", first_name="Anna")
+    bob = await make_user(email="bob@example.com", first_name="Bob")
+    household = await make_household(members=[anna, bob])
+    chore = await make_chore(
+        household=household,
+        assignment_type=AssignmentType.alphabetical,
+        assignees=[anna, bob],
+        repeats=RepeatPeriod.daily,
+        turn_length=2,
+    )
+    client = await auth_client(anna)
+
+    body = _payload(
+        assignment_type="alphabetical",
+        repeats="daily",
+        turn_length=2,
+        assignee_ids=[anna.id, bob.id],
+        current_assignee_id=bob.id,
+    )
+    override = await client.patch(f"/api/v1/chores/{chore.id}", json=body)
+    assert override.json()["current_assignee"]["id"] == bob.id
+
+    # First completion of a two-per-turn chore: still Bob's turn.
+    assert (await client.post(f"/api/v1/chores/{chore.id}/complete")).status_code == 201
+    mid = await client.get(f"/api/v1/chores/{chore.id}")
+    assert mid.json()["current_assignee"]["id"] == bob.id
+
+    # Second completes the turn, so it hands off through the strategy.
+    assert (await client.post(f"/api/v1/chores/{chore.id}/complete")).status_code == 201
+    after = await client.get(f"/api/v1/chores/{chore.id}")
+    assert after.json()["current_assignee"]["id"] == anna.id
+
+
 async def test_update_chore_start_date_moves_due_date_before_completion(
     make_user: MakeUser,
     make_household: MakeHousehold,

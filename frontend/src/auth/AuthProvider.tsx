@@ -72,6 +72,9 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     if (!userRef.current) return
     setUser(null)
     setImpersonating(false)
+    // Same reason as logout: this is a session ending, and on a shared device it is
+    // the likeliest way one ends, since it takes no action from the user at all.
+    clearTableSettings()
     toast.info(i18n.t('common.sessionExpired'), { id: 'session-expired' })
   }, [])
 
@@ -80,9 +83,22 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     return () => setUnauthorizedHandler(null)
   }, [handleExpiry])
 
+  // Remembered table settings include filters that name colleagues and households,
+  // and free-text search terms on the admin tables, so they must never cross from one
+  // account to another. Called wherever the identity behind the session changes: a
+  // different login, and impersonation starting or stopping (both of which land here
+  // through refresh). Deliberately keyed on the id changing rather than on being
+  // called, because every profile save also refreshes, and forgetting your own
+  // filters on each of those would be its own bug. Session *ends* clear
+  // unconditionally instead, in logout and handleExpiry.
+  const forgetTablesIfDifferentUser = useCallback((next: User) => {
+    if (userRef.current && userRef.current.id !== next.id) clearTableSettings()
+  }, [])
+
   const refresh = useCallback(async () => {
     try {
       const me = await api.get<Me>(endpoints.auth.me)
+      forgetTablesIfDifferentUser(me)
       setUser(me)
       setImpersonating(me.impersonating)
       syncAppearance(me)
@@ -90,7 +106,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null)
       setImpersonating(false)
     }
-  }, [syncAppearance])
+  }, [syncAppearance, forgetTablesIfDifferentUser])
 
   const login = useCallback(
     async (email: string, password: string, remember: boolean) => {
@@ -100,22 +116,24 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       if (res.two_factor_required || !res.user) {
         return { twoFactorRequired: res.two_factor_required }
       }
+      forgetTablesIfDifferentUser(res.user)
       setUser(res.user)
       setImpersonating(false)
       syncAppearance(res.user)
       return { twoFactorRequired: false }
     },
-    [syncAppearance],
+    [syncAppearance, forgetTablesIfDifferentUser],
   )
 
   const verifyTwoFactor = useCallback(
     async (code: string) => {
       const me = await api.post<User>(endpoints.auth.verifyTwoFactor, { code })
+      forgetTablesIfDifferentUser(me)
       setUser(me)
       setImpersonating(false)
       syncAppearance(me)
     },
-    [syncAppearance],
+    [syncAppearance, forgetTablesIfDifferentUser],
   )
 
   const logout = useCallback(async () => {

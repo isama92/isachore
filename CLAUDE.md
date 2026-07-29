@@ -222,10 +222,10 @@ pre-commit run --all-files                           # what the git hook runs
   `ChoreForm` therefore shows for `manual` always and for the auto strategies only
   where the page passes `allowAssigneeOverride` (edit does, create does not, so a
   random chore's first assignee stays random), and in both cases only with a
-  non-empty pool. Two things to keep true: the render and the payload must gate on
-  the same flag, so a hidden picker can never submit a value, and
-  `current_assignee_id` must stay derived against the live pool so removing someone
-  cannot submit a stale id. For the auto strategies an override lasts until the next
+  non-empty pool. The load-bearing part is that `current_assignee_id` stays derived
+  against the live pool: that is what lets the payload gate more loosely than the
+  render (on the strategy, not also on the pool) and still never submit a stale or
+  hidden value, since an empty pool forces `null` either way. For the auto strategies an override lasts until the next
   turn boundary, since completing re-derives through `_successor_assignee` — which
   is what the `currentAssigneeTurnHint` copy promises the user, so keep them in
   step. One dead end, pre-existing and not worth its own flag on `ChoreRead`: a

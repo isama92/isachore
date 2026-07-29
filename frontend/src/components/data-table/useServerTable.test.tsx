@@ -221,6 +221,19 @@ describe('useServerTable', () => {
     expect(result.current.table.loading).toBe(false)
   })
 
+  it('setFilters ignores an explicit undefined rather than sending it', async () => {
+    const fetchMock = stubFetch()
+    const { result } = renderTable()
+    await waitFor(() => expect(result.current.table.loading).toBe(false))
+
+    act(() => result.current.table.setFilters({ status: 'disabled', role: undefined }))
+    await waitFor(() => expect(String(fetchMock.mock.calls.at(-1)![0])).toContain('disabled'))
+    // Would arrive as the literal string "undefined" if the entries were cast rather
+    // than filtered.
+    expect(String(fetchMock.mock.calls.at(-1)![0])).not.toContain('undefined')
+    expect(result.current.params.get('role')).toBeNull()
+  })
+
   it('setFilter is a no-op when the value already matches', async () => {
     const fetchMock = stubFetch()
     const { result } = renderTable()
@@ -410,6 +423,42 @@ describe('useServerTable', () => {
       // A blip is not the stored state's fault; throwing away the user's sort
       // over one would be its own bug.
       expect(stored()).toEqual(saved)
+    })
+
+    it('recovers in place from a rejected stored sort, without needing a reload', async () => {
+      save({
+        pageSize: 20,
+        sortBy: 'a_column_that_went_away',
+        sortDir: 'desc',
+        filters: { status: 'active', role: '', q: '' },
+      })
+      // Only the dead sort is rejected, so a healed request succeeds.
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.includes('a_column_that_went_away')) {
+          return jsonResponse(422, { detail: 'bad sort_by' })
+        }
+        return jsonResponse(200, makePage([{ id: 1, name: 'A' }], 1))
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      const { result } = renderStored()
+
+      // Heals on its own, within the same mount: clearing storage alone would not be
+      // enough, because the restored value is ALSO this mount's default, so every
+      // later derive would land back on the dead sort and only a browser reload would
+      // recover. Resetting the default is what makes the retry use a live sort.
+      await waitFor(() => expect(result.current.table.rows).toHaveLength(1))
+      expect(result.current.table.error).toBeNull()
+      expect(String(fetchMock.mock.calls[0]![0])).toContain('a_column_that_went_away')
+      const healed = String(fetchMock.mock.calls.at(-1)![0])
+      expect(healed).not.toContain('a_column_that_went_away')
+      expect(healed).toContain('sort_by=created_at')
+      expect(localStorage.getItem(KEY)).not.toContain('a_column_that_went_away')
+
+      // And it stays healed once the user interacts.
+      act(() => result.current.table.setFilter('status', 'disabled'))
+      await waitFor(() => expect(String(fetchMock.mock.calls.at(-1)![0])).toContain('disabled'))
+      expect(String(fetchMock.mock.calls.at(-1)![0])).not.toContain('a_column_that_went_away')
     })
 
     it('still renders when storage refuses the write', async () => {

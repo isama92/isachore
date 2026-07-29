@@ -195,13 +195,24 @@ export function useServerTable<Row, Filters extends FilterSet = FilterSet>({
   // storage wins over the page's own defaults" for free, with no extra branch and no
   // mount-time URL rewrite (which would cost a second fetch and a flicker).
   //
-  // Read once, not per render, and the two must stay in step: `deriveState` and
-  // `applyOwnedParams` have to agree on what "the default" is, or a value equal to
-  // it gets dropped from the URL by one and resolved differently by the other. A
-  // per-render read would mostly coincide with this, since the effect below keeps
-  // storage equal to the committed state, but it would make the pair's agreement an
-  // accident of timing rather than something the code guarantees.
-  const [defaults] = useState(() => (storageKey ? readSettings(storageKey, initial) : initial))
+  // Read once, not per render, and the two consumers must stay in step:
+  // `deriveState` and `applyOwnedParams` have to agree on what "the default" is, or
+  // a value equal to it gets dropped from the URL by one and resolved differently by
+  // the other. A per-render read would mostly coincide with this, since the effect
+  // below keeps storage equal to the committed state, but it would make the pair's
+  // agreement an accident of timing rather than something the code guarantees.
+  //
+  // State rather than a ref because the fetch below resets it when the server
+  // rejects what was restored: that changes the derived state, so it has to
+  // re-render. `pageDefaults` is the pristine `initial`, snapshotted so the reset has
+  // a stable value to return to and so the fetch effect can depend on it without
+  // refiring (`initial` itself is a fresh object literal on every render). Note this
+  // snapshots regardless of `storageKey`, so a caller computing `initial.filters`
+  // from props would see them frozen at mount; every caller passes a constant today.
+  const [pageDefaults] = useState(initial)
+  const [defaults, setDefaults] = useState(() =>
+    storageKey ? readSettings(storageKey, pageDefaults) : pageDefaults,
+  )
 
   // Derive the effective state from the URL, applying defaults for absent keys.
   // A key that is present (even with an empty value) wins over the default, so
@@ -291,13 +302,21 @@ export function useServerTable<Row, Filters extends FilterSet = FilterSet>({
       .catch((err: unknown) => {
         if (ignore) return
         setError(err instanceof ApiError ? err.message : 'Failed to load')
-        // A remembered sort or filter the server no longer accepts would wedge this
-        // table on every single visit, so forget the saved settings and let a reload
-        // fall back to the page's own defaults. Only the param-validation statuses:
-        // a 401/403/404/5xx is not the stored state's fault, and throwing away a
-        // valid saved sort over a network blip would be its own bug.
+        // A remembered sort or filter the server no longer accepts (a release
+        // renaming a sort key, say) would wedge this table for good, so forget it.
+        // Both halves are needed: dropping the stored copy stops it coming back on
+        // the next visit, and resetting `defaults` heals THIS session, because the
+        // restored value is also the fallback every later derive would land on --
+        // otherwise each interaction resends the rejected sort and only a browser
+        // reload recovers. Resetting also stops the write effect persisting the
+        // rejected value again. Only the param-validation statuses: a 401/403/404/5xx
+        // is not the stored state's fault, and throwing away a valid saved sort over
+        // a network blip would be its own bug. A rejected value spelled out in the
+        // URL is deliberately left alone: it is not storage's doing, and the user can
+        // navigate away from it.
         if (storageKey && err instanceof ApiError && (err.status === 400 || err.status === 422)) {
           clearSettings(storageKey)
+          setDefaults(pageDefaults)
         }
       })
       .finally(() => {
@@ -306,9 +325,9 @@ export function useServerTable<Row, Filters extends FilterSet = FilterSet>({
     return () => {
       ignore = true
     }
-    // storageKey is here for the .catch above; it is a constant per table, so it
-    // never causes a refetch.
-  }, [endpoint, apiQuery, reloadToken, storageKey])
+    // storageKey and pageDefaults are here for the .catch above. Both are fixed for
+    // the life of the table, so neither ever causes a refetch.
+  }, [endpoint, apiQuery, reloadToken, storageKey, pageDefaults])
 
   // Remembered from an effect, not from `mutate`: the setSearchParams updater is a
   // function React may call more than once, which is no place for a side effect,
@@ -355,9 +374,15 @@ export function useServerTable<Row, Filters extends FilterSet = FilterSet>({
   // Several filters in one update, for callers that must change more than one at a
   // time. Calling setFilter twice in a tick would lose the first write, see mutate.
   const setFilters = (patch: Partial<Filters>) => {
-    const entries = Object.entries(patch) as [keyof Filters & string, string][]
+    // Partial<Filters> also admits an explicit undefined, which would otherwise pass
+    // the guard, survive the spread and reach the query as the string "undefined".
+    const entries = Object.entries(patch).filter(([, value]) => value !== undefined) as [
+      keyof Filters & string,
+      string,
+    ][]
     if (!entries.some(([key, value]) => state.filters[key] !== value)) return
-    mutate((s) => ({ ...s, filters: { ...s.filters, ...patch }, page: 1 }))
+    const defined = Object.fromEntries(entries) as Partial<Filters>
+    mutate((s) => ({ ...s, filters: { ...s.filters, ...defined }, page: 1 }))
   }
   const reload = () => {
     setLoading(true)

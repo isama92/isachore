@@ -176,7 +176,7 @@ describe('History', () => {
     renderWithProviders(<History />)
 
     // Both ids outlived what made them valid (household left, member removed). Cleared
-    // in one go: the hook merges the two setFilter calls through a functional updater.
+    // in one setFilters call: two setFilter calls in a tick would lose the first.
     await waitFor(() => {
       const last = lastCompletionsGet(fetchMock)
       expect(last).not.toContain('household_id')

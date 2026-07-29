@@ -249,6 +249,65 @@ describe('AuthProvider', () => {
     })
   })
 
+  it('forgets remembered table settings when the session expires mid-use', async () => {
+    mockFetch([
+      { path: '/api/v1/auth/me', body: makeMe({ email: 'a@example.com' }) },
+      { path: '/api/v1/thing', status: 401, body: { detail: 'Session expired' } },
+    ])
+    localStorage.setItem('isachore-table-admin-users', '{"filters":{"email":"someone@x.com"}}')
+    localStorage.setItem('isachore-language', 'it')
+    renderProvider()
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('a@example.com'))
+
+    await userEvent.click(screen.getByText('fetch'))
+
+    // An expiry takes no action from the user, so on a shared device it is the
+    // likeliest way a session ends: it has to clear the same things logout does.
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('none'))
+    expect(localStorage.getItem('isachore-table-admin-users')).toBeNull()
+    expect(localStorage.getItem('isachore-language')).toBe('it')
+  })
+
+  it('forgets remembered table settings when the account behind the session changes', async () => {
+    // Impersonation starting or stopping both land in refresh(), reporting a
+    // different user id.
+    let meBody = makeMe({ id: 1, email: 'admin@example.com' })
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/auth/me')) return jsonResponse(200, meBody)
+      return jsonResponse(404, {})
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    localStorage.setItem('isachore-table-chores', '{"filters":{"household_id":"4"}}')
+    renderProvider()
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('admin@example.com'))
+    expect(localStorage.getItem('isachore-table-chores')).not.toBeNull()
+
+    meBody = makeMe({ id: 2, email: 'other@example.com', impersonating: true })
+    await userEvent.click(screen.getByText('refresh'))
+
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('other@example.com'))
+    expect(localStorage.getItem('isachore-table-chores')).toBeNull()
+  })
+
+  it('keeps remembered table settings across a same-account refresh', async () => {
+    // Every profile save refreshes, so this must not be a clear.
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/auth/me')) {
+        return jsonResponse(200, makeMe({ id: 1, email: 'a@example.com' }))
+      }
+      return jsonResponse(404, {})
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    localStorage.setItem('isachore-table-chores', '{"filters":{"household_id":"4"}}')
+    renderProvider()
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('a@example.com'))
+
+    await userEvent.click(screen.getByText('refresh'))
+
+    await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(1))
+    expect(localStorage.getItem('isachore-table-chores')).not.toBeNull()
+  })
+
   it('ignores a 401 when there is no active session (pre-auth)', async () => {
     const toastSpy = vi.spyOn(toast, 'info')
     const fetchMock = mockFetch([

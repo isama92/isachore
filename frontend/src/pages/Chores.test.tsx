@@ -267,6 +267,33 @@ describe('Chores', () => {
     expect(lastChoresGet(fetchMock)).toContain('sort_by=created_at')
   })
 
+  it('pre-fills the title input from a remembered text filter and keeps it', async () => {
+    localStorage.setItem(
+      'isachore-table-chores',
+      JSON.stringify({
+        pageSize: 10,
+        sortBy: 'created_at',
+        sortDir: 'desc',
+        filters: { household_id: '', title: 'tub' },
+      }),
+    )
+    const fetchMock = stubFetch({ chores: [makeChore({ id: 7, title: 'Scrub the tub' })] })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+
+    await screen.findByText('Scrub the tub')
+    // The input seeds from the restored filter rather than '', which is what stops the
+    // 300ms debounce from firing on mount and wiping the very value it restored. A
+    // future text filter initialised from '' would silently do exactly that.
+    expect(screen.getByLabelText('Filter by title')).toHaveValue('tub')
+    expect(lastChoresGet(fetchMock)).toContain('title=tub')
+    // Still there after the debounce window has had time to fire.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400))
+    })
+    expect(lastChoresGet(fetchMock)).toContain('title=tub')
+    expect(screen.getByLabelText('Filter by title')).toHaveValue('tub')
+  })
+
   it('keeps a remembered household filter that is still valid', async () => {
     localStorage.setItem(
       'isachore-table-chores',
