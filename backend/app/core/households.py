@@ -1,7 +1,7 @@
-from sqlalchemy import ColumnElement, Select, func, insert, select
+from sqlalchemy import ColumnElement, Select, func, insert, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Chore, Household, User, UserStatus, household_members
+from app.models import Chore, ChoreOccurrence, Household, User, UserStatus, household_members
 
 # Whitelisted sort keys for the household tables and the members table. Literals
 # at the query-param layer make an unknown value a 422; the maps below turn a
@@ -65,6 +65,30 @@ def member_household_ids(user_id: int) -> Select[tuple[int]]:
         .join(Household, Household.id == household_members.c.household_id)
         .where(household_members.c.user_id == user_id, Household.deleted_at.is_(None))
     )
+
+
+def chore_scope(user_id: int, household_id: int | None) -> list[ColumnElement[bool]]:
+    """Chore-level scope shared by the two occurrence views (`api/v1/home.py` and
+    `api/v1/unscheduled.py`): live chores in the user's active households, optionally narrowed
+    to one. A household the user cannot see yields an empty scope rather than a 403, like the
+    chores list. Neither caller wants the same repeat periods, so the `repeats` predicate is
+    left to them - which is the whole reason this is a list rather than a single clause."""
+    scope = [
+        Chore.deleted_at.is_(None),
+        Chore.household_id.in_(member_household_ids(user_id)),
+    ]
+    if household_id is not None:
+        scope.append(Chore.household_id == household_id)
+    return scope
+
+
+def assignee_visibility(assignee_id: list[int] | None) -> ColumnElement[bool] | None:
+    """The selected members' occurrences, plus unassigned/shared ones (which belong to
+    everyone), or None for no assignee filter at all. The current assignee alone decides
+    visibility, so a rotating chore leaves your list the moment it hands off."""
+    if not assignee_id:
+        return None
+    return or_(ChoreOccurrence.assignee_id.is_(None), ChoreOccurrence.assignee_id.in_(assignee_id))
 
 
 async def get_member_household(

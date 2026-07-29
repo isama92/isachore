@@ -2,42 +2,18 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Query
-from sqlalchemy import ColumnElement, or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, SessionDep
 from app.core.chores import days_until_due, due_status
-from app.core.households import member_household_ids
+from app.core.households import assignee_visibility, chore_scope
 from app.models import Chore, ChoreOccurrence, OccurrenceStatus, RepeatPeriod
 from app.schemas import DueChoreRead, HomeRead, ProgressRead
 from app.schemas.chore import ChoreHouseholdRead
 from app.schemas.household import HouseholdMemberRead
 
 router = APIRouter()
-
-
-def chore_scope(user_id: int, household_id: int | None) -> list[ColumnElement[bool]]:
-    """Chore-level scope shared by the two occurrence views (here and
-    `api/v1/unscheduled.py`): live chores in the user's active households, optionally
-    narrowed to one. A household the user cannot see yields an empty scope rather than a
-    403, like the chores list. Neither caller wants the same repeat periods, so the
-    `repeats` predicate is left to them."""
-    scope = [
-        Chore.deleted_at.is_(None),
-        Chore.household_id.in_(member_household_ids(user_id)),
-    ]
-    if household_id is not None:
-        scope.append(Chore.household_id == household_id)
-    return scope
-
-
-def assignee_visibility(assignee_id: list[int] | None) -> ColumnElement[bool] | None:
-    """The selected members' occurrences, plus unassigned/shared ones (which belong to
-    everyone), or None for no assignee filter at all. The current assignee alone decides
-    visibility, so a rotating chore leaves your list the moment it hands off."""
-    if not assignee_id:
-        return None
-    return or_(ChoreOccurrence.assignee_id.is_(None), ChoreOccurrence.assignee_id.in_(assignee_id))
 
 
 @router.get("", response_model=HomeRead)

@@ -100,6 +100,33 @@ async def test_unscheduled_reports_days_since_last_completion(
     }
 
 
+async def test_unscheduled_treats_a_completion_with_no_timestamp_as_never_done(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    # `chore_occurrences.completed_at` is nullable, so a done row without one is
+    # representable even though no production path writes it. `_last_completions` drops those
+    # rather than passing NULL into the day arithmetic, which would 500 the whole view.
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, title="Odd", repeats=RepeatPeriod.manual)
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=_days_ago(5),
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=None,
+    )
+    client = await auth_client(user)
+
+    resp = await client.get("/api/v1/unscheduled")
+    assert resp.status_code == 200
+    assert [i["days_since_last_completion"] for i in resp.json()["items"]] == [None]
+
+
 async def test_unscheduled_reports_today_as_zero(
     make_user: MakeUser,
     make_household: MakeHousehold,

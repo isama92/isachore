@@ -1453,6 +1453,50 @@ async def test_update_chore_unscheduled_to_recurring_restarts_from_the_new_date(
     assert [(i["title"], i["days_until_due"]) for i in home["items"]] == [(chore.title, 0)]
 
 
+async def test_update_chore_back_to_recurring_skips_slots_already_completed(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    # "Did it today, parked it as unscheduled, later put it back on a schedule" is an ordinary
+    # sequence, and the form pre-fills the revealed start date with today - which re-seeds the
+    # slot onto a midnight the chore already has a `done` row for. Assigning that blind trips
+    # uq_occurrence_chore_scheduled and surfaces a 409 no retry can clear, since the same edit
+    # recomputes the same occupied slot every time.
+    #
+    # Driven entirely through the API: the collision only shows up in the real create ->
+    # complete -> edit -> complete -> edit order.
+    user = await make_user()
+    household = await make_household(members=[user])
+    today = datetime.now(UTC).date()
+    midnight = datetime(today.year, today.month, today.day, tzinfo=UTC)
+    client = await auth_client(user)
+
+    created = await client.post(
+        "/api/v1/chores",
+        json=_payload(household_id=household.id, repeats="weekly", start_date=today.isoformat()),
+    )
+    chore_id = created.json()["id"]
+    # Completes today's slot (a done row at midnight today) and opens next week's.
+    assert (await client.post(f"/api/v1/chores/{chore_id}/complete")).status_code == 201
+    # Park it: the open slot stays a week out, since an unscheduled chore keeps its slot.
+    assert (
+        await client.patch(f"/api/v1/chores/{chore_id}", json=_payload(repeats="manual"))
+    ).status_code == 200
+    # Completing it now writes a done row at NEXT week's midnight too, and reopens at `now`.
+    assert (await client.post(f"/api/v1/chores/{chore_id}/complete")).status_code == 201
+
+    resp = await client.patch(
+        f"/api/v1/chores/{chore_id}",
+        json=_payload(repeats="weekly", start_date=today.isoformat()),
+    )
+    assert resp.status_code == 200
+    # Today and today+7 are both spent, so the chore is due today+14: the walk continues past
+    # every completed slot, where advancing a single step would have landed on the second one.
+    assert await _open_slot(db_session, chore_id) == midnight + timedelta(days=14)
+
+
 async def test_update_chore_full_replace_resets_the_recurrence_fields(
     make_user: MakeUser,
     make_household: MakeHousehold,
@@ -1491,16 +1535,18 @@ async def test_update_chore_rejects_bad_recurrence_values(
         assert resp.status_code == 422, bad
 
 
-async def test_update_chore_slot_collision_is_a_conflict_not_a_crash(
+async def test_update_chore_snap_skips_a_slot_already_completed(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
     make_occurrence: MakeOccurrence,
     auth_client: AuthClient,
+    db_session: AsyncSession,
 ) -> None:
-    # Snapping is forward-only, and an open row's slot is always later than every done row's,
-    # so this cannot happen through the API. Nothing in the schema enforces that invariant
-    # though, so the commit is guarded: a collision must read as 409, never 500.
+    # A done row LATER than the open one, which unscheduled chores made reachable: one anchors
+    # its successors at completion timestamps, so a chore parked as unscheduled for a while ends
+    # up with done rows on both sides of its open row. Pinning a weekday then snaps forward onto
+    # the occupied slot, and assigning it would trip uq_occurrence_chore_scheduled and 409.
     user = await make_user()
     household = await make_household(members=[user])
     chore = await make_chore(household=household, with_occurrence=False)
@@ -1513,9 +1559,12 @@ async def test_update_chore_slot_collision_is_a_conflict_not_a_crash(
     await make_occurrence(chore=chore, scheduled_for=datetime(2026, 7, 22, tzinfo=UTC))
     client = await auth_client(user)
 
-    # Wed 22 Jul snaps to Tue 28 Jul, which the done row already occupies.
+    # Wed 22 Jul snaps to Tue 28 Jul, which the done row already occupies...
     resp = await client.patch(f"/api/v1/chores/{chore.id}", json=_payload(weekdays=[TUE]))
-    assert resp.status_code == 409
+    assert resp.status_code == 200
+    # ...so it carries on to the following Tuesday rather than conflicting. A slot the chore has
+    # already been completed for is not one it can be due for again.
+    assert await _open_slot(db_session, chore.id) == datetime(2026, 8, 4, tzinfo=UTC)
 
 
 # --- delete (soft) ---

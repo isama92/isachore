@@ -123,11 +123,13 @@ export default function Unscheduled() {
   // Only label the household when the user actually spans more than one.
   const multiHousehold = options.households.length > 1
 
+  // Same flex-gap flow as the due view, so the twin pages stay in step; this one shows its
+  // heading, since it is the view you arrive at deliberately rather than the landing page.
   return (
-    <main className="mx-auto w-full max-w-3xl px-5 py-8">
+    <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-5 py-8">
       <h1 className="font-display text-2xl font-bold tracking-tight">{t('unscheduled.title')}</h1>
 
-      {error && <p className="mt-4 text-[13px] font-bold text-danger">{error}</p>}
+      {error && <p className="text-[13px] font-bold text-danger">{error}</p>}
 
       <ChoreFilters
         group="unscheduled"
@@ -136,18 +138,17 @@ export default function Unscheduled() {
         onHouseholdChange={setHouseholdId}
         assigneeIds={assigneeIds}
         onAssigneeChange={setAssigneeIds}
-        className="mt-6"
       />
 
       {loading && !data && (
-        <p className="mt-6 font-medium text-muted-foreground">{t('common.loading')}</p>
+        <p className="font-medium text-muted-foreground">{t('common.loading')}</p>
       )}
 
       {data &&
         (data.items.length > 0 ? (
           // A flat list: no due sections to divide, because nothing here is due. The
           // server orders it alphabetically.
-          <ul className="mt-6 flex flex-col">
+          <ul className="flex flex-col">
             {data.items.map((chore) => (
               <ChoreRow
                 key={chore.id}
@@ -168,7 +169,7 @@ export default function Unscheduled() {
             ))}
           </ul>
         ) : (
-          <div className="mt-10 text-center">
+          <div className="mt-4 text-center">
             <p className="font-display text-lg font-bold tracking-tight">
               {t('unscheduled.emptyTitle')}
             </p>

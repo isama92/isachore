@@ -86,10 +86,12 @@ describe('Home', () => {
 
     expect(await screen.findByText('5 of 8 done today')).toBeInTheDocument()
     expect(screen.getByText('3 left')).toBeInTheDocument()
-    // The page carries no heading of its own: the sidebar names the view, and the filters
-    // (hidden here, since this user has one household and one member) come first. Asserted
-    // after the data lands, or it would pass against the loading state whatever happened.
-    expect(screen.queryByRole('heading')).not.toBeInTheDocument()
+    // The heading exists for screen readers but is not shown: the design leads with the
+    // filters. Queried by role, which reads the accessibility tree, so this passes only while
+    // the heading is really exposed there - and `sr-only` is what keeps it off the screen.
+    const heading = screen.getByRole('heading', { name: 'Your Chores' })
+    expect(heading).toHaveClass('sr-only')
+    expect(heading.tagName).toBe('H1')
 
     const overdue = screen.getByText('Clean the bathroom').closest('li')!
     expect(overdue.querySelector('.bg-due-overdue')).toBeTruthy()

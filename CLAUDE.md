@@ -263,8 +263,10 @@ pre-commit run --all-files                           # what the git hook runs
     `days_since_last_completion` instead of any due field. Its dot uses the
     `--done-recent/week/stale` tokens, NOT `--due-*`: the scales cross over, since done
     today is green while due today is yellow.
-  - **Their slots break two ordering assumptions the grid used to guarantee**, and both
-    bit once already:
+  - **Their slots break three assumptions the grid used to guarantee**, every one of which
+    bit once already. The root cause each time: an unscheduled chore anchors its successors
+    at completion timestamps, so its done rows sit on **both sides** of its open one, and
+    "the open slot is later than every done slot" is no longer true:
     - `undo_completion` finds the latest completion by `max(completed_at)`, NOT
       `max(scheduled_for)`. Slots only run in completion order while they come off a grid;
       switch a not-yet-due chore to unscheduled and its next done row is dated *earlier*
@@ -275,6 +277,13 @@ pre-commit run --all-files                           # what the git hook runs
       the slot from the new `start_date` rather than `snap_to_slot` it: snapping is the
       identity for every unpinned rule, so the chore would keep its last-completion moment
       and read as overdue by however long ago that was, while the form said "start today".
+    - Every re-dated slot goes through `_free_slot_from`, which walks it past any slot the
+      chore has **already completed**. `first_occurrence` and every grid slot are both
+      midnight UTC, so re-dating onto a grid the chore has history on can land exactly on a
+      done row; `uq_occurrence_chore_scheduled` then fails the commit and `update_chore`
+      returns a 409 that retrying can never clear, since the same edit recomputes the same
+      occupied slot. "Did it today, parked it as unscheduled, later put it back on a
+      schedule" is enough to hit it, because the form pre-fills today's date.
 - **Frontend auth**: `useAuth()` from `src/auth/useAuth.ts`; API calls through the
   `api` wrapper in `src/lib/api.ts` (throws `ApiError`). Protected routes wrap in
   `RequireAuth` / `RequireAdmin` (`src/components/`); authenticated pages render

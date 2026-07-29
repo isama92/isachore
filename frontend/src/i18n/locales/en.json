@@ -71,6 +71,7 @@
     "twoFactorError": "Could not verify the code"
   },
   "home": {
+    "title": "Your Chores",
     "unassigned": "Unassigned",
     "progress": {
       "doneToday": "{{done}} of {{total}} done today",

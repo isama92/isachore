@@ -152,13 +152,18 @@ export default function Home() {
   // Only label the household when the user actually spans more than one.
   const multiHousehold = options.households.length > 1
 
-  // The page carries no heading: the sidebar already says which view this is, and the
-  // filters are what the user reaches for. Which block comes first therefore depends on
-  // state, so each top-level block drops its own top margin when it lands first
-  // (`first:mt-0`) and sits flush against main's own py-8.
+  // The heading is sr-only: the design leads with the filters rather than a title, but a page
+  // with no heading at all leaves screen-reader users nothing to navigate to and no way to
+  // tell this view from its Unscheduled twin (which shows its title). Spacing is a flex `gap`
+  // rather than per-block top margins, because which block renders first depends on state:
+  // a `:first-child` scheme silently re-flows the moment anything is added above it, and an
+  // sr-only heading is `position: absolute`, so it contributes neither height nor a gap and
+  // the first visible block still sits flush against main's own py-8.
   return (
-    <main className="mx-auto w-full max-w-3xl px-5 py-8">
-      {error && <p className="mt-4 text-[13px] font-bold text-danger first:mt-0">{error}</p>}
+    <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-5 py-8">
+      <h1 className="sr-only">{t('home.title')}</h1>
+
+      {error && <p className="text-[13px] font-bold text-danger">{error}</p>}
 
       <ChoreFilters
         group="home"
@@ -167,17 +172,16 @@ export default function Home() {
         onHouseholdChange={setHouseholdId}
         assigneeIds={assigneeIds}
         onAssigneeChange={setAssigneeIds}
-        className="mt-6 first:mt-0"
       />
 
       {loading && !data && (
-        <p className="mt-6 font-medium text-muted-foreground first:mt-0">{t('common.loading')}</p>
+        <p className="font-medium text-muted-foreground">{t('common.loading')}</p>
       )}
 
       {data && (
         <>
           {data.progress.total_today > 0 && (
-            <div className="mt-6 rounded-xl border border-border bg-card p-4 first:mt-0">
+            <div className="rounded-xl border border-border bg-card p-4">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <span className="font-semibold">
                   {t('home.progress.doneToday', {
@@ -197,7 +201,7 @@ export default function Home() {
             /* One list, not one per section: it stays a single list to a screen
                reader (the sections carry no heading to be labelled by), and
                ChoreRow's `last:mb-0` keeps resolving against the real final row. */
-            <ul className="mt-6 flex flex-col first:mt-0">
+            <ul className="flex flex-col">
               {groupByDue(data.items).map((group, i, all) => {
                 // A section keeps its rows until the post-completion refetch, so
                 // emptying one leaves the rule with nothing to divide for the
@@ -246,7 +250,7 @@ export default function Home() {
               })}
             </ul>
           ) : (
-            <div className="mt-10 text-center">
+            <div className="mt-4 text-center">
               <p className="font-display text-lg font-bold tracking-tight">
                 {t('home.emptyTitle')}
               </p>

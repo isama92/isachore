@@ -15,6 +15,7 @@ from app.core.chores import (
     due_status,
     first_occurrence,
     next_occurrence_after,
+    next_slot_after,
     snap_to_slot,
 )
 from app.core.households import escape_like, get_member_household, member_household_ids
@@ -206,6 +207,43 @@ def _initial_slot(start_date: date | None, rule: RecurrenceRule, now: datetime) 
     return first_occurrence(start_date, rule) if start_date is not None else now
 
 
+async def _free_slot_from(
+    session: SessionDep, chore_id: int, candidate: datetime, rule: RecurrenceRule
+) -> datetime:
+    """`candidate`, advanced along the grid past every slot this chore has already completed.
+
+    Re-dating a chore onto a grid it has history on can land exactly on one of its `done`
+    rows, and `uq_occurrence_chore_scheduled` is per (chore, scheduled_for): the commit would
+    fail and `update_chore` would surface a 409 that retrying could never get past, because
+    the same edit recomputes the same occupied slot every time. It used to be impossible - an
+    open row's slot was always later than every done row's - but unscheduled chores broke
+    that: one anchors its successors at completion timestamps, so a chore that was unscheduled
+    for a while has done rows on both sides of its open one.
+
+    Walking forward applies the same rule `advance_anchor` already does: a slot the chore has
+    been completed for is not a slot it can be due for again. The rule always has an interval
+    to step, since a candidate only exists when there is a start date (never `manual`), and it
+    terminates because every step strictly advances while the done set is finite.
+    """
+    taken = set(
+        (
+            await session.execute(
+                select(ChoreOccurrence.scheduled_for).where(
+                    ChoreOccurrence.chore_id == chore_id,
+                    ChoreOccurrence.status == OccurrenceStatus.done,
+                    ChoreOccurrence.scheduled_for >= candidate,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    slot = candidate
+    while slot in taken:
+        slot = next_slot_after(slot, rule)
+    return slot
+
+
 async def _completion_counts(session: SessionDep, chore_id: int) -> dict[int, int]:
     """Completions of this chore per crediting member (done occurrences grouped by
     completed_by_user_id). Used only by the `least_done` strategy."""
@@ -327,25 +365,28 @@ async def _reconcile_open_occurrence(
     # to snap it to, and the slot only records when the chore became available, so it stands
     # whatever else the edit changed.
     if payload.start_date is not None:
-        # Before any completion the open occurrence is the first one, so its due date must
-        # follow a start_date edit (mirrors the old never-completed next_due behaviour).
-        # `was_unscheduled` takes the same branch even with completions behind it, because
-        # an unscheduled chore's slot is its last completion moment ("available since"), not
-        # a grid position: snapping that would hand a non-deadline straight to the due
-        # machinery and land a chore the user just dated "today" weeks overdue.
-        if latest_done is None or was_unscheduled:
-            occ.scheduled_for = first_occurrence(payload.start_date, rule)
-        else:
-            # The row sits on the grid the chore had when it was written, which this edit may
-            # have redefined. `snap_to_slot` is idempotent and moves it by days rather than
-            # weeks (at most six, never backwards), so pinning weekdays re-dates the chore
+        candidate = (
+            # Before any completion the open occurrence is the first one, so its due date must
+            # follow a start_date edit (mirrors the old never-completed next_due behaviour).
+            # `was_unscheduled` takes the same branch even with completions behind it, because
+            # an unscheduled chore's slot is its last completion moment ("available since"),
+            # not a grid position: snapping that would hand a non-deadline straight to the due
+            # machinery and land a chore the user just dated "today" weeks overdue.
+            first_occurrence(payload.start_date, rule)
+            if latest_done is None or was_unscheduled
+            # Otherwise the row sits on the grid the chore had when it was written, which this
+            # edit may have redefined. `snap_to_slot` is idempotent and moves it by days rather
+            # than weeks (at most six, never backwards), so pinning weekdays re-dates the chore
             # without spending a whole cycle. Note a chore overdue by less than that can land
             # in the future and leave the overdue bucket - reasonable, since the edit just
             # declared which weekdays it happens on. Only pinning moves anything: every other
             # rule accepts any datetime, because its phase lives in the occurrence chain.
-            # The new slot cannot collide with a `done` row, because movement is forward and
-            # an open row's slot is always later than every done row's (see update_chore).
-            occ.scheduled_for = snap_to_slot(occ.scheduled_for, rule)
+            else snap_to_slot(occ.scheduled_for, rule)
+        )
+        # Both candidates can land on a slot this chore has already completed, which
+        # `_free_slot_from` is what keeps off a `done` row - see its docstring for why neither
+        # is safe to assign blind.
+        occ.scheduled_for = await _free_slot_from(session, chore.id, candidate, rule)
 
 
 @router.post("", response_model=ChoreRead, status_code=status.HTTP_201_CREATED)
@@ -466,9 +507,9 @@ async def update_chore(
         await session.commit()
     except IntegrityError:
         # Reconcile computes an occurrence slot, so it can collide with a slot a concurrent
-        # POST /complete just wrote. Forward-only movement keeps it off this chore's `done`
-        # rows (their scheduled_for is always earlier than the open one's), but nothing in
-        # the schema enforces that invariant, so fail cleanly rather than 500.
+        # POST /complete just wrote. This chore's own `done` rows are already accounted for
+        # (`_free_slot_from` walks past them), so what is left is a genuine race, which a
+        # retry can clear - unlike a self-collision, which would 409 forever.
         await session.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

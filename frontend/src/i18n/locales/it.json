@@ -71,6 +71,7 @@
     "twoFactorError": "Impossibile verificare il codice"
   },
   "home": {
+    "title": "Le tue faccende",
     "unassigned": "Non assegnata",
     "progress": {
       "doneToday": "{{done}} di {{total}} fatte oggi",

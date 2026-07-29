@@ -38,13 +38,21 @@ def upgrade() -> None:
     #
     # The assignee is carried over from that row rather than advanced through the rotation
     # the way `_successor_assignee` would: reproducing the strategies in SQL is not worth it,
-    # and whoever last held the chore is the least surprising person to still hold it.
+    # and whoever last held the chore is the least surprising person to still hold it. It is
+    # dropped to NULL (unassigned/shared) when they are no longer in the chore's pool, though,
+    # or the revived chore would be listed under someone who can no longer be given it - and
+    # the view's assignee filter would offer them.
     op.execute(
         """
         INSERT INTO chore_occurrences (chore_id, scheduled_for, assignee_id, status, created_at)
         SELECT c.id,
                COALESCE(latest.scheduled_for + interval '1 second', c.created_at),
-               latest.assignee_id,
+               CASE
+                   WHEN EXISTS (
+                       SELECT 1 FROM chore_assignees ca
+                       WHERE ca.chore_id = c.id AND ca.user_id = latest.assignee_id
+                   ) THEN latest.assignee_id
+               END,
                'open',
                now()
         FROM chores c

@@ -220,6 +220,23 @@ describe('Unscheduled', () => {
     expect(screen.queryByRole('button', { name: 'Assignees' })).not.toBeInTheDocument()
   })
 
+  it('hides the filters, but still lists the chores, when the options request fails', async () => {
+    // useFilterOptions falls back to empty on failure, which hides the whole filter bar on
+    // both list pages - a silent degradation worth pinning. MULTI_OPTIONS would have shown
+    // both controls, so their absence is the failure's doing and not a one-member household.
+    mockFetch([
+      { path: FILTERS, method: 'GET', status: 500, body: { detail: 'boom' } },
+      { path: LIST, method: 'GET', body: body([makeUnscheduledChore({ title: 'Kettle' })]) },
+    ])
+    renderWithProviders(<Unscheduled />, { authValue: { user: makeUser({ id: 1 }) } })
+
+    // The list itself is unaffected: its own request carries any error the user needs.
+    expect(await screen.findByText('Kettle')).toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'Household' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Assignees' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Failed to load your unscheduled chores')).not.toBeInTheDocument()
+  })
+
   it('narrows by household and by assignee through the query string', async () => {
     const fetchMock = mockFetch([
       { path: FILTERS, method: 'GET', body: MULTI_OPTIONS },

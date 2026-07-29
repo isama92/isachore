@@ -6,8 +6,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, SessionDep
-from app.api.v1.home import assignee_visibility, chore_scope
 from app.core.chores import days_since
+from app.core.households import assignee_visibility, chore_scope
 from app.models import Chore, ChoreOccurrence, OccurrenceStatus, RepeatPeriod
 from app.schemas import UnscheduledChoreRead, UnscheduledRead
 from app.schemas.chore import ChoreHouseholdRead
