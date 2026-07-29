@@ -231,6 +231,17 @@ pre-commit run --all-files                           # what the git hook runs
   is what the `currentAssigneeTurnHint` copy promises the user, so keep them in
   step. Every live chore has exactly one open occurrence whatever its period, so
   `current_assignee: null` means unassigned/shared and never "nothing left to do".
+  **Handing a chore back to the household is its own field, `clear_current_assignee`,
+  and cannot be folded into `current_assignee_id: null`.** Null already means "no
+  explicit choice", and `_reconcile_open_occurrence` then *keeps* an assignee who is
+  still in the pool — which is load-bearing, because `ChoreForm` submits null routinely
+  whenever the picker is hidden (empty pool, or an auto strategy on create), so if null
+  cleared the assignee then editing a random chore's title would silently unassign it.
+  "Nobody" and "no opinion" are two different messages. The clear branch must also come
+  **first and stop there** in that function: falling through to the recompute `elif`
+  would immediately re-derive somebody from the strategy and undo it. In the form the
+  choice is a `UNASSIGNED` sentinel option rather than `value=""`, which Radix reserves
+  for "nothing selected" and would render as the placeholder instead.
 - **Unscheduled chores** (`repeats: 'manual'`, a *different* field from the `manual`
   assignment strategy) are the chores you do ad hoc: **never due, never overdue,
   repeatable on demand**. Completing one flips its occurrence to `done` and opens a

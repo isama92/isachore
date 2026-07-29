@@ -30,6 +30,12 @@ import { WeekdayPicker } from '@/components/chores/WeekdayPicker'
 import { AssigneeMultiSelect } from '@/components/chores/AssigneeMultiSelect'
 import RichTextEditor from '@/components/rich-text/RichTextEditor'
 
+// The "nobody" option's value in the current-assignee Select. A sentinel because Radix reserves
+// the empty string for "no value selected", so an <SelectItem value=""> renders as the
+// placeholder rather than as something you can pick. Never sent to the API: it maps to the
+// clear_current_assignee flag.
+const UNASSIGNED = 'unassigned'
+
 export type ChoreFormValues = {
   title: string
   // Sanitised HTML, not plain text. '' means "no description", which holds because
@@ -54,6 +60,10 @@ export type ChoreFormValues = {
   // strategies it is only editable where the page allows it (see
   // allowAssigneeOverride), and then only until the next completion re-derives it.
   current_assignee_id: number | null
+  // Hand the chore back to the whole household. Separate from a null current_assignee_id,
+  // which means "no opinion" and deliberately keeps whoever is already on the hook - see the
+  // field's comment in backend/app/schemas/chore.py for why the two cannot be merged.
+  clear_current_assignee: boolean
   tag_ids: number[]
 }
 
@@ -74,6 +84,7 @@ export type ChoreSubmit = {
   weekdays: number[] | null
   assignee_ids: number[]
   current_assignee_id: number | null
+  clear_current_assignee: boolean
   tag_ids: number[]
 }
 
@@ -192,6 +203,12 @@ export function ChoreForm({
         weekdays: weekdays.length > 0 ? weekdays : null,
         assignee_ids: selectedAssignees,
         current_assignee_id: canPickAssignee ? currentAssigneeId : null,
+        // Gated on the same condition as current_assignee_id, and for the same reason: the
+        // choice is only meaningful where the picker offers it, so a hidden picker must not
+        // smuggle an unassign through. Note it is NOT gated on the pool, which is what lets
+        // "clear" survive an edit that also empties the pool - the two agree, since an empty
+        // pool is unassigned anyway.
+        clear_current_assignee: canPickAssignee && values.clear_current_assignee,
         tag_ids: selectedTags,
       })
     } catch (err) {
@@ -382,8 +399,20 @@ export function ChoreForm({
             {t('choreCreate.currentAssignee')}
           </Label>
           <Select
-            value={currentAssigneeId !== null ? String(currentAssigneeId) : undefined}
-            onValueChange={(v) => setValues({ ...values, current_assignee_id: Number(v) })}
+            value={
+              values.clear_current_assignee
+                ? UNASSIGNED
+                : currentAssigneeId !== null
+                  ? String(currentAssigneeId)
+                  : undefined
+            }
+            onValueChange={(v) =>
+              setValues({
+                ...values,
+                clear_current_assignee: v === UNASSIGNED,
+                current_assignee_id: v === UNASSIGNED ? null : Number(v),
+              })
+            }
           >
             <SelectTrigger
               id="current-assignee"
@@ -393,6 +422,10 @@ export function ChoreForm({
               <SelectValue placeholder={t('choreCreate.currentAssigneePlaceholder')} />
             </SelectTrigger>
             <SelectContent>
+              {/* Hand the chore back to the whole household. A sentinel rather than '', which
+                  Radix reserves for "no value" and would render as the placeholder instead of a
+                  selectable option. */}
+              <SelectItem value={UNASSIGNED}>{t('choreCreate.currentAssigneeNobody')}</SelectItem>
               {selectedAssignees.map((id) => {
                 const member = members.find((m) => m.id === id)
                 return (
@@ -403,6 +436,11 @@ export function ChoreForm({
               })}
             </SelectContent>
           </Select>
+          {values.clear_current_assignee && (
+            <p className="text-[13px] font-medium text-muted-foreground">
+              {t('choreCreate.currentAssigneeNobodyHint')}
+            </p>
+          )}
           {!isManual && (
             <p className="text-[13px] font-medium text-muted-foreground">
               {t('choreCreate.currentAssigneeTurnHint')}

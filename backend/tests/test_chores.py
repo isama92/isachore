@@ -1777,3 +1777,154 @@ async def test_description_at_the_length_limit_is_accepted(
     )
     assert resp.status_code == 201
     assert resp.json()["description"] == "x" * MAX_RICH_TEXT_LENGTH
+
+
+# --- clearing the current assignee ---
+# `current_assignee_id: null` deliberately means "no explicit choice" and keeps a still-valid
+# assignee, so `clear_current_assignee` is the only way to say "nobody". An unassigned chore is
+# shared: home.py's assignee filter keeps unassigned chores for every member.
+
+
+async def test_update_chore_clears_the_current_assignee(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    anna = await make_user(email="anna@example.com", first_name="Anna")
+    bram = await make_user(email="bram@example.com", first_name="Bram")
+    household = await make_household(members=[anna, bram])
+    chore = await make_chore(household=household, assignees=[anna, bram])
+    client = await auth_client(anna)
+
+    # Assign, then unassign, so the clear has something to undo.
+    assigned = await client.patch(
+        f"/api/v1/chores/{chore.id}",
+        json=_payload(assignee_ids=[anna.id, bram.id], current_assignee_id=anna.id),
+    )
+    assert assigned.json()["current_assignee"]["id"] == anna.id
+
+    cleared = await client.patch(
+        f"/api/v1/chores/{chore.id}",
+        json=_payload(assignee_ids=[anna.id, bram.id], clear_current_assignee=True),
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["current_assignee"] is None
+    # The pool is untouched: unassigned means "nobody in particular right now", not "nobody can
+    # ever be given this".
+    assert {a["id"] for a in cleared.json()["assignees"]} == {anna.id, bram.id}
+
+
+async def test_update_chore_keeps_a_valid_assignee_when_none_is_given(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    """The reason clear_current_assignee has to exist at all. A null current_assignee_id means
+    "no opinion" and must NOT clear, because ChoreForm submits null whenever its picker is
+    hidden - so if this regressed, editing a chore's title would silently unassign it."""
+    anna = await make_user(email="anna@example.com", first_name="Anna")
+    bram = await make_user(email="bram@example.com", first_name="Bram")
+    household = await make_household(members=[anna, bram])
+    chore = await make_chore(household=household, assignees=[anna, bram])
+    client = await auth_client(anna)
+
+    await client.patch(
+        f"/api/v1/chores/{chore.id}",
+        json=_payload(assignee_ids=[anna.id, bram.id], current_assignee_id=bram.id),
+    )
+    resp = await client.patch(
+        f"/api/v1/chores/{chore.id}",
+        json=_payload(title="Renamed", assignee_ids=[anna.id, bram.id], current_assignee_id=None),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["title"] == "Renamed"
+    assert resp.json()["current_assignee"]["id"] == bram.id
+
+
+async def test_clear_current_assignee_wins_over_an_explicit_choice(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # Both fields set is a contradictory payload; the clear is documented as taking precedence,
+    # so this pins which one wins rather than leaving it to whichever branch runs first.
+    anna = await make_user(email="anna@example.com", first_name="Anna")
+    household = await make_household(members=[anna])
+    chore = await make_chore(household=household, assignees=[anna])
+    client = await auth_client(anna)
+
+    resp = await client.patch(
+        f"/api/v1/chores/{chore.id}",
+        json=_payload(
+            assignee_ids=[anna.id], current_assignee_id=anna.id, clear_current_assignee=True
+        ),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["current_assignee"] is None
+
+
+async def test_clear_current_assignee_survives_an_auto_strategy_reconcile(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    """The branch-ordering guard. `alphabetical` would otherwise re-derive an assignee from the
+    strategy the moment the clear left the slot empty, so a clear that merely fell through to
+    the "recompute" elif would look like it did nothing."""
+    anna = await make_user(email="anna@example.com", first_name="Anna")
+    bram = await make_user(email="bram@example.com", first_name="Bram")
+    household = await make_household(members=[anna, bram])
+    chore = await make_chore(
+        household=household, assignees=[anna, bram], assignment_type=AssignmentType.alphabetical
+    )
+    client = await auth_client(anna)
+
+    resp = await client.patch(
+        f"/api/v1/chores/{chore.id}",
+        json=_payload(
+            assignee_ids=[anna.id, bram.id],
+            assignment_type="alphabetical",
+            clear_current_assignee=True,
+        ),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["current_assignee"] is None
+
+
+async def test_create_chore_can_start_unassigned_under_an_auto_strategy(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    # Without the flag an auto strategy always picks somebody at creation, so this is the only
+    # way to create a shared chore that already has a rotation pool.
+    anna = await make_user(email="anna@example.com", first_name="Anna")
+    bram = await make_user(email="bram@example.com", first_name="Bram")
+    household = await make_household(members=[anna, bram])
+    client = await auth_client(anna)
+
+    resp = await client.post(
+        "/api/v1/chores",
+        json=_payload(
+            household_id=household.id,
+            assignment_type="alphabetical",
+            assignee_ids=[anna.id, bram.id],
+            clear_current_assignee=True,
+        ),
+    )
+    assert resp.status_code == 201
+    assert resp.json()["current_assignee"] is None
+
+    # And the default still picks somebody, so the flag is what changed the outcome.
+    plain = await client.post(
+        "/api/v1/chores",
+        json=_payload(
+            household_id=household.id,
+            title="Other",
+            assignment_type="alphabetical",
+            assignee_ids=[anna.id, bram.id],
+        ),
+    )
+    assert plain.json()["current_assignee"]["id"] == anna.id

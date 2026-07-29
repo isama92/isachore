@@ -275,6 +275,8 @@
     "currentAssignee": "Currently assigned to",
     "currentAssigneePlaceholder": "Choose who is on it",
     "currentAssigneeTurnHint": "Applies to the current turn; the next one follows the rotation again.",
+    "currentAssigneeNobody": "Nobody in particular",
+    "currentAssigneeNobodyHint": "Shown to everyone in the household.",
     "startDate": "Start date",
     "tags": "Tags",
     "noTags": "No tags yet.",

@@ -275,6 +275,8 @@
     "currentAssignee": "Attualmente assegnata a",
     "currentAssigneePlaceholder": "Scegli chi se ne occupa",
     "currentAssigneeTurnHint": "Vale per il turno attuale; il prossimo segue di nuovo la rotazione.",
+    "currentAssigneeNobody": "Nessuno in particolare",
+    "currentAssigneeNobodyHint": "Mostrata a tutti i membri del nucleo domestico.",
     "startDate": "Data di inizio",
     "tags": "Etichette",
     "noTags": "Ancora nessuna etichetta.",

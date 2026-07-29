@@ -124,6 +124,17 @@ class ChoreCreate(BaseModel):
     # Who starts on the hook. Used for `manual` (you set it); for the auto strategies
     # the initial assignee is derived, but an explicit pool member is honoured.
     current_assignee_id: int | None = None
+    # Make the chore unassigned/shared, so it shows for every household member. Takes
+    # precedence over `current_assignee_id`.
+    #
+    # A separate field because `current_assignee_id: null` already means something else, and
+    # cannot be reinterpreted: it means "no explicit choice", and the update path then keeps a
+    # still-valid assignee rather than clearing it (see _reconcile_open_occurrence). That
+    # matters because `ChoreForm` submits null routinely whenever its picker is hidden - an
+    # empty pool, or an auto strategy on the create page - so if null cleared the assignee,
+    # editing a random chore's title would silently unassign it. "Nobody" and "no opinion" are
+    # two different messages and each needs its own way to be said.
+    clear_current_assignee: bool = False
     tag_ids: list[int] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -150,6 +161,17 @@ class ChoreUpdate(BaseModel):
     weekdays: list[Weekday] | None = None
     assignee_ids: list[int] = Field(default_factory=list)
     current_assignee_id: int | None = None
+    # Make the chore unassigned/shared, so it shows for every household member. Takes
+    # precedence over `current_assignee_id`.
+    #
+    # A separate field because `current_assignee_id: null` already means something else, and
+    # cannot be reinterpreted: it means "no explicit choice", and the update path then keeps a
+    # still-valid assignee rather than clearing it (see _reconcile_open_occurrence). That
+    # matters because `ChoreForm` submits null routinely whenever its picker is hidden - an
+    # empty pool, or an auto strategy on the create page - so if null cleared the assignee,
+    # editing a random chore's title would silently unassign it. "Nobody" and "no opinion" are
+    # two different messages and each needs its own way to be said.
+    clear_current_assignee: bool = False
     tag_ids: list[int] = Field(default_factory=list)
 
     @model_validator(mode="after")

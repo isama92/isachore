@@ -345,3 +345,104 @@ describe('ChoreEdit', () => {
     ).toBeInTheDocument()
   })
 })
+
+describe('clearing the current assignee', () => {
+  // makeUser for the chore's own assignees (ChoreRead embeds the full user), makeHouseholdMember
+  // for the members endpoint (data-minimised: no email). Same split as the tests above.
+  const jo = makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' })
+  const sam = makeUser({ id: 3, first_name: 'Sam', last_name: 'Lee' })
+  const members = [
+    makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' }),
+    makeHouseholdMember({ id: 3, first_name: 'Sam', last_name: 'Lee' }),
+  ]
+
+  function mocks(chore: ReturnType<typeof makeChore>) {
+    return [
+      { path: '/api/v1/chores/7', method: 'GET' as const, body: chore },
+      { path: MEMBERS, method: 'GET' as const, body: page(members) },
+      { path: TAGS, method: 'GET' as const, body: page([]) },
+      { path: '/api/v1/chores/7', method: 'PATCH' as const, body: chore },
+    ]
+  }
+
+  const assigned = makeChore({
+    id: 7,
+    title: 'Dishes',
+    assignment_type: 'manual',
+    household: { id: 4, name: 'Beach House' },
+    assignees: [jo, sam],
+    current_assignee: jo,
+  })
+
+  it('hands the chore back to the household', async () => {
+    // The point of the feature: a manual chore stuck on one person, handed back to everyone.
+    // clear_current_assignee rather than current_assignee_id: null, because null means "no
+    // opinion" server-side and would keep Jo.
+    const fetchMock = mockFetch(mocks(assigned))
+    renderEdit()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    await screen.findByDisplayValue('Dishes')
+    const picker = screen.getByRole('combobox', { name: 'Currently assigned to' })
+    expect(within(picker).getByText('Jo Ng')).toBeInTheDocument()
+
+    await user.click(picker)
+    await user.click(await screen.findByRole('option', { name: 'Nobody in particular' }))
+    expect(screen.getByText('Shown to everyone in the household.')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('chores-list')
+    expect(patchBody(fetchMock)).toMatchObject({
+      clear_current_assignee: true,
+      current_assignee_id: null,
+    })
+  })
+
+  it('does not send the flag when a person is chosen', async () => {
+    // Guards the other direction: picking someone after choosing nobody has to turn the flag
+    // back off, or the API would clear the assignee the user just selected.
+    const fetchMock = mockFetch(mocks(assigned))
+    renderEdit()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    await screen.findByDisplayValue('Dishes')
+    const picker = screen.getByRole('combobox', { name: 'Currently assigned to' })
+    await user.click(picker)
+    await user.click(await screen.findByRole('option', { name: 'Nobody in particular' }))
+    await user.click(screen.getByRole('combobox', { name: 'Currently assigned to' }))
+    await user.click(await screen.findByRole('option', { name: 'Sam Lee' }))
+
+    expect(screen.queryByText('Shown to everyone in the household.')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('chores-list')
+    expect(patchBody(fetchMock)).toMatchObject({
+      clear_current_assignee: false,
+      current_assignee_id: 3,
+    })
+  })
+
+  it('opens on "nobody" for a chore that is already unassigned', async () => {
+    // Seeded from the chore, so saving an unrelated edit cannot quietly re-derive an assignee
+    // for a chore someone deliberately shared. The pool is non-empty, which is what makes the
+    // picker show at all.
+    const shared = makeChore({
+      id: 7,
+      title: 'Dishes',
+      assignment_type: 'manual',
+      household: { id: 4, name: 'Beach House' },
+      assignees: [jo, sam],
+      current_assignee: null,
+    })
+    const fetchMock = mockFetch(mocks(shared))
+    renderEdit()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    await screen.findByDisplayValue('Dishes')
+    const picker = screen.getByRole('combobox', { name: 'Currently assigned to' })
+    expect(within(picker).getByText('Nobody in particular')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('chores-list')
+    expect(patchBody(fetchMock)).toMatchObject({ clear_current_assignee: true })
+  })
+})

@@ -132,6 +132,8 @@ export default function ChoreCreate() {
     assignee_ids: clone?.assignee_ids ?? [],
     // A fresh chore derives its own starting assignee (manual lets you pick one).
     current_assignee_id: null,
+    // A new chore starts with whatever the strategy derives, so there is nothing to clear yet.
+    clear_current_assignee: false,
     tag_ids: clone?.tag_ids ?? [],
   }
 

@@ -84,6 +84,10 @@ export default function ChoreEdit() {
             weekdays: chore.weekdays ?? [],
             assignee_ids: chore.assignees.map((a) => a.id),
             current_assignee_id: chore.current_assignee?.id ?? null,
+            // Seeded from the chore's actual state: an already-unassigned chore opens with
+            // "Nobody in particular" selected rather than an empty picker, so saving an
+            // unrelated edit cannot quietly re-derive an assignee for it.
+            clear_current_assignee: chore.current_assignee === null,
             tag_ids: chore.tags.map((tag) => tag.id),
           }}
           submitLabel={t('choreEdit.submit')}
