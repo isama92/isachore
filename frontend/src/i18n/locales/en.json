@@ -129,6 +129,7 @@
       "repeats": "Repeats",
       "assignment": "Assignment",
       "tags": "Tags",
+      "createdAt": "Created",
       "start": "Start",
       "actions": "Actions"
     },

@@ -7,7 +7,7 @@ import { CopyPlusIcon, SquarePenIcon, Trash2Icon } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
 import { routes } from '../lib/routes'
-import { formatDate, repeatLabel } from '../lib/chores'
+import { formatDate, formatDateTime, repeatLabel } from '../lib/chores'
 import type { Chore, ChoreCloneState, Household, Page } from '../lib/types'
 import { DataTable } from '@/components/data-table/DataTable'
 import { useServerTable } from '@/components/data-table/useServerTable'
@@ -46,8 +46,8 @@ export default function Chores() {
   const table = useServerTable<Chore, ChoreFilters>({
     endpoint: endpoints.chores.root,
     initial: {
-      sortBy: 'start_date',
-      sortDir: 'asc',
+      sortBy: 'created_at',
+      sortDir: 'desc',
       pageSize: 10,
       filters: { household_id: '', title: '' },
     },
@@ -296,6 +296,14 @@ export default function Chores() {
       cell: ({ row }) => tagsCell(row.original.tags),
     },
     {
+      // Date *and* time, like the History table: chores created on the same day
+      // are common, and the whole point of this column is to order by creation.
+      accessorKey: 'created_at',
+      header: t('chores.headers.createdAt'),
+      cell: ({ row }) => formatDateTime(row.original.created_at),
+      meta: { cellClassName: 'font-medium text-muted-foreground' },
+    },
+    {
       accessorKey: 'start_date',
       header: t('chores.headers.start'),
       cell: ({ row }) => formatDate(row.original.start_date),
@@ -361,7 +369,7 @@ export default function Chores() {
         <DataTable
           columns={columns}
           table={table}
-          minWidthClassName="min-w-[760px]"
+          minWidthClassName="min-w-[880px]"
           emptyMessage={t('chores.empty')}
         />
       </main>

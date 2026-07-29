@@ -5,6 +5,7 @@ import { Route, Routes, useLocation } from 'react-router'
 import { toast } from 'sonner'
 import Chores from './Chores'
 import { renderWithProviders } from '../test/utils'
+import { formatDate, formatDateTime } from '../lib/chores'
 import { makeChore, makeHousehold, makeTag, makeUser } from '../test/fixtures'
 import type { Chore, Household } from '../lib/types'
 
@@ -213,6 +214,52 @@ describe('Chores', () => {
       repeat_interval: 3,
       weekdays: [1, 4],
     })
+  })
+
+  it('sorts by creation date, newest first, by default', async () => {
+    const fetchMock = stubFetch({ chores: [makeChore({ title: 'Scrub the tub' })] })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+
+    await screen.findByText('Scrub the tub')
+    const firstGet = lastChoresGet(fetchMock)
+    expect(firstGet).toContain('sort_by=created_at')
+    expect(firstGet).toContain('sort_dir=desc')
+    expect(screen.getByRole('columnheader', { name: /Created/ })).toHaveAttribute(
+      'aria-sort',
+      'descending',
+    )
+    // Start keeps its own server-side sort; 'none' (not absent) is what says the
+    // column is still sortable, just not the one currently sorted.
+    expect(screen.getByRole('columnheader', { name: /Start/ })).toHaveAttribute('aria-sort', 'none')
+  })
+
+  it('shows when each chore was created, including the time', async () => {
+    const chore = makeChore({
+      title: 'Scrub the tub',
+      created_at: '2026-03-04T09:30:00Z',
+      start_date: '2026-07-16',
+    })
+    stubFetch({ chores: [chore] })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+
+    const row = (await screen.findByText('Scrub the tub')).closest('tr')!
+    // Expected text comes from the same helper rather than a literal: the cell renders
+    // in the viewer's timezone and the suite pins none. The two dates are deliberately
+    // months apart, so this fails if the column renders start_date by mistake.
+    expect(within(row).getByText(formatDateTime(chore.created_at))).toBeInTheDocument()
+    expect(within(row).getByText(formatDate(chore.start_date))).toBeInTheDocument()
+  })
+
+  it('sorts ascending when the Created header is clicked', async () => {
+    const fetchMock = stubFetch({ chores: [makeChore({ title: 'Scrub the tub' })] })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    await screen.findByText('Scrub the tub')
+    await user.click(screen.getByRole('button', { name: /Created/ }))
+
+    await waitFor(() => expect(lastChoresGet(fetchMock)).toContain('sort_dir=asc'))
+    expect(lastChoresGet(fetchMock)).toContain('sort_by=created_at')
   })
 
   it('shows a household filter and pushes the choice into the query', async () => {

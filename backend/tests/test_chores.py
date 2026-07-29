@@ -545,6 +545,35 @@ async def test_list_chores_sort_by_title(
     assert [c["title"] for c in resp.json()["items"]] == ["Alpha", "Beta", "Gamma"]
 
 
+async def test_list_chores_sort_by_created_at(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    # created_at is a server_default of now(), which Postgres freezes for the whole
+    # transaction, so every fixture chore here would otherwise share one timestamp and the
+    # id tiebreaker would decide the order. Setting them by hand, deliberately out of step
+    # with the insertion order, is what makes this assert the created_at sort rather than
+    # the tiebreaker: an id-desc fallback would answer Middle, Newest, Oldest.
+    oldest = await make_chore(household=household, title="Oldest")
+    newest = await make_chore(household=household, title="Newest")
+    middle = await make_chore(household=household, title="Middle")
+    oldest.created_at = datetime(2026, 1, 1, tzinfo=UTC)
+    newest.created_at = datetime(2026, 3, 1, tzinfo=UTC)
+    middle.created_at = datetime(2026, 2, 1, tzinfo=UTC)
+    await db_session.flush()
+    client = await auth_client(user)
+
+    resp = await client.get("/api/v1/chores?sort_by=created_at&sort_dir=desc")
+    assert [c["title"] for c in resp.json()["items"]] == ["Newest", "Middle", "Oldest"]
+    resp = await client.get("/api/v1/chores?sort_by=created_at&sort_dir=asc")
+    assert [c["title"] for c in resp.json()["items"]] == ["Oldest", "Middle", "Newest"]
+
+
 async def test_list_chores_sort_by_household(
     make_user: MakeUser,
     make_household: MakeHousehold,
