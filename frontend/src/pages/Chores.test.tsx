@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Route, Routes, useLocation } from 'react-router'
 import { toast } from 'sonner'
 import Chores from './Chores'
 import { renderWithProviders } from '../test/utils'
+import { formatDate, formatDateTime } from '../lib/chores'
 import { makeChore, makeHousehold, makeTag, makeUser } from '../test/fixtures'
 import type { Chore, Household } from '../lib/types'
 
@@ -50,13 +51,18 @@ function stubFetch(opts: {
   return fetchMock
 }
 
+function choresGets(fetchMock: FetchMock): string[] {
+  return fetchMock.mock.calls
+    .filter(
+      ([url, init]) =>
+        (init?.method ?? 'GET').toUpperCase() === 'GET' &&
+        String(url).split('?')[0].endsWith('/api/v1/chores'),
+    )
+    .map(([url]) => String(url))
+}
+
 function lastChoresGet(fetchMock: FetchMock): string {
-  const calls = fetchMock.mock.calls.filter(
-    ([url, init]) =>
-      (init?.method ?? 'GET').toUpperCase() === 'GET' &&
-      String(url).split('?')[0].endsWith('/api/v1/chores'),
-  )
-  return String(calls.at(-1)?.[0] ?? '')
+  return choresGets(fetchMock).at(-1) ?? ''
 }
 
 describe('Chores', () => {
@@ -213,6 +219,134 @@ describe('Chores', () => {
       repeat_interval: 3,
       weekdays: [1, 4],
     })
+  })
+
+  it('sorts by creation date, newest first, by default', async () => {
+    const fetchMock = stubFetch({ chores: [makeChore({ title: 'Scrub the tub' })] })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+
+    await screen.findByText('Scrub the tub')
+    const firstGet = lastChoresGet(fetchMock)
+    expect(firstGet).toContain('sort_by=created_at')
+    expect(firstGet).toContain('sort_dir=desc')
+    expect(screen.getByRole('columnheader', { name: /Created/ })).toHaveAttribute(
+      'aria-sort',
+      'descending',
+    )
+    // Start keeps its own server-side sort; 'none' (not absent) is what says the
+    // column is still sortable, just not the one currently sorted.
+    expect(screen.getByRole('columnheader', { name: /Start/ })).toHaveAttribute('aria-sort', 'none')
+  })
+
+  it('shows when each chore was created, including the time', async () => {
+    const chore = makeChore({
+      title: 'Scrub the tub',
+      created_at: '2026-03-04T09:30:00Z',
+      start_date: '2026-07-16',
+    })
+    stubFetch({ chores: [chore] })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+
+    const row = (await screen.findByText('Scrub the tub')).closest('tr')!
+    // Expected text comes from the same helper rather than a literal: the cell renders
+    // in the viewer's timezone and the suite pins none. The two dates are deliberately
+    // months apart, so this fails if the column renders start_date by mistake.
+    expect(within(row).getByText(formatDateTime(chore.created_at))).toBeInTheDocument()
+    expect(within(row).getByText(formatDate(chore.start_date))).toBeInTheDocument()
+  })
+
+  it('sorts ascending when the Created header is clicked', async () => {
+    const fetchMock = stubFetch({ chores: [makeChore({ title: 'Scrub the tub' })] })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    await screen.findByText('Scrub the tub')
+    await user.click(screen.getByRole('button', { name: /Created/ }))
+
+    await waitFor(() => expect(lastChoresGet(fetchMock)).toContain('sort_dir=asc'))
+    expect(lastChoresGet(fetchMock)).toContain('sort_by=created_at')
+  })
+
+  it('pre-fills the title input from a remembered text filter and keeps it', async () => {
+    localStorage.setItem(
+      'isachore-table-chores',
+      JSON.stringify({
+        pageSize: 10,
+        sortBy: 'created_at',
+        sortDir: 'desc',
+        filters: { household_id: '', title: 'tub' },
+      }),
+    )
+    const fetchMock = stubFetch({ chores: [makeChore({ id: 7, title: 'Scrub the tub' })] })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+
+    await screen.findByText('Scrub the tub')
+    // The input seeds from the restored filter rather than '', which is what stops the
+    // 300ms debounce from firing on mount and wiping the very value it restored. A
+    // future text filter initialised from '' would silently do exactly that.
+    expect(screen.getByLabelText('Filter by title')).toHaveValue('tub')
+    expect(lastChoresGet(fetchMock)).toContain('title=tub')
+    // Still there after the debounce window has had time to fire.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400))
+    })
+    expect(lastChoresGet(fetchMock)).toContain('title=tub')
+    expect(screen.getByLabelText('Filter by title')).toHaveValue('tub')
+  })
+
+  it('keeps a remembered household filter that is still valid', async () => {
+    localStorage.setItem(
+      'isachore-table-chores',
+      JSON.stringify({
+        pageSize: 10,
+        sortBy: 'created_at',
+        sortDir: 'desc',
+        filters: { household_id: '2', title: '' },
+      }),
+    )
+    const fetchMock = stubFetch({
+      chores: [makeChore({ id: 7, title: 'Scrub the tub' })],
+      households: [
+        makeHousehold({ id: 1, name: 'Flat 3B' }),
+        makeHousehold({ id: 2, name: 'Beach House' }),
+      ],
+    })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+
+    // The select renders only once the households have loaded, so this is the prune
+    // having had its chance to run.
+    await screen.findByRole('combobox', { name: 'Household' })
+    // Then settle: a prune navigates, which would refetch. Asserting the query
+    // straight away would pass whether or not the filter was wrongly cleared, so
+    // "still exactly one request" is what actually pins this.
+    await act(async () => {})
+    expect(choresGets(fetchMock)).toHaveLength(1)
+    expect(lastChoresGet(fetchMock)).toContain('household_id=2')
+    expect(screen.getByRole('combobox', { name: 'Household' })).toHaveTextContent('Beach House')
+  })
+
+  it('forgets a remembered household filter the user can no longer pick', async () => {
+    localStorage.setItem(
+      'isachore-table-chores',
+      JSON.stringify({
+        pageSize: 10,
+        sortBy: 'created_at',
+        sortDir: 'desc',
+        filters: { household_id: '99', title: '' },
+      }),
+    )
+    const fetchMock = stubFetch({
+      chores: [makeChore({ id: 7, title: 'Scrub the tub' })],
+      households: [
+        makeHousehold({ id: 1, name: 'Flat 3B' }),
+        makeHousehold({ id: 2, name: 'Beach House' }),
+      ],
+    })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+
+    // Household 99 is gone (left, deleted, membership revoked). Left in place it would
+    // filter the list to nothing behind a blank select, with no way back.
+    await waitFor(() => expect(lastChoresGet(fetchMock)).not.toContain('household_id'))
   })
 
   it('shows a household filter and pushes the choice into the query', async () => {

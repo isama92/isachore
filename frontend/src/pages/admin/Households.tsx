@@ -41,6 +41,7 @@ export default function AdminHouseholds() {
 
   const table = useServerTable<Household, HouseholdFilters>({
     endpoint: endpoints.adminHouseholds.root,
+    storageKey: 'admin-households',
     initial: {
       sortBy: 'created_at',
       sortDir: 'desc',

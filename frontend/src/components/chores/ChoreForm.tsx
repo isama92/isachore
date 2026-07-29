@@ -40,7 +40,9 @@ export type ChoreFormValues = {
   // form's spelling of the API's null: unpinned.
   weekdays: number[]
   assignee_ids: number[]
-  // Who starts on the hook. Only used for `manual`; the other strategies derive it.
+  // Who is on the hook right now. Always meaningful for `manual`; for the auto
+  // strategies it is only editable where the page allows it (see
+  // allowAssigneeOverride), and then only until the next completion re-derives it.
   current_assignee_id: number | null
   tag_ids: number[]
 }
@@ -76,6 +78,11 @@ type Props = {
   // Rendered above the fields: the household select (create) or the read-only
   // household name (edit).
   header?: ReactNode
+  // Let the current assignee be changed whatever the assignment strategy. The API
+  // honours an explicit pool member for all of them, so this is only about which
+  // page offers it: edit does, because moving a chore off whoever is stuck with it
+  // is the point; create does not, so a random chore's first assignee stays random.
+  allowAssigneeOverride?: boolean
   // Must navigate away on success: the form only clears its saving state on
   // error, so a successful submit is expected to unmount the form.
   onSubmit: (values: ChoreSubmit) => Promise<void>
@@ -90,6 +97,7 @@ export function ChoreForm({
   cancelTo,
   errorMessage,
   header,
+  allowAssigneeOverride = false,
   onSubmit,
 }: Props) {
   const { t } = useTranslation()
@@ -124,6 +132,12 @@ export function ChoreForm({
     values.current_assignee_id !== null && selectedAssignees.includes(values.current_assignee_id)
       ? values.current_assignee_id
       : null
+  // Manual always offers the picker, since nothing else would ever set an assignee.
+  // The auto strategies only offer it where the caller asks (the edit page), and
+  // there it is a one-turn override: the next completion re-derives from the
+  // strategy, which the hint below says out loud.
+  const canPickAssignee = isManual || allowAssigneeOverride
+  const showAssigneePicker = canPickAssignee && selectedAssignees.length > 0
 
   // Recurrence, derived for the same reason: switching period must not submit stale
   // detail. NOTE `isManual` above is the *assignment strategy*; `manualRepeat` here is
@@ -163,7 +177,7 @@ export function ChoreForm({
         // clearing every day unpins an existing chore.
         weekdays: weekdays.length > 0 ? weekdays : null,
         assignee_ids: selectedAssignees,
-        current_assignee_id: isManual ? currentAssigneeId : null,
+        current_assignee_id: canPickAssignee ? currentAssigneeId : null,
         tag_ids: selectedTags,
       })
     } catch (err) {
@@ -333,8 +347,8 @@ export function ChoreForm({
         </div>
       )}
 
-      {/* Manual: pick who is currently on the hook (from the selected pool). */}
-      {isManual && selectedAssignees.length > 0 && (
+      {/* Who is currently on the hook, picked from the selected pool. */}
+      {showAssigneePicker && (
         <div className="flex flex-col gap-1.5">
           <Label id="current-assignee-label" htmlFor="current-assignee">
             {t('choreCreate.currentAssignee')}
@@ -361,6 +375,11 @@ export function ChoreForm({
               })}
             </SelectContent>
           </Select>
+          {!isManual && (
+            <p className="text-[13px] font-medium text-muted-foreground">
+              {t('choreCreate.currentAssigneeTurnHint')}
+            </p>
+          )}
         </div>
       )}
 

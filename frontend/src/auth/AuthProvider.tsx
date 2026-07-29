@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { api, setUnauthorizedHandler } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
 import type { LoginResponse, Me, User } from '../lib/types'
+import { claimTableSettings, clearTableSettings } from '../components/data-table/useServerTable'
 import { useTheme } from '../theme/useTheme'
 import i18n, { changeLanguage } from '../i18n/i18n'
 import { AuthContext } from './context'
@@ -37,6 +38,13 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       .get<Me>(endpoints.auth.me)
       .then((me) => {
         if (cancelled) return
+        // Every place a user is adopted claims the remembered table settings: here,
+        // login, verifyTwoFactor, and refresh (which is where impersonation starting
+        // and stopping both land). Filters name colleagues and households and the
+        // admin tables save search terms, so they must not cross accounts; the claim
+        // clears them only when the account actually differs, since a profile save
+        // refreshes too. Session ENDS clear outright, in handleExpiry and logout.
+        claimTableSettings(me.id)
         setUser(me)
         setImpersonating(me.impersonating)
         syncAppearance(me)
@@ -71,6 +79,9 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     if (!userRef.current) return
     setUser(null)
     setImpersonating(false)
+    // Same reason as logout: this is a session ending, and on a shared device it is
+    // the likeliest way one ends, since it takes no action from the user at all.
+    clearTableSettings()
     toast.info(i18n.t('common.sessionExpired'), { id: 'session-expired' })
   }, [])
 
@@ -82,6 +93,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     try {
       const me = await api.get<Me>(endpoints.auth.me)
+      claimTableSettings(me.id)
       setUser(me)
       setImpersonating(me.impersonating)
       syncAppearance(me)
@@ -99,6 +111,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       if (res.two_factor_required || !res.user) {
         return { twoFactorRequired: res.two_factor_required }
       }
+      claimTableSettings(res.user.id)
       setUser(res.user)
       setImpersonating(false)
       syncAppearance(res.user)
@@ -110,6 +123,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const verifyTwoFactor = useCallback(
     async (code: string) => {
       const me = await api.post<User>(endpoints.auth.verifyTwoFactor, { code })
+      claimTableSettings(me.id)
       setUser(me)
       setImpersonating(false)
       syncAppearance(me)
@@ -121,6 +135,10 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     await api.post(endpoints.auth.logout)
     setUser(null)
     setImpersonating(false)
+    // Remembered table filters name colleagues and households, so they must not
+    // outlive the session on a shared device. Theme and language deliberately do
+    // survive: they are this browser's preferences, not one account's data.
+    clearTableSettings()
   }, [])
 
   const value = useMemo(

@@ -35,6 +35,7 @@ export default function Households() {
 
   const table = useServerTable<Household, HouseholdFilters>({
     endpoint: endpoints.households.root,
+    storageKey: 'households',
     initial: { sortBy: 'created_at', sortDir: 'desc', pageSize: 10, filters: { name: '' } },
   })
 

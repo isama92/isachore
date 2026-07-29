@@ -129,6 +129,7 @@
       "repeats": "Ripetizione",
       "assignment": "Assegnazione",
       "tags": "Etichette",
+      "createdAt": "Creata",
       "start": "Inizio",
       "actions": "Azioni"
     },
@@ -238,6 +239,7 @@
     "turnLengthHint": "Completamenti prima che la faccenda passi alla persona successiva.",
     "currentAssignee": "Attualmente assegnata a",
     "currentAssigneePlaceholder": "Scegli chi se ne occupa",
+    "currentAssigneeTurnHint": "Vale per il turno attuale; il prossimo segue di nuovo la rotazione.",
     "startDate": "Data di inizio",
     "tags": "Etichette",
     "noTags": "Ancora nessuna etichetta.",

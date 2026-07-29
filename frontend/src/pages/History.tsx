@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import type { ColumnDef } from '@tanstack/react-table'
@@ -46,6 +46,7 @@ export default function History() {
 
   const table = useServerTable<HistoryEntry, HistoryFilters>({
     endpoint: endpoints.completions.root,
+    storageKey: 'history',
     initial: {
       sortBy: 'created_at',
       sortDir: 'desc',
@@ -57,13 +58,36 @@ export default function History() {
   const [options, setOptions] = useState<HistoryFilterOptions>(EMPTY_OPTIONS)
   const [error, setError] = useState<string | null>(null)
 
+  // Latest-value refs so the options effect below can prune a remembered filter
+  // without taking them as dependencies (which would refetch the options).
+  const setFiltersRef = useRef(table.setFilters)
+  const filtersRef = useRef(table.filters)
+  useEffect(() => {
+    setFiltersRef.current = table.setFilters
+    filtersRef.current = table.filters
+  })
+
   // The user/household filter options (and whether to show each filter at all).
   useEffect(() => {
     let cancelled = false
     api
       .get<HistoryFilterOptions>(endpoints.completions.filters)
       .then((data) => {
-        if (!cancelled) setOptions(data)
+        if (cancelled) return
+        setOptions(data)
+        // A remembered id outlives whatever made it valid (household left, member
+        // removed). Left in place it filters the list down to nothing behind a blank
+        // Select, so drop what can no longer be picked. Both go in ONE setFilters
+        // call: two setFilter calls in a tick would lose the first, see the hook.
+        const { household_id, user_id } = filtersRef.current
+        const dead: Partial<HistoryFilters> = {}
+        if (household_id !== '' && !data.households.some((h) => String(h.id) === household_id)) {
+          dead.household_id = ''
+        }
+        if (user_id !== '' && !data.members.some((m) => String(m.id) === user_id)) {
+          dead.user_id = ''
+        }
+        if (Object.keys(dead).length > 0) setFiltersRef.current(dead)
       })
       .catch(() => {
         if (!cancelled) setOptions(EMPTY_OPTIONS)

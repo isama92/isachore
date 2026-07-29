@@ -87,6 +87,10 @@ export default function ChoreEdit() {
           submitLabel={t('choreEdit.submit')}
           cancelTo={routes.chores.list}
           errorMessage={t('choreEdit.updateError')}
+          // Editing is where moving a chore off whoever is currently stuck with it
+          // makes sense, whatever the strategy. Create leaves the auto strategies to
+          // pick their own first assignee.
+          allowAssigneeOverride
           header={
             <div className="flex flex-col gap-1.5">
               <Label>{t('choreCreate.household')}</Label>

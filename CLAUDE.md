@@ -9,7 +9,7 @@ and the non-obvious gotchas.
 
 ## Workflow
 
-- Work in small steps; the roadmap in README.md is the backlog (tick items off
+- Work in small steps; the todo list in README.md is the backlog (tick items off
   when done). When a requirement is ambiguous or a decision shapes UX or
   architecture, ask before building.
 - **Never commit to `main`.** Branch at the *start* of a step, before the first
@@ -214,6 +214,25 @@ pre-commit run --all-files                           # what the git hook runs
   the target user and parks the admin's own token in the `isachore_admin_token`
   cookie; `POST /auth/stop-impersonating` restores it. `/auth/me` reports
   `impersonating`; logout ends both sessions.
+- **Who is on the hook now** is `chore_occurrences.assignee_id` on the single open
+  occurrence, not a column on the chore; the pool is `chore_assignees` and the
+  rotation order is computed, never stored (`app/core/assignment.py`). The API
+  honours an explicit `current_assignee_id` for **every** strategy, not just
+  `manual` (`_reconcile_open_occurrence`, deliberately ungated). The picker in
+  `ChoreForm` therefore shows for `manual` always and for the auto strategies only
+  where the page passes `allowAssigneeOverride` (edit does, create does not, so a
+  random chore's first assignee stays random), and in both cases only with a
+  non-empty pool. The load-bearing part is that `current_assignee_id` stays derived
+  against the live pool: that is what lets the payload gate more loosely than the
+  render (on the strategy, not also on the pool) and still never submit a stale or
+  hidden value, since an empty pool forces `null` either way. For the auto strategies
+  an override lasts until the next turn boundary, because completing re-derives
+  through `_successor_assignee` — which
+  is what the `currentAssigneeTurnHint` copy promises the user, so keep them in
+  step. One dead end, pre-existing and not worth its own flag on `ChoreRead`: a
+  completed one-off (`repeats: 'manual'`, no open occurrence, a *different* field
+  from the strategy) makes `_reconcile_open_occurrence` return early, so the picker
+  silently does nothing there.
 - **Frontend auth**: `useAuth()` from `src/auth/useAuth.ts`; API calls through the
   `api` wrapper in `src/lib/api.ts` (throws `ApiError`). Protected routes wrap in
   `RequireAuth` / `RequireAdmin` (`src/components/`); authenticated pages render
@@ -283,6 +302,43 @@ pre-commit run --all-files                           # what the git hook runs
   - **HTTPS is required**, so this only works in the tls/traefik modes or behind
     a TLS-terminating proxy. No CSP change was needed: `worker-src` and
     `manifest-src` both fall back to `default-src 'self'`.
+- **Server-driven tables**: every list view is `DataTable` + `useServerTable`
+  (`src/components/data-table/`), TanStack Table in fully manual mode with the
+  fetching inside the hook. A column's `id`/`accessorKey` IS the server sort key, so
+  it has to match that endpoint's whitelist (`CHORE_SORT_COLUMNS` and friends) or
+  sorting breaks silently. Four things not to undo:
+  - **State lives in the URL**, and with a `storageKey` also in `localStorage` under
+    `isachore-table-<key>` (seven keys; `household-members` is deliberately shared by
+    both household edit pages). Storage is read ONCE at mount and what comes back
+    *becomes* that mount's defaults, which is the whole trick: it buys "URL wins over
+    storage, storage wins over the page's own defaults" with no extra branch and no
+    mount-time URL rewrite (which would cost a second fetch and a flicker).
+    `deriveState` and `applyOwnedParams` must keep comparing against that same
+    `defaults`: each encodes "the default", one as the fallback and one as what to
+    omit from the URL, and they have to agree or a value equal to it resolves two
+    ways.
+  - **The page number is never stored**, only page size / sort / filters, so every
+    arrival starts at page 1. A stored page can be out of range after deletions and
+    nothing clamps it.
+  - **`setSearchParams` does not compose within a tick**: react-router hands the
+    updater the current render's params (its own docs say multiple calls "will not
+    build on the prior value"), so two `setFilter` calls in one tick both start from
+    the same place and the last silently wins. Change several filters through
+    `setFilters`. Each setter's early-return guard is also what keeps `loading`
+    honest, since `mutate` flips it true and with no URL change there is no request
+    and so no `.finally` to flip it back: a test for one of those guards must assert
+    `loading`, or it pins nothing.
+  - **Stored settings are untrusted**, validated per field (a bad value falls back on
+    its own, not all-or-nothing), and a 400/422 response clears that table's key so a
+    stored sort the server no longer accepts cannot wedge a page forever. 404 does
+    NOT clear, which is why `Tags` prunes a dead `household_id` itself once its
+    household list loads: `list_tags` 404s for a household you are not in, and its
+    selector is hidden below two households, so nothing on screen could clear it.
+    `Chores` and `History` prune too (via latest-value refs, so the options are not
+    refetched), though they merely return an empty page. `clearTableSettings()` runs
+    on logout because the saved filters name colleagues and households; theme and
+    language deliberately survive, being the browser's preferences rather than one
+    account's data.
 - Import routing from `react-router` (v8), never `react-router-dom`.
 - **UI components**: shadcn/ui (radix-nova) live in `frontend/src/components/ui/`,
   config in `components.json`. Import via the `@/` alias and compose classes with
@@ -338,6 +394,16 @@ pre-commit run --all-files                           # what the git hook runs
 Tests live in `backend/tests/` (pytest) and alongside the code as
 `frontend/src/**/*.test.{ts,tsx}` (vitest). Mirror the existing patterns; cover
 the negative paths (401/403/400/404/409), not just the happy one.
+
+- **A test for one clause of a compound condition must satisfy every other
+  clause**, or it asserts a fall-through and pins nothing. This has now cost real
+  work three times: the `sw.js` note below (a request shape matching no branch
+  falls through whether or not the guard exists), `useServerTable`'s early-return
+  guards (no URL change means no refetch either way, so only asserting `loading`
+  catches a missing guard), and the chore form's assignee picker (a test that
+  switched strategy with an *empty* assignee pool proved nothing about the
+  strategy gate, since the empty pool hides the picker by itself). When adding a
+  test for a guard, delete the guard and watch the test fail.
 
 - **Backend**: `docker compose exec backend uv run pytest` (in the container so
   `db` resolves). Fixtures spin up a throwaway `isachore_test` DB and roll each

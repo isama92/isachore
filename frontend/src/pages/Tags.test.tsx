@@ -102,6 +102,53 @@ describe('Tags', () => {
     expect(await screen.findByText('beach-only')).toBeInTheDocument()
   })
 
+  it('forgets a remembered household filter the user can no longer pick', async () => {
+    localStorage.setItem(
+      'isachore-table-tags',
+      JSON.stringify({
+        pageSize: 10,
+        sortBy: 'name',
+        sortDir: 'asc',
+        filters: { household_id: '99' },
+      }),
+    )
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const path = url.split('?')[0]
+      if ((init?.method ?? 'GET').toUpperCase() !== 'GET') return jsonBody(undefined, 204)
+      if (path.endsWith('/api/v1/households')) {
+        return jsonBody({
+          items: [makeHousehold({ id: 1, name: 'Flat 3B' })],
+          total: 1,
+          page: 1,
+          page_size: 100,
+        })
+      }
+      if (path.endsWith('/api/v1/tags')) {
+        // list_tags answers 404 for a household the caller is not a member of, and the
+        // hook only forgets stored settings on 400/422. This page is the reason the
+        // prune has to exist: Chores and History merely return an empty page.
+        if (url.includes('household_id=99')) {
+          return jsonBody({ detail: 'Household not found' }, 404)
+        }
+        return jsonBody({
+          items: [makeTag({ id: 3, name: 'deep-clean' })],
+          total: 1,
+          page: 1,
+          page_size: 20,
+        })
+      }
+      return jsonBody(undefined, 204)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderWithProviders(<Tags />, { authValue: { user: me } })
+
+    // With one household the selector never renders, so without the prune this page
+    // would fail on every visit with nothing on screen able to clear the filter.
+    expect(await screen.findByText('deep-clean')).toBeInTheDocument()
+    expect(lastTagsGet(fetchMock)).not.toContain('household_id')
+  })
+
   it('deletes a tag after confirming in the dialog and reloads', async () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     const toastSpy = vi.spyOn(toast, 'success')

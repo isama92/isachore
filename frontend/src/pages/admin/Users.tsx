@@ -54,6 +54,7 @@ export default function Users() {
 
   const table = useServerTable<User, UserFilters>({
     endpoint: endpoints.users.root,
+    storageKey: 'admin-users',
     initial: {
       sortBy: 'created_at',
       sortDir: 'desc',

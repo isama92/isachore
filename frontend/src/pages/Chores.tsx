@@ -7,7 +7,7 @@ import { CopyPlusIcon, SquarePenIcon, Trash2Icon } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
 import { routes } from '../lib/routes'
-import { formatDate, repeatLabel } from '../lib/chores'
+import { formatDate, formatDateTime, repeatLabel } from '../lib/chores'
 import type { Chore, ChoreCloneState, Household, Page } from '../lib/types'
 import { DataTable } from '@/components/data-table/DataTable'
 import { useServerTable } from '@/components/data-table/useServerTable'
@@ -45,9 +45,10 @@ export default function Chores() {
 
   const table = useServerTable<Chore, ChoreFilters>({
     endpoint: endpoints.chores.root,
+    storageKey: 'chores',
     initial: {
-      sortBy: 'start_date',
-      sortDir: 'asc',
+      sortBy: 'created_at',
+      sortDir: 'desc',
       pageSize: 10,
       filters: { household_id: '', title: '' },
     },
@@ -62,9 +63,13 @@ export default function Chores() {
 
   // Keep a latest-value ref to the (per-render) setFilter so the debounce effect
   // doesn't need it as a dependency (which would reset the timer every render).
+  // Same trick for the active filters, so the options effect below can prune a
+  // remembered household without re-running (which would refetch the options).
   const setFilterRef = useRef(table.setFilter)
+  const filtersRef = useRef(table.filters)
   useEffect(() => {
     setFilterRef.current = table.setFilter
+    filtersRef.current = table.filters
   })
 
   useEffect(() => {
@@ -78,7 +83,15 @@ export default function Chores() {
     api
       .get<Page<Household>>(`${endpoints.households.root}?sort_by=id&sort_dir=asc&page_size=100`)
       .then((page) => {
-        if (!cancelled) setHouseholds(page.items)
+        if (cancelled) return
+        setHouseholds(page.items)
+        // A remembered household_id outlives whatever made it valid (household left,
+        // deleted, or membership revoked). Left in place it filters the list down to
+        // nothing behind a blank Select, so drop what can no longer be picked.
+        const active = filtersRef.current.household_id
+        if (active !== '' && !page.items.some((h) => String(h.id) === active)) {
+          setFilterRef.current('household_id', '')
+        }
       })
       .catch(() => {
         if (!cancelled) setHouseholds([])
@@ -302,6 +315,14 @@ export default function Chores() {
       meta: { cellClassName: 'font-medium text-muted-foreground' },
     },
     {
+      // Date *and* time, like the History table: chores created on the same day
+      // are common, and the whole point of this column is to order by creation.
+      accessorKey: 'created_at',
+      header: t('chores.headers.createdAt'),
+      cell: ({ row }) => formatDateTime(row.original.created_at),
+      meta: { cellClassName: 'font-medium text-muted-foreground' },
+    },
+    {
       id: 'actions',
       header: t('chores.headers.actions'),
       enableSorting: false,
@@ -361,7 +382,7 @@ export default function Chores() {
         <DataTable
           columns={columns}
           table={table}
-          minWidthClassName="min-w-[760px]"
+          minWidthClassName="min-w-[880px]"
           emptyMessage={t('chores.empty')}
         />
       </main>

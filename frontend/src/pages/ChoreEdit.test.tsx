@@ -180,6 +180,108 @@ describe('ChoreEdit', () => {
     ).toBeInTheDocument()
   })
 
+  it('lets an auto-rotating chore be handed to someone else, and says it is one turn', async () => {
+    const jo = makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' })
+    const sam = makeUser({ id: 3, first_name: 'Sam', last_name: 'Lee' })
+    const rotating = makeChore({
+      id: 7,
+      title: 'Dishes',
+      assignment_type: 'random',
+      household: { id: 4, name: 'Beach House' },
+      assignees: [jo, sam],
+      current_assignee: jo,
+    })
+    const fetchMock = mockFetch([
+      { path: '/api/v1/chores/7', method: 'GET', body: rotating },
+      {
+        path: MEMBERS,
+        method: 'GET',
+        body: page([
+          makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' }),
+          makeHouseholdMember({ id: 3, first_name: 'Sam', last_name: 'Lee' }),
+        ]),
+      },
+      { path: TAGS, method: 'GET', body: page([]) },
+      { path: '/api/v1/chores/7', method: 'PATCH', body: rotating },
+    ])
+    renderEdit()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    await screen.findByDisplayValue('Dishes')
+    // The picker used to be manual-only, so a random chore offered no way off
+    // whoever it had landed on.
+    const picker = screen.getByRole('combobox', { name: 'Currently assigned to' })
+    expect(within(picker).getByText('Jo Ng')).toBeInTheDocument()
+    // The override lasts one turn; the next completion re-derives from the strategy.
+    expect(
+      screen.getByText('Applies to the current turn; the next one follows the rotation again.'),
+    ).toBeInTheDocument()
+
+    await user.click(picker)
+    await user.click(await screen.findByRole('option', { name: 'Sam Lee' }))
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    await screen.findByText('chores-list')
+    expect(patchBody(fetchMock)).toMatchObject({ current_assignee_id: 3 })
+  })
+
+  it('offers no assignee picker at all when the chore has nobody assigned', async () => {
+    mockFetch([
+      {
+        path: '/api/v1/chores/7',
+        method: 'GET',
+        body: makeChore({
+          id: 7,
+          title: 'Dishes',
+          assignment_type: 'random',
+          household: { id: 4, name: 'Beach House' },
+          assignees: [],
+          current_assignee: null,
+        }),
+      },
+      { path: MEMBERS, method: 'GET', body: page([]) },
+      { path: TAGS, method: 'GET', body: page([]) },
+    ])
+    renderEdit()
+
+    await screen.findByDisplayValue('Dishes')
+    // An empty pool is ordinary on a shared chore. Without the pool check the edit
+    // page would render an empty Select on its placeholder, plus the turn hint.
+    expect(
+      screen.queryByRole('combobox', { name: 'Currently assigned to' }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText(/Applies to the current turn/)).not.toBeInTheDocument()
+  })
+
+  it('does not offer the turn hint for a manual chore, whose pick is not temporary', async () => {
+    const jo = makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' })
+    mockFetch([
+      {
+        path: '/api/v1/chores/7',
+        method: 'GET',
+        body: makeChore({
+          id: 7,
+          title: 'Dishes',
+          assignment_type: 'manual',
+          household: { id: 4, name: 'Beach House' },
+          assignees: [jo],
+          current_assignee: jo,
+        }),
+      },
+      {
+        path: MEMBERS,
+        method: 'GET',
+        body: page([makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })]),
+      },
+      { path: TAGS, method: 'GET', body: page([]) },
+    ])
+    renderEdit()
+
+    await screen.findByDisplayValue('Dishes')
+    expect(screen.getByRole('combobox', { name: 'Currently assigned to' })).toBeInTheDocument()
+    expect(screen.queryByText(/Applies to the current turn/)).not.toBeInTheDocument()
+  })
+
   it('saves changes with a PATCH that omits the household, then navigates', async () => {
     const fetchMock = editMocks()
     renderEdit()
