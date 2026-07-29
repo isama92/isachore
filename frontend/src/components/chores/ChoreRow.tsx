@@ -1,9 +1,10 @@
-import { CheckIcon } from 'lucide-react'
+import { CheckIcon, FileTextIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 // One chore card in a list view: a colour-coded dot + title + one line of detail, who it
-// is for ("who is this for"), and a "Done" button. Shared by the two list pages, which
+// is for ("who is this for"), an optional marker for chores that carry written instructions,
+// and a "Done" button. Shared by the two list pages, which
 // differ only in what they put in `detail` and how they react to a completion:
 //
 // - Your Chores passes a due label and `exiting`, so the row plays an exit animation and
@@ -23,6 +24,8 @@ export default function ChoreRow({
   busy = false,
   doneText,
   doneLabel,
+  descriptionLabel,
+  onShowDescription,
   onComplete,
 }: {
   title: string
@@ -35,6 +38,13 @@ export default function ChoreRow({
   busy?: boolean
   doneText: string
   doneLabel: string
+  // `onShowDescription` is the gate: undefined hides the icon entirely, exactly as
+  // householdName above hides the household, so a chore with no instructions has no marker to
+  // click and no empty dialog to reach. Callers pass the label unconditionally, which is why it
+  // is only read when the handler is set - but it is the icon button's ONLY accessible name, so
+  // a caller passing the handler without it ships an unnamed button.
+  descriptionLabel?: string
+  onShowDescription?: () => void
   onComplete: () => void
 }) {
   return (
@@ -52,7 +62,25 @@ export default function ChoreRow({
             aria-hidden
           />
           <div className="min-w-0 flex-1">
-            <p className="truncate font-semibold">{title}</p>
+            {/* The title and its marker share a flex row so the <p> keeps truncating: the icon
+                is shrink-0 beside it rather than inline content that would be clipped with the
+                text. The marker doubles as the affordance and the indicator, which is why it
+                sits next to the name rather than over with the Done action. */}
+            <div className="flex min-w-0 items-center gap-1.5">
+              <p className="truncate font-semibold">{title}</p>
+              {onShowDescription && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={descriptionLabel}
+                  onClick={onShowDescription}
+                  className="shrink-0 text-muted-foreground"
+                >
+                  <FileTextIcon />
+                </Button>
+              )}
+            </div>
             <p className="mt-0.5 text-[13px] font-medium text-muted-foreground">{detail}</p>
             {/* On mobile the right-hand column is too cramped, so the assignee
                 (and household, for multi-household users) stack here under the

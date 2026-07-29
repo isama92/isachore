@@ -9,6 +9,7 @@ import type { UnscheduledChore, UnscheduledData } from '../lib/types'
 import ChoreFilters from '@/components/chores/ChoreFilters'
 import ChoreRow from '@/components/chores/ChoreRow'
 import CreditDialog from '@/components/chores/CreditDialog'
+import DescriptionDialog from '@/components/chores/DescriptionDialog'
 import { useFilterOptions } from '@/components/chores/useFilterOptions'
 import { fullName } from '@/lib/user'
 
@@ -24,6 +25,8 @@ export default function Unscheduled() {
   const [busy, setBusy] = useState<Set<number>>(new Set())
   // The chore whose "who gets credit" dialog is open (null = closed).
   const [creditFor, setCreditFor] = useState<UnscheduledChore | null>(null)
+  // Which chore's instructions are on screen; non-null opens the dialog, as with creditFor.
+  const [descriptionFor, setDescriptionFor] = useState<UnscheduledChore | null>(null)
 
   const options = useFilterOptions()
   const [householdId, setHouseholdId] = useState('')
@@ -164,6 +167,10 @@ export default function Unscheduled() {
                 busy={busy.has(chore.id)}
                 doneText={t('unscheduled.done')}
                 doneLabel={t('unscheduled.markDone', { title: chore.title })}
+                descriptionLabel={t('unscheduled.showDescription', { title: chore.title })}
+                onShowDescription={
+                  chore.has_description ? () => setDescriptionFor(chore) : undefined
+                }
                 onComplete={() => requestComplete(chore)}
               />
             ))}
@@ -183,6 +190,8 @@ export default function Unscheduled() {
         onClose={() => setCreditFor(null)}
         onConfirm={creditAndComplete}
       />
+
+      <DescriptionDialog chore={descriptionFor} onClose={() => setDescriptionFor(null)} />
     </main>
   )
 }

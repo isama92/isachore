@@ -16,7 +16,6 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import {
   Select,
   SelectContent,
@@ -29,9 +28,14 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { TagMultiSelect } from '@/components/chores/TagMultiSelect'
 import { WeekdayPicker } from '@/components/chores/WeekdayPicker'
 import { AssigneeMultiSelect } from '@/components/chores/AssigneeMultiSelect'
+import RichTextEditor from '@/components/rich-text/RichTextEditor'
 
 export type ChoreFormValues = {
   title: string
+  // Sanitised HTML, not plain text. '' means "no description", which holds because
+  // RichTextEditor emits '' rather than the `<p></p>` Tiptap actually keeps for an untouched
+  // document - so the `|| null` in handleSubmit stays correct. The backend collapses
+  // visually-empty HTML to NULL as well, for clients that are not this form.
   description: string
   start_date: string
   repeats: RepeatPeriod
@@ -211,14 +215,16 @@ export function ChoreForm({
         />
       </div>
 
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="description">{t('choreCreate.description')}</Label>
-        <Textarea
-          id="description"
+      {/* gap-2, not gap-1.5: the editor is a bordered composite like the pickers below, not a
+          bare input. Labelled by id rather than htmlFor, because the field is a contenteditable
+          and so not a labelable element (same as the assignee and weekday pickers). */}
+      <div className="flex flex-col gap-2">
+        <Label id="description-label">{t('choreCreate.description')}</Label>
+        <RichTextEditor
           value={values.description}
-          onChange={(e) => setValues({ ...values, description: e.target.value })}
+          onChange={(html) => setValues((v) => ({ ...v, description: html }))}
+          labelledBy="description-label"
           placeholder={t('choreCreate.descriptionPlaceholder')}
-          rows={3}
         />
       </div>
 

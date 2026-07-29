@@ -88,6 +88,8 @@ async def get_unscheduled(
                 id=occ.chore_id,
                 title=occ.chore.title,
                 days_since_last_completion=since(occ.chore_id),
+                # Free: the query already selectinloads the whole Chore. See home.py.
+                has_description=occ.chore.description is not None,
                 household=ChoreHouseholdRead.model_validate(occ.chore.household),
                 # Only the current assignee shows, as on the due view (the pool lives on
                 # the chore).

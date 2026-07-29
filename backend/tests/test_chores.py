@@ -5,6 +5,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.richtext import MAX_RICH_TEXT_LENGTH
 from app.models import (
     AssignmentType,
     Chore,
@@ -1653,3 +1654,126 @@ async def test_delete_chore_requires_auth(
 
     resp = await client.delete(f"/api/v1/chores/{chore.id}")
     assert resp.status_code == 401
+
+
+# --- description sanitisation ---
+# The allowlist itself is covered exhaustively in test_richtext.py. These prove it is wired
+# into both write paths and that the response reflects what was stored, which is what a
+# validator that is merely importable would fail.
+
+
+async def test_create_chore_sanitises_the_description(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    client = await auth_client(user)
+
+    resp = await client.post(
+        "/api/v1/chores",
+        json=_payload(
+            household_id=household.id,
+            description=(
+                '<h1>Steps</h1><p onclick="x">Scrub the tub<script>alert(1)</script></p>'
+                '<ul><li>towels</li></ul><img src="data:image/png;base64,AAA">'
+            ),
+        ),
+    )
+    assert resp.status_code == 201
+    assert resp.json()["description"] == ("Steps<p>Scrub the tub</p><ul><li>towels</li></ul>")
+
+
+async def test_update_chore_sanitises_the_description(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household)
+    client = await auth_client(user)
+
+    resp = await client.patch(
+        f"/api/v1/chores/{chore.id}",
+        json=_payload(description='<p style="position:fixed">notes</p><iframe></iframe>'),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["description"] == "<p>notes</p>"
+
+
+async def test_create_chore_stores_null_for_visually_empty_html(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    client = await auth_client(user)
+
+    # Deliberately NOT "": an empty string already became None before rich text, so it would
+    # pass whether or not the blank-HTML collapse exists. Each of these is a truthy string
+    # that an untouched editor really does submit.
+    for blank in ("<p></p>", "<p><br></p>", "<p>&nbsp;</p>", "<script>alert(1)</script>"):
+        resp = await client.post(
+            "/api/v1/chores", json=_payload(household_id=household.id, description=blank)
+        )
+        assert resp.status_code == 201, blank
+        assert resp.json()["description"] is None, blank
+
+
+async def test_update_chore_clears_a_description_with_visually_empty_html(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, description="<p>old notes</p>")
+    client = await auth_client(user)
+
+    resp = await client.patch(
+        f"/api/v1/chores/{chore.id}", json=_payload(description="<p><br></p>")
+    )
+    assert resp.status_code == 200
+    assert resp.json()["description"] is None
+
+
+async def test_write_paths_reject_an_oversized_description(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household)
+    client = await auth_client(user)
+
+    over = "<p>" + ("x" * MAX_RICH_TEXT_LENGTH) + "</p>"
+    # Markup that sanitises down to two characters but arrives oversized. This is the case
+    # that pins the ordering: the cap has to bound what the server agrees to parse, so a
+    # payload cannot buy its way under the limit by being mostly junk that gets stripped.
+    junk = "<table>" * 4_000 + "hi" + "</table>" * 4_000
+
+    for bad in (over, junk):
+        resp = await client.post(
+            "/api/v1/chores", json=_payload(household_id=household.id, description=bad)
+        )
+        assert resp.status_code == 422, len(bad)
+        resp = await client.patch(f"/api/v1/chores/{chore.id}", json=_payload(description=bad))
+        assert resp.status_code == 422, len(bad)
+
+
+async def test_description_at_the_length_limit_is_accepted(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    client = await auth_client(user)
+
+    resp = await client.post(
+        "/api/v1/chores",
+        json=_payload(household_id=household.id, description="x" * MAX_RICH_TEXT_LENGTH),
+    )
+    assert resp.status_code == 201
+    assert resp.json()["description"] == "x" * MAX_RICH_TEXT_LENGTH

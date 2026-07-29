@@ -2,7 +2,18 @@ import enum
 from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ARRAY, Column, Date, DateTime, ForeignKey, SmallInteger, String, Table, func
+from sqlalchemy import (
+    ARRAY,
+    Column,
+    Date,
+    DateTime,
+    ForeignKey,
+    SmallInteger,
+    String,
+    Table,
+    Text,
+    func,
+)
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -57,7 +68,12 @@ class Chore(Base):
         ForeignKey("households.id", ondelete="CASCADE"), index=True
     )
     title: Mapped[str] = mapped_column(String(255))
-    description: Mapped[str | None] = mapped_column(String(2000))
+    # Sanitised HTML, not plain text: see app/core/richtext.py for the allowlist and why the
+    # cleaning happens on write. Text rather than String(n) because markup counts against a
+    # length cap and a varchar bound would silently shrink what anyone can write; the real
+    # limit is MAX_RICH_TEXT_LENGTH, enforced at the schema layer where it can return a 422
+    # instead of a database error. NULL, never "", is the one spelling of "no description".
+    description: Mapped[str | None] = mapped_column(Text)
     # When the chore starts, which is only ever used to seed the first occurrence's slot;
     # every later slot is walked from the previous one. NULL means unscheduled (`manual`),
     # which has no start: its first occurrence opens at creation time and each completion

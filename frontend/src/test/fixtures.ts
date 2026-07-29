@@ -170,6 +170,9 @@ export function makeDueChore(overrides: Partial<DueChore> = {}): DueChore {
     next_due: '2026-07-20T09:00:00Z',
     days_until_due: 2,
     status: 'soon',
+    // Defaults to no instructions, so the marker icon is opt-in per test: most rows are about
+    // due state and would otherwise gain an extra button for every query to trip over.
+    has_description: false,
     household: { id: 1, name: 'Test Household' },
     assignees: [],
     ...overrides,
@@ -183,6 +186,8 @@ export function makeUnscheduledChore(overrides: Partial<UnscheduledChore> = {}):
     id: 1,
     title: 'Descale the kettle',
     days_since_last_completion: 4,
+    // See makeDueChore: opt-in, so the marker icon does not appear on every row by default.
+    has_description: false,
     household: { id: 1, name: 'Test Household' },
     assignees: [],
     ...overrides,

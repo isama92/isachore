@@ -8,6 +8,11 @@ import { mockFetch, renderWithProviders } from '../test/utils'
 import { makeChore, makeHousehold, makeHouseholdMember, makeTag, makeUser } from '../test/fixtures'
 import type { Page } from '../lib/types'
 
+// jsdom cannot drive a contenteditable, so the rich text editor is swapped for a textarea with
+// the same contract. See src/test/richTextEditorMock.tsx for why, and
+// src/components/rich-text/RichTextEditor.test.tsx for the real editor's own coverage.
+vi.mock('@/components/rich-text/RichTextEditor', () => import('../test/richTextEditorMock'))
+
 const me = makeUser({ id: 1, first_name: 'Alex', last_name: 'Kim' })
 
 // The members and tags endpoints carry a query string, so match them by pattern.

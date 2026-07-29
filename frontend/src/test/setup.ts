@@ -20,6 +20,26 @@ window.ResizeObserver = class ResizeObserver {
   disconnect() {}
 }
 
+// ProseMirror (under Tiptap, in the rich text editor) measures the selection to decide where
+// the caret and decorations sit. jsdom implements Range but returns nothing from its geometry
+// methods, so these are stubs rather than fakes: the editor's *document* behaviour is what the
+// tests assert, and none of them depend on a real coordinate. Same plain-assignment reason as
+// the Radix stubs above - vi.unstubAllGlobals() must not strip them.
+Range.prototype.getClientRects = () =>
+  ({
+    length: 0,
+    item: () => null,
+    [Symbol.iterator]: function* () {},
+  }) as unknown as DOMRectList
+Range.prototype.getBoundingClientRect = () => new DOMRect()
+// ProseMirror's mousedown handler resolves a click to a document position via
+// posAtCoords -> document.elementFromPoint, which jsdom does not implement at all (it throws
+// rather than returning nothing). Returning null is the "no element there" answer ProseMirror
+// already handles, so a click is a no-op instead of an uncaught TypeError. Tests place the
+// caret by focusing the editable, not by clicking, precisely because a real hit test is what
+// jsdom cannot give us.
+document.elementFromPoint = () => null
+
 // The Profile page's scroll-spy submenu constructs an IntersectionObserver,
 // which jsdom does not implement. A no-op stub is enough: tests drive the DOM
 // directly and never rely on scroll-position callbacks firing.

@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import Unscheduled from './Unscheduled'
 import { mockFetch, renderWithProviders } from '../test/utils'
-import { makeHouseholdMember, makeUnscheduledChore, makeUser } from '../test/fixtures'
+import { makeChore, makeHouseholdMember, makeUnscheduledChore, makeUser } from '../test/fixtures'
 import type { HistoryFilterOptions, UnscheduledChore } from '../lib/types'
 
 const LIST = /\/api\/v1\/unscheduled/
@@ -280,3 +280,116 @@ function renderUnscheduled(items: UnscheduledChore[], options = SOLO_OPTIONS) {
   ])
   return renderWithProviders(<Unscheduled />, { authValue: { user: makeUser({ id: 1 }) } })
 }
+
+describe('description dialog', () => {
+  const CHORE_12 = '/api/v1/chores/12'
+
+  function withDescription(has: boolean) {
+    return [
+      { path: FILTERS, method: 'GET' as const, body: SOLO_OPTIONS },
+      {
+        path: LIST,
+        method: 'GET' as const,
+        body: body([makeUnscheduledChore({ id: 12, title: 'Oven', has_description: has })]),
+      },
+    ]
+  }
+
+  it('offers no marker for a chore with no instructions', async () => {
+    mockFetch(withDescription(false))
+    renderWithProviders(<Unscheduled />, { authValue: { user: makeUser({ id: 1 }) } })
+
+    // Waits for the row first: asserting absence before the list lands would pass on an empty
+    // page and prove nothing.
+    expect(await screen.findByRole('button', { name: 'Done: “Oven”' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Description: “Oven”' })).not.toBeInTheDocument()
+  })
+
+  it('fetches and renders the instructions as formatted HTML', async () => {
+    // Rendered, not escaped: the marker's whole point is that a checklist reads as a checklist.
+    // The list payload carries only the flag, so the HTML can only have come from the fetch.
+    const fetchMock = mockFetch([
+      ...withDescription(true),
+      {
+        path: CHORE_12,
+        method: 'GET',
+        body: makeChore({
+          id: 12,
+          title: 'Oven',
+          description: '<p>Scrub it, then:</p><ul><li>wipe the racks</li></ul>',
+        }),
+      },
+    ])
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderWithProviders(<Unscheduled />, { authValue: { user: makeUser({ id: 1 }) } })
+
+    await user.click(await screen.findByRole('button', { name: 'Description: “Oven”' }))
+    const dialog = within(await screen.findByRole('dialog'))
+    expect(dialog.getByRole('heading', { name: 'Oven' })).toBeInTheDocument()
+    expect(await dialog.findByText('wipe the racks')).toBeInTheDocument()
+    expect(dialog.getByText('wipe the racks').tagName).toBe('LI')
+
+    // Fetched on open, not with the list.
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === CHORE_12)).toHaveLength(1)
+  })
+
+  it('renders a saved link so it opens in a new tab', async () => {
+    // The renderer passes the server's HTML straight through, so target/rel are the server's
+    // guarantee (forced in app/core/richtext.py), not something applied here. This asserts the
+    // contract holds all the way to the DOM the user clicks.
+    mockFetch([
+      ...withDescription(true),
+      {
+        path: CHORE_12,
+        method: 'GET',
+        body: makeChore({
+          id: 12,
+          title: 'Oven',
+          description:
+            '<p>See <a href="https://example.com" target="_blank" rel="noopener noreferrer">the manual</a></p>',
+        }),
+      },
+    ])
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderWithProviders(<Unscheduled />, { authValue: { user: makeUser({ id: 1 }) } })
+
+    await user.click(await screen.findByRole('button', { name: 'Description: “Oven”' }))
+    const dialog = within(await screen.findByRole('dialog'))
+    const link = await dialog.findByRole('link', { name: 'the manual' })
+    expect(link).toHaveAttribute('href', 'https://example.com')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+  })
+
+  it('reports a failed fetch instead of an empty dialog', async () => {
+    mockFetch([
+      ...withDescription(true),
+      { path: CHORE_12, method: 'GET', status: 500, body: { detail: 'Server exploded' } },
+    ])
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderWithProviders(<Unscheduled />, { authValue: { user: makeUser({ id: 1 }) } })
+
+    await user.click(await screen.findByRole('button', { name: 'Description: “Oven”' }))
+    const dialog = within(await screen.findByRole('dialog'))
+    expect(await dialog.findByText('Server exploded')).toBeInTheDocument()
+  })
+
+  it('says so when the description was cleared since the list loaded', async () => {
+    // has_description was true when the list was fetched, and the chore has since lost it. The
+    // marker is already on screen, so the dialog needs an answer rather than a blank body.
+    mockFetch([
+      ...withDescription(true),
+      {
+        path: CHORE_12,
+        method: 'GET',
+        body: makeChore({ id: 12, title: 'Oven', description: null }),
+      },
+    ])
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderWithProviders(<Unscheduled />, { authValue: { user: makeUser({ id: 1 }) } })
+
+    await user.click(await screen.findByRole('button', { name: 'Description: “Oven”' }))
+    const dialog = within(await screen.findByRole('dialog'))
+    expect(await dialog.findByText('This chore has no description.')).toBeInTheDocument()
+  })
+})

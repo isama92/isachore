@@ -23,6 +23,11 @@ class DueChoreRead(BaseModel):
     next_due: datetime
     days_until_due: int  # negative = overdue, 0 = today, positive = upcoming
     status: DueStatus
+    # Whether the chore carries written instructions, NOT the instructions themselves: the row
+    # only needs it to decide whether to offer the marker icon that opens the description
+    # dialog, which fetches the chore itself on open. Sending the HTML here instead would put
+    # every description in the household on the critical path of the app's landing page.
+    has_description: bool
     household: ChoreHouseholdRead
     assignees: list[HouseholdMemberRead]
 
@@ -40,6 +45,9 @@ class UnscheduledChoreRead(BaseModel):
     # Whole UTC days since the last completion (0 = earlier today), or None if the chore has
     # never been done. Drives both the row's label and its recency dot.
     days_since_last_completion: int | None
+    # See DueChoreRead: a flag, not the description. Note this is not due state, so it does
+    # not breach the "no due vocabulary here" rule above.
+    has_description: bool
     household: ChoreHouseholdRead
     assignees: list[HouseholdMemberRead]
 

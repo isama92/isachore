@@ -284,6 +284,43 @@ pre-commit run --all-files                           # what the git hook runs
       returns a 409 that retrying can never clear, since the same edit recomputes the same
       occupied slot. "Did it today, parked it as unscheduled, later put it back on a
       schedule" is enough to hit it, because the form pre-fills today's date.
+- **Rich text descriptions**: `chores.description` is sanitised HTML in a `Text` column,
+  authored in Tiptap v3. `backend/app/core/richtext.py` is the **single definition of the
+  format** and the security boundary; the editor's `extensions.ts` and `index.css`'s
+  `.rich-text` are downstream of it. Five things to keep straight:
+  - **Sanitising happens on write, server-side, and that is not negotiable.** `/api/v1` is a
+    JSON API with future non-browser clients, so a browser-side allowlist proves nothing:
+    `curl` skips it. `SanitisedHtml` in `schemas/chore.py` puts `max_length` *inside* the
+    `Annotated` so the cap runs on raw markup **before** the `AfterValidator` - that ordering
+    is what stops a mostly-junk payload buying its way under the limit by being stripped.
+    `target="_blank"` and `rel="noopener noreferrer"` are **forced** onto every link
+    (nh3's `set_tag_attribute_values`), not merely allowed, so a payload posted with
+    `target="_self"` is overridden rather than obeyed. Tightening the allowlist later does
+    NOT clean old rows; that needs its own data migration.
+  - **"Empty" is not one value in HTML.** Every WYSIWYG emits `<p></p>`, `<p><br></p>` or
+    `<p>&nbsp;</p>` for an untouched editor and all three are truthy, which is what makes a
+    bare `if description:` wrong. `sanitise_description` collapses them to `NULL`, and
+    `RichTextEditor` emits `''` rather than `<p></p>`, so `ChoreForm`'s `|| null` stays
+    correct. Two gotchas inside `is_blank`: nh3 re-escapes on the way out, so stripping tags
+    off `<p>&nbsp;</p>` yields the literal `&nbsp;` and needs `html.unescape` before
+    `.strip()`; and the unescaped form must never be what gets stored.
+  - **StarterKit is configured by subtraction, and that list is load-bearing.** `heading`,
+    `codeBlock`, `horizontalRule` and `trailingNode` are all off. The first three sit outside
+    `ALLOWED_TAGS`, so leaving one on means a user formats a heading, sees it look right,
+    saves, and gets a plain paragraph back with no error; `trailingNode` keeps a *real*
+    trailing paragraph that serialises, so it would make every document look non-empty.
+    `Placeholder` (from `@tiptap/extensions`) is the exception that IS safe to add: it is a
+    decoration, not a node, so it cannot touch `getHTML()` or `isEmpty`. Being CSS it is also
+    invisible to assistive tech, hence the `aria-placeholder` beside it.
+  - Read surfaces: the editor itself, and `DescriptionDialog` opened from the marker icon on
+    `ChoreRow` (Home and Unscheduled). Those two lists carry `has_description: bool`, **not**
+    the HTML - the dialog fetches `GET /chores/{id}` on open, so a household's instructions
+    never ride along on the landing page. `RichText` is the only
+    `dangerouslySetInnerHTML` outside `ui/chart.tsx`, and it is NOT a sanitiser: only ever
+    pass it something the server has already cleaned.
+  - `ChoreCreate` and `ChoreEdit` are `lazy()` in `App.tsx` for the same reason Statistics is:
+    they are the only routes reaching `ChoreForm`, and that chunk is ~146 kB gzipped. A third page
+    rendering `ChoreForm` needs splitting too, or the editor lands back in the main chunk.
 - **Frontend auth**: `useAuth()` from `src/auth/useAuth.ts`; API calls through the
   `api` wrapper in `src/lib/api.ts` (throws `ApiError`). Protected routes wrap in
   `RequireAuth` / `RequireAdmin` (`src/components/`); authenticated pages render
@@ -457,6 +494,27 @@ the negative paths (401/403/400/404/409), not just the happy one.
   switched strategy with an *empty* assignee pool proved nothing about the
   strategy gate, since the empty pool hides the picker by itself). When adding a
   test for a guard, delete the guard and watch the test fail.
+
+  Make that four times. The rich text toolbar's `useEditorState` took three
+  attempts to pin, because the obvious tests all pass without it: Tiptap v3's React
+  binding is non-reactive, so `editor.isActive()` read from render is stale, but the
+  staleness is invisible whenever the **document** changes, since `onUpdate` makes the
+  caller re-render and recompute the stale read by accident. Asserting `aria-pressed`
+  after an edit proves nothing; toggling a mark at a collapsed caret fires `onUpdate`
+  too. Only a pure selection move is document-free, and jsdom refuses arrow keys
+  outright ("Not implemented. The result of this interaction is unreliable."), so the
+  test drives `setTextSelection` through a harness that owns the editor.
+
+- **Contenteditable is the one thing jsdom cannot drive**, which is why
+  `src/test/richTextEditorMock.tsx` exists and is the **only** `vi.mock` in the repo.
+  Page tests about a *form* swap the editor for a textarea with the same contract
+  (same accessible name via `labelledBy`, value in, string out), which is what keeps
+  `getByLabelText('Description')` and `toHaveValue(...)` working. The real editor is
+  covered in `RichTextEditor.test.tsx`, which works around jsdom by driving commands
+  instead of keys; it needs `Range.prototype.getClientRects`,
+  `getBoundingClientRect` and `document.elementFromPoint` stubbed in `test/setup.ts`
+  (ProseMirror hit-tests a click through the last one and jsdom throws), and it
+  focuses the editable rather than clicking into it.
 
 - **Backend**: `docker compose exec backend uv run pytest` (in the container so
   `db` resolves). Fixtures spin up a throwaway `isachore_test` DB and roll each

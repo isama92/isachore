@@ -3,7 +3,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import Home from './Home'
 import { mockFetch, renderWithProviders } from '../test/utils'
-import { makeDueChore, makeHouseholdMember, makeUser } from '../test/fixtures'
+import { makeChore, makeDueChore, makeHouseholdMember, makeUser } from '../test/fixtures'
 import type { DueChore, HistoryFilterOptions } from '../lib/types'
 
 const HOME = /\/api\/v1\/home/
@@ -586,5 +586,95 @@ describe('Home', () => {
     const row = (await screen.findByText('Clean the bathroom')).closest('li')!
     expect(within(row).getAllByText('Anna Aardvark').length).toBeGreaterThan(0)
     expect(within(row).queryByText('Test Household')).not.toBeInTheDocument()
+  })
+})
+
+describe('description dialog', () => {
+  const CHORE_12 = '/api/v1/chores/12'
+
+  function routes(has: boolean) {
+    return [
+      { path: FILTERS, method: 'GET' as const, body: SOLO_OPTIONS },
+      {
+        path: HOME,
+        method: 'GET' as const,
+        body: homeBody(0, 1, [makeDueChore({ id: 12, title: 'Bathroom', has_description: has })]),
+      },
+    ]
+  }
+
+  it('offers no marker for a chore with no instructions', async () => {
+    mockFetch(routes(false))
+    renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+    // Waits for the row first: asserting absence before the list lands would pass on an empty
+    // page and prove nothing.
+    expect(await screen.findByRole('button', { name: 'Done: “Bathroom”' })).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Description: “Bathroom”' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('fetches the instructions on open and renders them as HTML', async () => {
+    const fetchMock = mockFetch([
+      ...routes(true),
+      {
+        path: CHORE_12,
+        method: 'GET',
+        body: makeChore({
+          id: 12,
+          title: 'Bathroom',
+          description: '<p>Scrub the tub, then:</p><ul><li>replace the towels</li></ul>',
+        }),
+      },
+    ])
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+    // Not requested with the list: the payload carries only the flag, which is the whole reason
+    // the dialog fetches at all.
+    expect(
+      await screen.findByRole('button', { name: 'Description: “Bathroom”' }),
+    ).toBeInTheDocument()
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === CHORE_12)).toHaveLength(0)
+
+    await user.click(screen.getByRole('button', { name: 'Description: “Bathroom”' }))
+    const dialog = within(await screen.findByRole('dialog'))
+    expect(dialog.getByRole('heading', { name: 'Bathroom' })).toBeInTheDocument()
+    expect(await dialog.findByText('replace the towels')).toBeInTheDocument()
+    expect(dialog.getByText('replace the towels').tagName).toBe('LI')
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === CHORE_12)).toHaveLength(1)
+  })
+
+  it('refetches on a second open rather than caching', async () => {
+    // Deliberately uncached: a description can be edited between two opens, and one request is
+    // cheaper than reasoning about when to invalidate.
+    let n = 0
+    const fetchMock = mockFetch([
+      ...routes(true),
+      {
+        path: CHORE_12,
+        method: 'GET',
+        body: () => {
+          n += 1
+          return makeChore({ id: 12, title: 'Bathroom', description: `<p>version ${n}</p>` })
+        },
+      },
+    ])
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+    await user.click(await screen.findByRole('button', { name: 'Description: “Bathroom”' }))
+    expect(
+      await within(await screen.findByRole('dialog')).findByText('version 1'),
+    ).toBeInTheDocument()
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: 'Description: “Bathroom”' }))
+    expect(
+      await within(await screen.findByRole('dialog')).findByText('version 2'),
+    ).toBeInTheDocument()
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === CHORE_12)).toHaveLength(2)
   })
 })

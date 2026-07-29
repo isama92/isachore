@@ -424,3 +424,24 @@ async def test_home_exposes_the_recurrence_detail(
     assert item["repeats"] == "weekly"
     assert item["repeat_interval"] == 2
     assert item["weekdays"] == [1, 4]
+
+
+async def test_home_flags_which_chores_carry_a_description(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # The flag, not the description: the row uses it to decide whether to offer the marker
+    # icon, and the dialog fetches the chore itself on open.
+    user = await make_user()
+    household = await make_household(members=[user])
+    await make_chore(household=household, title="With", description="<p>Scrub the tub</p>")
+    await make_chore(household=household, title="Without")
+    client = await auth_client(user)
+
+    items = (await client.get("/api/v1/home")).json()["items"]
+    flags = {i["title"]: i["has_description"] for i in items}
+    assert flags == {"With": True, "Without": False}
+    # The HTML itself stays off this payload.
+    assert all("description" not in i for i in items)
