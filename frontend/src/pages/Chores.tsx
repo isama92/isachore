@@ -309,17 +309,17 @@ export default function Chores() {
       cell: ({ row }) => tagsCell(row.original.tags),
     },
     {
+      accessorKey: 'start_date',
+      header: t('chores.headers.start'),
+      cell: ({ row }) => formatDate(row.original.start_date),
+      meta: { cellClassName: 'font-medium text-muted-foreground' },
+    },
+    {
       // Date *and* time, like the History table: chores created on the same day
       // are common, and the whole point of this column is to order by creation.
       accessorKey: 'created_at',
       header: t('chores.headers.createdAt'),
       cell: ({ row }) => formatDateTime(row.original.created_at),
-      meta: { cellClassName: 'font-medium text-muted-foreground' },
-    },
-    {
-      accessorKey: 'start_date',
-      header: t('chores.headers.start'),
-      cell: ({ row }) => formatDate(row.original.start_date),
       meta: { cellClassName: 'font-medium text-muted-foreground' },
     },
     {
