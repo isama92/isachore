@@ -45,6 +45,7 @@ export default function Chores() {
 
   const table = useServerTable<Chore, ChoreFilters>({
     endpoint: endpoints.chores.root,
+    storageKey: 'chores',
     initial: {
       sortBy: 'created_at',
       sortDir: 'desc',
@@ -62,9 +63,13 @@ export default function Chores() {
 
   // Keep a latest-value ref to the (per-render) setFilter so the debounce effect
   // doesn't need it as a dependency (which would reset the timer every render).
+  // Same trick for the active filters, so the options effect below can prune a
+  // remembered household without re-running (which would refetch the options).
   const setFilterRef = useRef(table.setFilter)
+  const filtersRef = useRef(table.filters)
   useEffect(() => {
     setFilterRef.current = table.setFilter
+    filtersRef.current = table.filters
   })
 
   useEffect(() => {
@@ -78,7 +83,15 @@ export default function Chores() {
     api
       .get<Page<Household>>(`${endpoints.households.root}?sort_by=id&sort_dir=asc&page_size=100`)
       .then((page) => {
-        if (!cancelled) setHouseholds(page.items)
+        if (cancelled) return
+        setHouseholds(page.items)
+        // A remembered household_id outlives whatever made it valid (household left,
+        // deleted, or membership revoked). Left in place it filters the list down to
+        // nothing behind a blank Select, so drop what can no longer be picked.
+        const active = filtersRef.current.household_id
+        if (active !== '' && !page.items.some((h) => String(h.id) === active)) {
+          setFilterRef.current('household_id', '')
+        }
       })
       .catch(() => {
         if (!cancelled) setHouseholds([])

@@ -143,6 +143,28 @@ describe('AuthProvider', () => {
     await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('none'))
   })
 
+  it('logout forgets remembered table settings, but not the browser preferences', async () => {
+    mockFetch([
+      { path: '/api/v1/auth/me', body: makeMe({ email: 'a@example.com' }) },
+      { path: '/api/v1/auth/logout', method: 'POST', status: 204 },
+    ])
+    // Saved table filters name colleagues and households, and the admin tables save
+    // name/email search terms, so on a shared device the next account must not
+    // inherit them.
+    localStorage.setItem('isachore-table-history', '{"filters":{"user_id":"7"}}')
+    localStorage.setItem('isachore-table-admin-users', '{"filters":{"email":"someone@x.com"}}')
+    localStorage.setItem('isachore-language', 'it')
+    renderProvider()
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('a@example.com'))
+
+    await userEvent.click(screen.getByText('logout'))
+
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('none'))
+    expect(localStorage.getItem('isachore-table-history')).toBeNull()
+    expect(localStorage.getItem('isachore-table-admin-users')).toBeNull()
+    expect(localStorage.getItem('isachore-language')).toBe('it')
+  })
+
   it('refresh re-fetches the current user', async () => {
     let meBody = makeMe({ email: 'first@example.com' })
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {

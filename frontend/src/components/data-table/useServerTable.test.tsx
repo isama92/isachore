@@ -3,7 +3,7 @@ import { MemoryRouter, useSearchParams } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import { jsonResponse } from '../../test/utils'
-import { useServerTable } from './useServerTable'
+import { clearTableSettings, useServerTable } from './useServerTable'
 
 type Row = { id: number; name: string }
 
@@ -184,6 +184,54 @@ describe('useServerTable', () => {
     expect(result.current.params.get('tab')).toBe('details')
   })
 
+  it('setFilters applies several filters in one update', async () => {
+    const fetchMock = stubFetch()
+    const { result } = renderTable()
+    await waitFor(() => expect(result.current.table.loading).toBe(false))
+
+    act(() => result.current.table.setPage(2))
+    await waitFor(() => expect(result.current.params.get('page')).toBe('2'))
+
+    // Both survive. Two setFilter calls here would not: setSearchParams is a
+    // navigation, so the second would start from the same location as the first
+    // and overwrite it.
+    act(() => result.current.table.setFilters({ status: 'disabled', role: 'admin' }))
+    await waitFor(() => {
+      const last = String(fetchMock.mock.calls.at(-1)![0])
+      expect(last).toContain('status=disabled')
+      expect(last).toContain('role=admin')
+      expect(last).toContain('page=1')
+    })
+    expect(result.current.params.get('status')).toBe('disabled')
+    expect(result.current.params.get('role')).toBe('admin')
+  })
+
+  // The `loading` assertions are the point of these two. Without the guards the URL
+  // does not change either, so no refetch happens with or without them and a call
+  // count alone would pass regardless. What breaks is that `mutate` sets loading true
+  // and nothing clears it: no URL change, no request, no `.finally`.
+  it('setFilters is a no-op when every value already matches', async () => {
+    const fetchMock = stubFetch()
+    const { result } = renderTable()
+    await waitFor(() => expect(result.current.table.loading).toBe(false))
+
+    const before = fetchMock.mock.calls.length
+    act(() => result.current.table.setFilters({ status: 'active', role: '' }))
+    expect(fetchMock.mock.calls.length).toBe(before)
+    expect(result.current.table.loading).toBe(false)
+  })
+
+  it('setFilter is a no-op when the value already matches', async () => {
+    const fetchMock = stubFetch()
+    const { result } = renderTable()
+    await waitFor(() => expect(result.current.table.loading).toBe(false))
+
+    const before = fetchMock.mock.calls.length
+    act(() => result.current.table.setFilter('status', 'active'))
+    expect(fetchMock.mock.calls.length).toBe(before)
+    expect(result.current.table.loading).toBe(false)
+  })
+
   it('reload() refetches the current page', async () => {
     const fetchMock = stubFetch()
     const { result } = renderTable()
@@ -192,5 +240,215 @@ describe('useServerTable', () => {
     const before = fetchMock.mock.calls.length
     act(() => result.current.table.reload())
     await waitFor(() => expect(fetchMock.mock.calls.length).toBe(before + 1))
+  })
+
+  describe('with a storageKey', () => {
+    const KEY = 'isachore-table-things'
+
+    function renderStored(entries = ['/x']) {
+      return renderHook(
+        () => {
+          const table = useServerTable<Row>({ endpoint: '/api/x', storageKey: 'things', initial })
+          const [params] = useSearchParams()
+          return { table, params }
+        },
+        {
+          wrapper: ({ children }: { children: ReactNode }) => (
+            <MemoryRouter initialEntries={entries}>{children}</MemoryRouter>
+          ),
+        },
+      )
+    }
+
+    function save(settings: unknown) {
+      localStorage.setItem(KEY, JSON.stringify(settings))
+    }
+
+    function stored(): Record<string, unknown> {
+      return JSON.parse(localStorage.getItem(KEY)!) as Record<string, unknown>
+    }
+
+    it('restores page size, sort and filters when the URL carries none', async () => {
+      save({
+        pageSize: 50,
+        sortBy: 'name',
+        sortDir: 'asc',
+        filters: { status: 'disabled', role: 'admin', q: '' },
+      })
+      const fetchMock = stubFetch()
+      const { result } = renderStored()
+      await waitFor(() => expect(result.current.table.loading).toBe(false))
+
+      const url = String(fetchMock.mock.calls[0]![0])
+      expect(url).toContain('page_size=50')
+      expect(url).toContain('sort_by=name')
+      expect(url).toContain('sort_dir=asc')
+      expect(url).toContain('status=disabled')
+      expect(url).toContain('role=admin')
+      // Restored values act as this mount's defaults, so the URL stays clean
+      // rather than being rewritten with them.
+      expect(result.current.params.get('sort_by')).toBeNull()
+      expect(result.current.params.get('page_size')).toBeNull()
+    })
+
+    it('always starts on page 1, however the settings were saved', async () => {
+      // `page: 7` is smuggled in by hand: nothing writes it, and nothing may read it.
+      save({ pageSize: 50, sortBy: 'name', sortDir: 'asc', filters: {}, page: 7 })
+      const fetchMock = stubFetch()
+      const { result } = renderStored()
+      await waitFor(() => expect(result.current.table.loading).toBe(false))
+
+      const url = String(fetchMock.mock.calls[0]![0])
+      expect(url).toContain('page=1')
+      expect(url).not.toContain('page=7')
+      expect(result.current.table.page).toBe(1)
+    })
+
+    it('lets an explicit URL param win over the stored value', async () => {
+      save({
+        pageSize: 50,
+        sortBy: 'name',
+        sortDir: 'asc',
+        filters: { status: 'disabled', role: '', q: '' },
+      })
+      const fetchMock = stubFetch()
+      const { result } = renderStored(['/x?sort_by=email&status=active'])
+      await waitFor(() => expect(result.current.table.loading).toBe(false))
+
+      const url = String(fetchMock.mock.calls[0]![0])
+      expect(url).toContain('sort_by=email')
+      expect(url).toContain('status=active')
+      // Untouched by the URL, so the stored value still applies.
+      expect(url).toContain('page_size=50')
+    })
+
+    it('remembers a sort, page size and filter change, but never the page', async () => {
+      stubFetch()
+      const { result } = renderStored()
+      await waitFor(() => expect(result.current.table.loading).toBe(false))
+
+      act(() => result.current.table.setSort('name', 'asc'))
+      await waitFor(() => expect(stored().sortBy).toBe('name'))
+      expect(stored().sortDir).toBe('asc')
+
+      act(() => result.current.table.setPageSize(50))
+      await waitFor(() => expect(stored().pageSize).toBe(50))
+
+      act(() => result.current.table.setFilter('status', 'disabled'))
+      await waitFor(() =>
+        expect((stored().filters as Record<string, string>).status).toBe('disabled'),
+      )
+
+      act(() => result.current.table.setPage(3))
+      await waitFor(() => expect(result.current.table.page).toBe(3))
+      expect(stored()).not.toHaveProperty('page')
+    })
+
+    // Each shape is its own case so a failure names the one that broke. 1000 is over
+    // the API's page_size cap, 20.5 is not an integer, 42 is not a string.
+    it.each([
+      'not json at all',
+      'null',
+      '[1,2,3]',
+      '"a string"',
+      JSON.stringify({ pageSize: 1000, sortBy: '', sortDir: 'sideways', filters: 'nope' }),
+      JSON.stringify({ pageSize: 20.5, sortBy: 42, sortDir: null, filters: { status: 7 } }),
+    ])('falls back to the page defaults for unusable stored settings: %s', async (raw) => {
+      localStorage.setItem(KEY, raw)
+      const fetchMock = stubFetch()
+      const { result } = renderStored()
+      await waitFor(() => expect(result.current.table.loading).toBe(false))
+
+      const url = String(fetchMock.mock.calls[0]![0])
+      expect(url).toContain('page_size=20')
+      expect(url).toContain('sort_by=created_at')
+      expect(url).toContain('sort_dir=desc')
+      expect(url).toContain('status=active')
+    })
+
+    it('drops a stored filter key this table does not have, keeping the rest', async () => {
+      save({ pageSize: 20, sortBy: 'name', sortDir: 'asc', filters: { gone: 'x', role: 'admin' } })
+      const fetchMock = stubFetch()
+      const { result } = renderStored()
+      await waitFor(() => expect(result.current.table.loading).toBe(false))
+
+      const url = String(fetchMock.mock.calls[0]![0])
+      expect(url).not.toContain('gone=')
+      // Still-valid neighbours survive: the fallback is per field, not all-or-nothing.
+      expect(url).toContain('sort_by=name')
+      expect(url).toContain('role=admin')
+      // A filter absent from storage falls back to the page's own default.
+      expect(url).toContain('status=active')
+    })
+
+    it('forgets settings the server rejects, but keeps them through a server error', async () => {
+      const saved = {
+        pageSize: 20,
+        sortBy: 'a_column_that_went_away',
+        sortDir: 'desc',
+        filters: { status: 'active', role: '', q: '' },
+      }
+
+      save(saved)
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => jsonResponse(422, { detail: 'bad sort_by' })),
+      )
+      const rejected = renderStored()
+      await waitFor(() => expect(rejected.result.current.table.loading).toBe(false))
+      // Otherwise this table would 422 on every future visit, with no way out.
+      expect(localStorage.getItem(KEY)).toBeNull()
+      rejected.unmount()
+
+      save(saved)
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => jsonResponse(500, { detail: 'boom' })),
+      )
+      const errored = renderStored()
+      await waitFor(() => expect(errored.result.current.table.loading).toBe(false))
+      // A blip is not the stored state's fault; throwing away the user's sort
+      // over one would be its own bug.
+      expect(stored()).toEqual(saved)
+    })
+
+    it('still renders when storage refuses the write', async () => {
+      const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation((): never => {
+        throw new Error('quota exceeded')
+      })
+      try {
+        stubFetch()
+        const { result } = renderStored()
+        // Would throw out of the effect and take the page down if the write were
+        // unguarded, which matters because it runs on mount for every table.
+        await waitFor(() => expect(result.current.table.loading).toBe(false))
+        expect(result.current.table.rows).toHaveLength(1)
+      } finally {
+        setItem.mockRestore()
+      }
+    })
+
+    it('clearTableSettings forgets every table, leaving other keys alone', async () => {
+      save({ pageSize: 50, sortBy: 'name', sortDir: 'asc', filters: {} })
+      localStorage.setItem('isachore-table-somewhere-else', '{}')
+      localStorage.setItem('isachore-theme', 'mocha')
+
+      clearTableSettings()
+
+      expect(localStorage.getItem(KEY)).toBeNull()
+      expect(localStorage.getItem('isachore-table-somewhere-else')).toBeNull()
+      // Theme and language are this browser's preferences, not one account's data.
+      expect(localStorage.getItem('isachore-theme')).toBe('mocha')
+    })
+
+    it('writes nothing when a table opts out of persistence', async () => {
+      stubFetch()
+      const { result } = renderTable()
+      await waitFor(() => expect(result.current.table.loading).toBe(false))
+
+      act(() => result.current.table.setSort('name', 'asc'))
+      await waitFor(() => expect(result.current.table.sortBy).toBe('name'))
+      expect(localStorage.length).toBe(0)
+    })
   })
 })

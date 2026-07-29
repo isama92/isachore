@@ -42,6 +42,9 @@ export function HouseholdMembersTable({ basePath, adminId, canManage }: Props) {
   // No filter UI here (households have few members); the table just paginates.
   const table = useServerTable<HouseholdMember>({
     endpoint: householdResource(basePath).members,
+    // One key for every household, member and admin view alike: what is being
+    // remembered is a sort preference, not anything household-specific.
+    storageKey: 'household-members',
     initial: { sortBy: 'name', sortDir: 'asc', pageSize: 10, filters: {} },
   })
   const [error, setError] = useState<string | null>(null)

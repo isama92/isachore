@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
@@ -42,6 +42,7 @@ export default function Tags() {
   // selector below narrows to a specific one when the user has more than one.
   const table = useServerTable<Tag, TagFilters>({
     endpoint: endpoints.tags.root,
+    storageKey: 'tags',
     initial: { sortBy: 'name', sortDir: 'asc', pageSize: 10, filters: { household_id: '' } },
   })
 
@@ -49,13 +50,33 @@ export default function Tags() {
   const [householdsLoaded, setHouseholdsLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Latest-value refs so the effect below can prune a remembered household without
+  // taking them as dependencies (which would refetch the household list).
+  const setFilterRef = useRef(table.setFilter)
+  const filtersRef = useRef(table.filters)
+  useEffect(() => {
+    setFilterRef.current = table.setFilter
+    filtersRef.current = table.filters
+  })
+
   // Households for the selector (and to know the default the backend falls to).
   useEffect(() => {
     let cancelled = false
     api
       .get<Page<Household>>(`${endpoints.households.root}?sort_by=id&sort_dir=asc&page_size=100`)
       .then((page) => {
-        if (!cancelled) setHouseholds(page.items)
+        if (cancelled) return
+        setHouseholds(page.items)
+        // Pruning a dead household_id matters more here than on Chores or History,
+        // which merely return an empty page for one: list_tags answers 404, the hook
+        // only forgets stored settings on 400/422, and the selector is hidden when
+        // the user has fewer than two households. A remembered id for a household
+        // since left would otherwise fail this page on every visit with nothing on
+        // screen to clear it.
+        const active = filtersRef.current.household_id
+        if (active !== '' && !page.items.some((h) => String(h.id) === active)) {
+          setFilterRef.current('household_id', '')
+        }
       })
       .catch(() => {
         if (!cancelled) setHouseholds([])

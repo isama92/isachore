@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Route, Routes, useLocation } from 'react-router'
 import { toast } from 'sonner'
@@ -51,13 +51,18 @@ function stubFetch(opts: {
   return fetchMock
 }
 
+function choresGets(fetchMock: FetchMock): string[] {
+  return fetchMock.mock.calls
+    .filter(
+      ([url, init]) =>
+        (init?.method ?? 'GET').toUpperCase() === 'GET' &&
+        String(url).split('?')[0].endsWith('/api/v1/chores'),
+    )
+    .map(([url]) => String(url))
+}
+
 function lastChoresGet(fetchMock: FetchMock): string {
-  const calls = fetchMock.mock.calls.filter(
-    ([url, init]) =>
-      (init?.method ?? 'GET').toUpperCase() === 'GET' &&
-      String(url).split('?')[0].endsWith('/api/v1/chores'),
-  )
-  return String(calls.at(-1)?.[0] ?? '')
+  return choresGets(fetchMock).at(-1) ?? ''
 }
 
 describe('Chores', () => {
@@ -260,6 +265,61 @@ describe('Chores', () => {
 
     await waitFor(() => expect(lastChoresGet(fetchMock)).toContain('sort_dir=asc'))
     expect(lastChoresGet(fetchMock)).toContain('sort_by=created_at')
+  })
+
+  it('keeps a remembered household filter that is still valid', async () => {
+    localStorage.setItem(
+      'isachore-table-chores',
+      JSON.stringify({
+        pageSize: 10,
+        sortBy: 'created_at',
+        sortDir: 'desc',
+        filters: { household_id: '2', title: '' },
+      }),
+    )
+    const fetchMock = stubFetch({
+      chores: [makeChore({ id: 7, title: 'Scrub the tub' })],
+      households: [
+        makeHousehold({ id: 1, name: 'Flat 3B' }),
+        makeHousehold({ id: 2, name: 'Beach House' }),
+      ],
+    })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+
+    // The select renders only once the households have loaded, so this is the prune
+    // having had its chance to run.
+    await screen.findByRole('combobox', { name: 'Household' })
+    // Then settle: a prune navigates, which would refetch. Asserting the query
+    // straight away would pass whether or not the filter was wrongly cleared, so
+    // "still exactly one request" is what actually pins this.
+    await act(async () => {})
+    expect(choresGets(fetchMock)).toHaveLength(1)
+    expect(lastChoresGet(fetchMock)).toContain('household_id=2')
+    expect(screen.getByRole('combobox', { name: 'Household' })).toHaveTextContent('Beach House')
+  })
+
+  it('forgets a remembered household filter the user can no longer pick', async () => {
+    localStorage.setItem(
+      'isachore-table-chores',
+      JSON.stringify({
+        pageSize: 10,
+        sortBy: 'created_at',
+        sortDir: 'desc',
+        filters: { household_id: '99', title: '' },
+      }),
+    )
+    const fetchMock = stubFetch({
+      chores: [makeChore({ id: 7, title: 'Scrub the tub' })],
+      households: [
+        makeHousehold({ id: 1, name: 'Flat 3B' }),
+        makeHousehold({ id: 2, name: 'Beach House' }),
+      ],
+    })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+
+    // Household 99 is gone (left, deleted, membership revoked). Left in place it would
+    // filter the list to nothing behind a blank select, with no way back.
+    await waitFor(() => expect(lastChoresGet(fetchMock)).not.toContain('household_id'))
   })
 
   it('shows a household filter and pushes the choice into the query', async () => {

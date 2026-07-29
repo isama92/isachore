@@ -283,6 +283,43 @@ pre-commit run --all-files                           # what the git hook runs
   - **HTTPS is required**, so this only works in the tls/traefik modes or behind
     a TLS-terminating proxy. No CSP change was needed: `worker-src` and
     `manifest-src` both fall back to `default-src 'self'`.
+- **Server-driven tables**: every list view is `DataTable` + `useServerTable`
+  (`src/components/data-table/`), TanStack Table in fully manual mode with the
+  fetching inside the hook. A column's `id`/`accessorKey` IS the server sort key, so
+  it has to match that endpoint's whitelist (`CHORE_SORT_COLUMNS` and friends) or
+  sorting breaks silently. Four things not to undo:
+  - **State lives in the URL**, and with a `storageKey` also in `localStorage` under
+    `isachore-table-<key>` (seven keys; `household-members` is deliberately shared by
+    both household edit pages). Storage is read ONCE at mount and what comes back
+    *becomes* that mount's defaults, which is the whole trick: it buys "URL wins over
+    storage, storage wins over the page's own defaults" with no extra branch and no
+    mount-time URL rewrite (which would cost a second fetch and a flicker).
+    `deriveState` and `applyOwnedParams` must keep comparing against that same
+    `defaults`: each encodes "the default", one as the fallback and one as what to
+    omit from the URL, and they have to agree or a value equal to it resolves two
+    ways.
+  - **The page number is never stored**, only page size / sort / filters, so every
+    arrival starts at page 1. A stored page can be out of range after deletions and
+    nothing clamps it.
+  - **`setSearchParams` does not compose within a tick**: react-router hands the
+    updater the current render's params (its own docs say multiple calls "will not
+    build on the prior value"), so two `setFilter` calls in one tick both start from
+    the same place and the last silently wins. Change several filters through
+    `setFilters`. Each setter's early-return guard is also what keeps `loading`
+    honest, since `mutate` flips it true and with no URL change there is no request
+    and so no `.finally` to flip it back: a test for one of those guards must assert
+    `loading`, or it pins nothing.
+  - **Stored settings are untrusted**, validated per field (a bad value falls back on
+    its own, not all-or-nothing), and a 400/422 response clears that table's key so a
+    stored sort the server no longer accepts cannot wedge a page forever. 404 does
+    NOT clear, which is why `Tags` prunes a dead `household_id` itself once its
+    household list loads: `list_tags` 404s for a household you are not in, and its
+    selector is hidden below two households, so nothing on screen could clear it.
+    `Chores` and `History` prune too (via latest-value refs, so the options are not
+    refetched), though they merely return an empty page. `clearTableSettings()` runs
+    on logout because the saved filters name colleagues and households; theme and
+    language deliberately survive, being the browser's preferences rather than one
+    account's data.
 - Import routing from `react-router` (v8), never `react-router-dom`.
 - **UI components**: shadcn/ui (radix-nova) live in `frontend/src/components/ui/`,
   config in `components.json`. Import via the `@/` alias and compose classes with

@@ -153,6 +153,37 @@ describe('History', () => {
     await waitFor(() => expect(lastCompletionsGet(fetchMock)).toContain('household_id=2'))
   })
 
+  it('forgets remembered person and household filters that are no longer offered', async () => {
+    localStorage.setItem(
+      'isachore-table-history',
+      JSON.stringify({
+        pageSize: 10,
+        sortBy: 'created_at',
+        sortDir: 'desc',
+        filters: { user_id: '98', household_id: '99' },
+      }),
+    )
+    const fetchMock = stubFetch({
+      entries: [makeHistoryEntry({ id: 7, title: 'Scrub the tub' })],
+      options: {
+        households: [
+          { id: 1, name: 'Flat 3B' },
+          { id: 2, name: 'Beach House' },
+        ],
+        members: [me, makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })],
+      },
+    })
+    renderWithProviders(<History />)
+
+    // Both ids outlived what made them valid (household left, member removed). Cleared
+    // in one go: the hook merges the two setFilter calls through a functional updater.
+    await waitFor(() => {
+      const last = lastCompletionsGet(fetchMock)
+      expect(last).not.toContain('household_id')
+      expect(last).not.toContain('user_id')
+    })
+  })
+
   it('hides the person filter when there is a single member', async () => {
     stubFetch({
       entries: [makeHistoryEntry({ title: 'Scrub the tub' })],

@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { api, setUnauthorizedHandler } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
 import type { LoginResponse, Me, User } from '../lib/types'
+import { clearTableSettings } from '../components/data-table/useServerTable'
 import { useTheme } from '../theme/useTheme'
 import i18n, { changeLanguage } from '../i18n/i18n'
 import { AuthContext } from './context'
@@ -121,6 +122,10 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     await api.post(endpoints.auth.logout)
     setUser(null)
     setImpersonating(false)
+    // Remembered table filters name colleagues and households, so they must not
+    // outlive the session on a shared device. Theme and language deliberately do
+    // survive: they are this browser's preferences, not one account's data.
+    clearTableSettings()
   }, [])
 
   const value = useMemo(

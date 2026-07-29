@@ -34,6 +34,7 @@ function makeController(
     setPageSize: vi.fn(),
     setSort: vi.fn(),
     setFilter: vi.fn(),
+    setFilters: vi.fn(),
     reload: vi.fn(),
     ...overrides,
   }
