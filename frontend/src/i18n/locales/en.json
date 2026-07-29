@@ -239,6 +239,7 @@
     "turnLengthHint": "Completions before the chore hands off to the next person.",
     "currentAssignee": "Currently assigned to",
     "currentAssigneePlaceholder": "Choose who is on it",
+    "currentAssigneeTurnHint": "Applies to the current turn; the next one follows the rotation again.",
     "startDate": "Start date",
     "tags": "Tags",
     "noTags": "No tags yet.",

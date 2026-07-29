@@ -739,6 +739,101 @@ async def test_update_chore_recomputes_current_assignee_when_dropped_from_pool(
     assert body["current_assignee"]["id"] == bob.id
 
 
+async def test_update_chore_honours_explicit_current_assignee_for_an_auto_strategy(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # The chore edit page offers the current-assignee picker for every strategy, not
+    # just manual, which rests entirely on _reconcile_open_occurrence having no
+    # assignment_type gate around the explicit choice. Nothing else pins that: the
+    # frontend mocks fetch, and the other update cases only cover the null re-derive.
+    anna = await make_user(email="anna@example.com", first_name="Anna")
+    bob = await make_user(email="bob@example.com", first_name="Bob")
+    household = await make_household(members=[anna, bob])
+    # alphabetical would derive Anna on its own, so asking for Bob is a real override.
+    chore = await make_chore(
+        household=household,
+        assignment_type=AssignmentType.alphabetical,
+        assignees=[anna, bob],
+    )
+    client = await auth_client(anna)
+
+    resp = await client.patch(
+        f"/api/v1/chores/{chore.id}",
+        json=_payload(
+            assignment_type="alphabetical",
+            assignee_ids=[anna.id, bob.id],
+            current_assignee_id=bob.id,
+        ),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["current_assignee"]["id"] == bob.id
+
+
+async def test_update_chore_rejects_a_current_assignee_outside_the_pool(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    anna = await make_user(email="anna@example.com", first_name="Anna")
+    bob = await make_user(email="bob@example.com", first_name="Bob")
+    household = await make_household(members=[anna, bob])
+    chore = await make_chore(household=household, assignees=[anna])
+    client = await auth_client(anna)
+
+    # Bob is a household member but not an assignee, so he cannot be "on it".
+    resp = await client.patch(
+        f"/api/v1/chores/{chore.id}",
+        json=_payload(assignee_ids=[anna.id], current_assignee_id=bob.id),
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "The current assignee must be one of the chore's assignees"
+
+
+async def test_completing_after_an_override_re_derives_the_next_assignee(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # The UI tells the user an override "applies to the current turn; the next one
+    # follows the rotation again". This is that promise: completing hands off through
+    # the strategy from whoever was pinned, rather than sticking on them.
+    anna = await make_user(email="anna@example.com", first_name="Anna")
+    bob = await make_user(email="bob@example.com", first_name="Bob")
+    cara = await make_user(email="cara@example.com", first_name="Cara")
+    household = await make_household(members=[anna, bob, cara])
+    chore = await make_chore(
+        household=household,
+        assignment_type=AssignmentType.alphabetical,
+        assignees=[anna, bob, cara],
+        repeats=RepeatPeriod.daily,
+    )
+    client = await auth_client(anna)
+
+    override = await client.patch(
+        f"/api/v1/chores/{chore.id}",
+        json=_payload(
+            assignment_type="alphabetical",
+            repeats="daily",
+            assignee_ids=[anna.id, bob.id, cara.id],
+            current_assignee_id=cara.id,
+        ),
+    )
+    assert override.json()["current_assignee"]["id"] == cara.id
+
+    resp = await client.post(f"/api/v1/chores/{chore.id}/complete")
+    assert resp.status_code == 201
+    after = await client.get(f"/api/v1/chores/{chore.id}")
+    # Alphabetical order is Anna, Bob, Cara: the successor to the pinned Cara wraps to
+    # Anna. Notably NOT Cara again, and not Bob (who would be next from the derived
+    # Anna the chore started on).
+    assert after.json()["current_assignee"]["id"] == anna.id
+
+
 async def test_update_chore_start_date_moves_due_date_before_completion(
     make_user: MakeUser,
     make_household: MakeHousehold,

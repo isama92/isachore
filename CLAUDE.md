@@ -214,6 +214,24 @@ pre-commit run --all-files                           # what the git hook runs
   the target user and parks the admin's own token in the `isachore_admin_token`
   cookie; `POST /auth/stop-impersonating` restores it. `/auth/me` reports
   `impersonating`; logout ends both sessions.
+- **Who is on the hook now** is `chore_occurrences.assignee_id` on the single open
+  occurrence, not a column on the chore; the pool is `chore_assignees` and the
+  rotation order is computed, never stored (`app/core/assignment.py`). The API
+  honours an explicit `current_assignee_id` for **every** strategy, not just
+  `manual` (`_reconcile_open_occurrence`, deliberately ungated). The picker in
+  `ChoreForm` therefore shows for `manual` always and for the auto strategies only
+  where the page passes `allowAssigneeOverride` (edit does, create does not, so a
+  random chore's first assignee stays random), and in both cases only with a
+  non-empty pool. Two things to keep true: the render and the payload must gate on
+  the same flag, so a hidden picker can never submit a value, and
+  `current_assignee_id` must stay derived against the live pool so removing someone
+  cannot submit a stale id. For the auto strategies an override lasts until the next
+  turn boundary, since completing re-derives through `_successor_assignee` — which
+  is what the `currentAssigneeTurnHint` copy promises the user, so keep them in
+  step. One dead end, pre-existing and not worth its own flag on `ChoreRead`: a
+  completed one-off (`repeats: 'manual'`, no open occurrence, a *different* field
+  from the strategy) makes `_reconcile_open_occurrence` return early, so the picker
+  silently does nothing there.
 - **Frontend auth**: `useAuth()` from `src/auth/useAuth.ts`; API calls through the
   `api` wrapper in `src/lib/api.ts` (throws `ApiError`). Protected routes wrap in
   `RequireAuth` / `RequireAdmin` (`src/components/`); authenticated pages render
@@ -375,6 +393,16 @@ pre-commit run --all-files                           # what the git hook runs
 Tests live in `backend/tests/` (pytest) and alongside the code as
 `frontend/src/**/*.test.{ts,tsx}` (vitest). Mirror the existing patterns; cover
 the negative paths (401/403/400/404/409), not just the happy one.
+
+- **A test for one clause of a compound condition must satisfy every other
+  clause**, or it asserts a fall-through and pins nothing. This has now cost real
+  work three times: the `sw.js` note below (a request shape matching no branch
+  falls through whether or not the guard exists), `useServerTable`'s early-return
+  guards (no URL change means no refetch either way, so only asserting `loading`
+  catches a missing guard), and the chore form's assignee picker (a test that
+  switched strategy with an *empty* assignee pool proved nothing about the
+  strategy gate, since the empty pool hides the picker by itself). When adding a
+  test for a guard, delete the guard and watch the test fail.
 
 - **Backend**: `docker compose exec backend uv run pytest` (in the container so
   `db` resolves). Fixtures spin up a throwaway `isachore_test` DB and roll each

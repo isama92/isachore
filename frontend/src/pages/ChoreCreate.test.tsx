@@ -252,20 +252,22 @@ describe('ChoreCreate', () => {
     expect(field).toHaveAttribute('max', '365')
   })
 
-  it('shows take turns only for auto strategies and the current-assignee picker only for manual', async () => {
+  it('shows take turns only for auto strategies, and no assignee picker until the pool has a member', async () => {
     singleHouseholdMocks()
     withRoutes()
 
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     await screen.findByLabelText('Title')
     // Manual is the default: no take-turns checkbox, and no current-assignee picker
-    // until the pool has a member.
+    // until the pool has a member. This absence is the pool check, NOT the
+    // manual-only gate; the filled-pool case below is what pins that.
     expect(screen.queryByRole('checkbox', { name: 'Take turns' })).not.toBeInTheDocument()
     expect(
       screen.queryByRole('combobox', { name: 'Currently assigned to' }),
     ).not.toBeInTheDocument()
 
-    // Switching to an auto strategy reveals take turns and hides the current picker.
+    // Switching to an auto strategy reveals take turns. The picker stays absent, but
+    // with an empty pool that says nothing about the strategy either way.
     await user.click(screen.getByRole('combobox', { name: 'Assignment' }))
     await user.click(await screen.findByRole('option', { name: 'Alphabetical' }))
     expect(screen.getByRole('checkbox', { name: 'Take turns' })).toBeInTheDocument()
@@ -320,6 +322,36 @@ describe('ChoreCreate', () => {
 
     await screen.findByText('chores-list')
     expect(postBody(fetchMock)).toMatchObject({ assignee_ids: [], current_assignee_id: null })
+  })
+
+  it('still hides the current-assignee picker for an auto strategy with a filled pool', async () => {
+    const fetchMock = singleHouseholdMocks()
+    withRoutes()
+
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    await user.type(await screen.findByLabelText('Title'), 'Dishes')
+    // The pool must be non-empty for this to mean anything: the picker is hidden for
+    // an empty pool whatever the strategy, so switching strategy alone proves nothing.
+    await user.click(screen.getByRole('button', { name: 'Assignees' }))
+    await user.click(await screen.findByRole('option', { name: 'Jo Ng' }))
+    await user.keyboard('{Escape}')
+    expect(screen.getByRole('combobox', { name: 'Currently assigned to' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('combobox', { name: 'Assignment' }))
+    await user.click(await screen.findByRole('option', { name: 'Alphabetical' }))
+
+    // Creating is not where you override a rotation: let alphabetical pick its own
+    // first assignee. The edit page is the one that passes allowAssigneeOverride.
+    expect(
+      screen.queryByRole('combobox', { name: 'Currently assigned to' }),
+    ).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Add chore' }))
+
+    await screen.findByText('chores-list')
+    expect(postBody(fetchMock)).toMatchObject({
+      assignment_type: 'alphabetical',
+      current_assignee_id: null,
+    })
   })
 
   it('lets manual pick the current assignee and submits it', async () => {
