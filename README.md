@@ -545,12 +545,13 @@ codebase live in [CLAUDE.md](CLAUDE.md).
 Security issues go through [SECURITY.md](SECURITY.md), privately, not a public
 issue. isachore is GPLv3, see [COPYING](COPYING).
 
-### Roadmap
+### Todo
 
 - [ ] Occasional tasks should be show in another panel
 - [ ] Add the created at field in the Chores table and automatically sort the table by that value (desc), so users can see chores ordered by creation instead of start at
 - [ ] Save tables settings (pagination, filters, sorting) in storage so when page is refreshed/changed they will still be set
 - [ ] Allow changing current assignee of a chore from the chore edit page
+- [ ] Add spacing between chores due today and tomorrow, also add spacing between chores due this week and everything else
 - [ ] Add a skip button (next to complete), and change the charts to also show the skipped chores
 - [ ] Live updates when a housemate completes a chore (websocket)
 - [ ] Chore change log (who changed what)

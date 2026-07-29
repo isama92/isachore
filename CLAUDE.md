@@ -9,7 +9,7 @@ and the non-obvious gotchas.
 
 ## Workflow
 
-- Work in small steps; the roadmap in README.md is the backlog (tick items off
+- Work in small steps; the todo list in README.md is the backlog (tick items off
   when done). When a requirement is ambiguous or a decision shapes UX or
   architecture, ask before building.
 - **Never commit to `main`.** Branch at the *start* of a step, before the first
