@@ -301,11 +301,16 @@ def make_chore(db_session: AsyncSession) -> Callable[..., Awaitable[Chore]]:
         with_occurrence: bool = True,
     ) -> Chore:
         pool = assignees or []
+        # The slot the first occurrence opens at. An unscheduled chore stores NO start date
+        # (the schema layer forces it to None, so a fixture holding one would let a bug
+        # through), but the date still places its occurrence chain, exactly as the seeder's
+        # `start_days_ago` does: that is how a test says "last done a fortnight ago".
+        slot_from = start_date or date(2026, 7, 16)
         chore = Chore(
             household_id=household.id,
             title=title,
             description=description,
-            start_date=start_date or date(2026, 7, 16),
+            start_date=None if repeats == RepeatPeriod.manual else slot_from,
             repeats=repeats,
             assignment_type=assignment_type,
             turn_length=turn_length,
@@ -329,7 +334,7 @@ def make_chore(db_session: AsyncSession) -> Callable[..., Awaitable[Chore]]:
             db_session.add(
                 ChoreOccurrence(
                     chore_id=chore.id,
-                    scheduled_for=first_occurrence(chore.start_date, rule),
+                    scheduled_for=first_occurrence(slot_from, rule),
                     assignee_id=current.id if current is not None else None,
                     status=OccurrenceStatus.open,
                 )

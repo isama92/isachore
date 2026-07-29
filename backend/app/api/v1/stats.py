@@ -7,7 +7,7 @@ from sqlalchemy import select
 from app.api.deps import CurrentUser, SessionDep
 from app.core.chores import DueStatus, days_late, days_until_due, due_status
 from app.core.households import member_household_ids
-from app.models import Chore, ChoreOccurrence, OccurrenceStatus, User
+from app.models import Chore, ChoreOccurrence, OccurrenceStatus, RepeatPeriod, User
 from app.schemas.stats import (
     CompletionBucket,
     PersonStat,
@@ -46,7 +46,13 @@ async def get_stats(
     (`status_breakdown`, `currently_overdue`, `active_chores`) is always live. Optional
     `household_id` narrows to one household; `user_id` narrows completions to that
     person's credited completions and the live snapshot to occurrences currently on
-    their plate. A household/person the user can't see just yields empty scope."""
+    their plate. A household/person the user can't see just yields empty scope.
+
+    Unscheduled chores have no deadline, so they are counted where the question is "how much
+    got done, and by whom" (`completed_in_range`, `completions_over_time`, `per_person`) and
+    excluded where the answer needs a due date (`currently_overdue`, `status_breakdown`,
+    `active_chores`, `punctuality`, `on_time_rate`). One consequence to keep in mind:
+    `punctuality` therefore no longer sums to `completed_in_range`."""
     now = datetime.now(UTC)
     today = now.date()
     # UTC day bounds (not a ::date cast, which depends on the session TimeZone), matching
@@ -64,9 +70,15 @@ async def get_stats(
     # --- Live snapshot: the open occurrences (range-independent) ---
     # Soft-deleted chores drop out here (nothing left to do), matching the Home scope;
     # completed history below is intentionally kept even for soft-deleted chores.
+    # Unscheduled chores drop out too: with no due date they cannot be overdue, due today or
+    # upcoming, so they have no bucket to land in. This single predicate is what keeps them
+    # out of `status_breakdown`, `currently_overdue` AND `active_chores`, which all read the
+    # same list - and it preserves the invariant that the three buckets sum to
+    # `active_chores`, which excluding them from only the overdue count would have broken.
     open_filters = [
         Chore.deleted_at.is_(None),
         scope,
+        Chore.repeats != RepeatPeriod.manual,
         ChoreOccurrence.status == OccurrenceStatus.open,
     ]
     if household_id is not None:
@@ -111,6 +123,9 @@ async def get_stats(
             select(
                 ChoreOccurrence.completed_at,
                 ChoreOccurrence.scheduled_for,
+                # Punctuality is only meaningful against a deadline, so the period rides
+                # along to exclude the unscheduled ones from it (see the loop below).
+                Chore.repeats,
                 User.id,
                 User.first_name,
                 User.last_name,
@@ -137,22 +152,30 @@ async def get_stats(
     on_time = late = early = 0
     # user_id -> [first_name, last_name, count]
     person_counts: dict[int, list] = {}
-    for completed_at, scheduled_for, uid, first_name, last_name in done_rows:
+    for completed_at, scheduled_for, repeats, uid, first_name, last_name in done_rows:
         completed_day = completed_at.astimezone(UTC).date()
         key = _week_start(completed_day) if weekly else completed_day
         buckets[key] = buckets.get(key, 0) + 1
-        late_by = days_late(scheduled_for, completed_at)
-        if late_by > 0:
-            late += 1
-        elif late_by < 0:
-            early += 1
-        else:
-            on_time += 1
+        # Doing an unscheduled chore is still work done, so it counts towards the total, the
+        # time chart and the per-person ranking. It just cannot be punctual: its slot records
+        # when the chore became available, not a deadline, so measuring lateness against it
+        # would score the gap since the last completion as being late.
+        if repeats != RepeatPeriod.manual:
+            late_by = days_late(scheduled_for, completed_at)
+            if late_by > 0:
+                late += 1
+            elif late_by < 0:
+                early += 1
+            else:
+                on_time += 1
         if uid is not None:
             entry = person_counts.setdefault(uid, [first_name, last_name, 0])
             entry[2] += 1
 
     total = len(done_rows)
+    # The punctuality denominator is the scheduled completions only, NOT `total`: the two
+    # differ by however many unscheduled chores were done in the range.
+    scheduled_total = on_time + late + early
     completions_over_time = [
         CompletionBucket(bucket=day.isoformat(), count=count)
         for day, count in sorted(buckets.items())
@@ -172,8 +195,9 @@ async def get_stats(
         kpis=StatsKpis(
             completed_in_range=total,
             currently_overdue=status_breakdown.overdue,
-            # Fraction not late (on time or early); None when nothing was completed.
-            on_time_rate=(on_time + early) / total if total else None,
+            # Fraction not late (on time or early) of the completions that had a deadline;
+            # None when none of them did, which includes "nothing was completed at all".
+            on_time_rate=(on_time + early) / scheduled_total if scheduled_total else None,
             active_chores=len(open_due),
         ),
         completions_over_time=completions_over_time,

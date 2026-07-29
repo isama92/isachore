@@ -99,6 +99,25 @@ describe('History', () => {
     expect(screen.queryByText(/days late/)).not.toBeInTheDocument()
   })
 
+  it('shows a placeholder rather than a verdict for an unscheduled chore', async () => {
+    // null lateness means the chore had no due date to miss (the server decides that). It
+    // must not read as "On time", which would claim a punctuality nobody measured. The
+    // scheduled row alongside it proves the column still renders a verdict when there is one.
+    stubFetch({
+      entries: [
+        makeHistoryEntry({ id: 1, title: 'Sorted the loft', days_late: null }),
+        makeHistoryEntry({ id: 2, title: 'Washed up', days_late: 0 }),
+      ],
+    })
+    renderWithProviders(<History />)
+
+    const unscheduled = (await screen.findByText('Sorted the loft')).closest('tr')!
+    expect(within(unscheduled).getByText('—')).toBeInTheDocument()
+    expect(within(unscheduled).queryByText('On time')).not.toBeInTheDocument()
+    const scheduled = screen.getByText('Washed up').closest('tr')!
+    expect(within(scheduled).getByText('On time')).toBeInTheDocument()
+  })
+
   it('shows a placeholder when the completer is unknown', async () => {
     stubFetch({ entries: [makeHistoryEntry({ title: 'Orphaned', completed_by: null })] })
     renderWithProviders(<History />)

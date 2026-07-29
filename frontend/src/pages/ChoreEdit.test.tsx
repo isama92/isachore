@@ -127,6 +127,33 @@ describe('ChoreEdit', () => {
     expect(patchBody(fetchMock)).toMatchObject({ repeat_interval: 2, weekdays: [1, 4] })
   })
 
+  it('hides the start date for an unscheduled chore and resends it as null', async () => {
+    // The API stores no start date for these, so the form receives null and must not render
+    // an empty date field. ChoreUpdate is a full replace, so the save has to resend the null
+    // rather than inventing today's date.
+    const unscheduled = makeChore({
+      id: 7,
+      title: 'Sort the loft',
+      repeats: 'manual',
+      start_date: null,
+      household: { id: 4, name: 'Beach House' },
+    })
+    const fetchMock = mockFetch([
+      { path: '/api/v1/chores/7', method: 'GET', body: unscheduled },
+      { path: MEMBERS, method: 'GET', body: page([]) },
+      { path: TAGS, method: 'GET', body: page([]) },
+      { path: '/api/v1/chores/7', method: 'PATCH', body: unscheduled },
+    ])
+    renderEdit()
+
+    expect(await screen.findByDisplayValue('Sort the loft')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Start date/ })).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('chores-list')
+    expect(patchBody(fetchMock)).toMatchObject({ repeats: 'manual', start_date: null })
+  })
+
   it('unpins a chore when every weekday is cleared', async () => {
     const pinned = makeChore({
       id: 7,

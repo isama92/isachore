@@ -489,6 +489,91 @@ async def test_undo_latest_reopens_the_occurrence(
     ]
 
 
+async def test_undo_unscheduled_completion_reopens_the_previous_slot(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    # An unscheduled chore's chain is anchored on completion timestamps rather than a grid,
+    # so undoing walks it back one link: the successor opened by the second completion goes,
+    # and the row that completion belonged to reopens. Done through the endpoints, because
+    # the timestamps are what the undo has to order by.
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, repeats=RepeatPeriod.manual, with_occurrence=True)
+    client = await auth_client(user)
+    for _ in range(2):
+        assert (await client.post(f"/api/v1/chores/{chore.id}/complete")).status_code == 201
+
+    slots_before = await _slots(db_session, chore.id)
+    assert [status for _, status in slots_before] == [
+        OccurrenceStatus.done,
+        OccurrenceStatus.done,
+        OccurrenceStatus.open,
+    ]
+    entries = (await client.get("/api/v1/completions")).json()["items"]
+    latest_id = max(e["id"] for e in entries)
+
+    assert (await client.delete(f"/api/v1/completions/{latest_id}")).status_code == 204
+
+    slots_after = await _slots(db_session, chore.id)
+    # One fewer row, and the second slot is open again with its original timestamp: the
+    # chore is available to do once more, crediting nobody for the undone completion.
+    assert [status for _, status in slots_after] == [OccurrenceStatus.done, OccurrenceStatus.open]
+    assert [slot for slot, _ in slots_after] == [slot for slot, _ in slots_before[:2]]
+
+
+async def test_undo_picks_the_latest_completion_not_the_latest_slot(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    # Slots only run in completion order while they come off a recurrence grid. A chore
+    # switched to unscheduled while its slot was still in the future keeps that future slot
+    # (see test_update_chore_weekly_to_manual...), and every later slot is a completion
+    # timestamp - so the chore ends up with a done row dated LATER than the open row after
+    # it. Ordering by slot would then call the wrong completion the latest: it would
+    # hard-delete this genuinely-latest one and leave the chain un-rewound.
+    user = await make_user()
+    household = await make_household(members=[user])
+    future_slot = DUE + timedelta(days=3)
+    chore = await make_chore(
+        household=household, repeats=RepeatPeriod.manual, with_occurrence=False
+    )
+    # The inherited future slot, completed first...
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=future_slot,
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=DUE,
+    )
+    # ...then reopened at that completion moment and completed again a day later.
+    latest = await make_occurrence(
+        chore=chore,
+        scheduled_for=DUE,
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=DUE + timedelta(days=1),
+    )
+    await make_occurrence(chore=chore, scheduled_for=DUE + timedelta(days=1))
+    client = await auth_client(user)
+
+    assert (await client.delete(f"/api/v1/completions/{latest.id}")).status_code == 204
+
+    # The reopen branch ran: the successor is gone and `latest` is open again at its own
+    # slot, with the future-slotted completion left alone as history.
+    assert await _slots(db_session, chore.id) == [
+        (DUE, OccurrenceStatus.open),
+        (future_slot, OccurrenceStatus.done),
+    ]
+
+
 async def test_undo_only_completion_leaves_a_fresh_open_occurrence(
     make_user: MakeUser,
     make_household: MakeHousehold,

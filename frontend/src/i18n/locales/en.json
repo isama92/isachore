@@ -32,9 +32,10 @@
   },
   "sidebar": {
     "nav": "Main navigation",
-    "home": "Home",
+    "home": "Your Chores",
+    "unscheduled": "Unscheduled Chores",
     "households": "Households",
-    "chores": "Chores",
+    "chores": "Chores Management",
     "history": "History",
     "statistics": "Statistics",
     "tags": "Tags",
@@ -70,8 +71,7 @@
     "twoFactorError": "Could not verify the code"
   },
   "home": {
-    "titleMine": "Your chores",
-    "titleHousehold": "Household chores",
+    "title": "Your Chores",
     "unassigned": "Unassigned",
     "progress": {
       "doneToday": "{{done}} of {{total}} done today",
@@ -105,8 +105,39 @@
       "doneAs": "Done as {{name}}"
     }
   },
+  "unscheduled": {
+    "title": "Unscheduled Chores",
+    "unassigned": "Unassigned",
+    "lastDone": {
+      "today": "Last done today",
+      "days_one": "Last done {{count}} day ago",
+      "days_other": "Last done {{count}} days ago",
+      "never": "Never done"
+    },
+    "emptyTitle": "Nothing waiting",
+    "emptyHint": "Chores with no schedule show up here.",
+    "markDone": "Done: “{{title}}”",
+    "done": "Done",
+    "completed": "Chore marked done",
+    "loadError": "Failed to load your unscheduled chores",
+    "completeError": "Could not mark the chore done",
+    "filters": {
+      "householdLabel": "Household",
+      "householdAll": "All households",
+      "assigneeLabel": "Assignees",
+      "assigneeAll": "All assignees",
+      "assigneeSearch": "Search members…",
+      "assigneeEmpty": "No members found."
+    },
+    "credit": {
+      "title": "Complete “{{title}}”?",
+      "body": "This chore is assigned to {{names}}. Who should the History credit for this completion?",
+      "doneAsMe": "Done as me",
+      "doneAs": "Done as {{name}}"
+    }
+  },
   "chores": {
-    "title": "Chores",
+    "title": "Chores Management",
     "new": "New chore",
     "edit": "Edit",
     "clone": "Clone",
@@ -117,6 +148,7 @@
     "emptyHint": "Add the first one with New chore above.",
     "unassigned": "Unassigned",
     "noTags": "None",
+    "noStart": "—",
     "andMore": "and {{count}} more",
     "delete": "Delete",
     "deleteConfirm": "Delete “{{title}}”?",
@@ -146,6 +178,7 @@
     "onTime": "On time",
     "daysLate_one": "{{count}} day late",
     "daysLate_other": "{{count}} days late",
+    "notDue": "—",
     "unknownUser": "Unknown",
     "undo": "Undo",
     "undone": "Completion undone",
@@ -564,7 +597,7 @@
   },
   "options": {
     "repeat": {
-      "manual": "Manual",
+      "manual": "Unscheduled",
       "daily": "Daily",
       "weekly": "Weekly",
       "monthly": "Monthly",

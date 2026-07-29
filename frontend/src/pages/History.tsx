@@ -167,8 +167,13 @@ export default function History() {
       id: 'overdue',
       header: t('history.headers.overdue'),
       enableSorting: false,
+      // null means the chore was unscheduled and so had no deadline to be late against
+      // (the server decides that, see HistoryEntryRead). A placeholder rather than "On
+      // time", which would claim a punctuality nothing was measuring.
       cell: ({ row }) =>
-        row.original.days_late > 0 ? (
+        row.original.days_late === null ? (
+          <span className="text-muted-foreground">{t('history.notDue')}</span>
+        ) : row.original.days_late > 0 ? (
           <span className="font-semibold text-danger">
             {t('history.daysLate', { count: row.original.days_late })}
           </span>

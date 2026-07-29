@@ -116,6 +116,11 @@
   --color-due-soon: var(--due-soon);
   --color-due-later: var(--due-later);
 
+  /* Unscheduled-view recency colours (dots): how long since the chore was last done. */
+  --color-done-recent: var(--done-recent);
+  --color-done-week: var(--done-week);
+  --color-done-stale: var(--done-stale);
+
   /* Statistics chart palette + punctuality status colours (Statistics page). */
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
@@ -167,6 +172,16 @@
   --due-today: var(--ctp-yellow);
   --due-soon: var(--ctp-green);
   --due-later: var(--placeholder);
+
+  /* Unscheduled-view recency colours: done today (green), done within the week (yellow),
+     longer ago or never done (the same muted grey as --due-later). Separate names rather
+     than reuse of the --due-* trio because the two scales cross over: due TODAY is the
+     yellow one, but done today is the green one, so `bg-due-soon` meaning "done today"
+     would read as a bug to the next person in here. Track the flavour's accents and
+     resolve lazily, exactly as --due-* above. */
+  --done-recent: var(--ctp-green);
+  --done-week: var(--ctp-yellow);
+  --done-stale: var(--placeholder);
 
   /* Statistics charts. Single-series bar charts (completions over time, per
      person) use --primary, so they track the user's chosen accent. --chart-1..5

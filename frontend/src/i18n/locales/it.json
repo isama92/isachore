@@ -32,9 +32,10 @@
   },
   "sidebar": {
     "nav": "Navigazione principale",
-    "home": "Home",
+    "home": "Le tue faccende",
+    "unscheduled": "Faccende non pianificate",
     "households": "Nuclei domestici",
-    "chores": "Faccende",
+    "chores": "Gestione faccende",
     "history": "Cronologia",
     "statistics": "Statistiche",
     "tags": "Etichette",
@@ -70,8 +71,7 @@
     "twoFactorError": "Impossibile verificare il codice"
   },
   "home": {
-    "titleMine": "Le tue faccende",
-    "titleHousehold": "Faccende del nucleo domestico",
+    "title": "Le tue faccende",
     "unassigned": "Non assegnata",
     "progress": {
       "doneToday": "{{done}} di {{total}} fatte oggi",
@@ -105,8 +105,39 @@
       "doneAs": "Fatto da {{name}}"
     }
   },
+  "unscheduled": {
+    "title": "Faccende non pianificate",
+    "unassigned": "Non assegnata",
+    "lastDone": {
+      "today": "Fatta oggi",
+      "days_one": "Fatta {{count}} giorno fa",
+      "days_other": "Fatta {{count}} giorni fa",
+      "never": "Mai fatta"
+    },
+    "emptyTitle": "Niente in attesa",
+    "emptyHint": "Le faccende senza pianificazione compaiono qui.",
+    "markDone": "Fatto: “{{title}}”",
+    "done": "Fatto",
+    "completed": "Faccenda segnata come completata",
+    "loadError": "Impossibile caricare le tue faccende non pianificate",
+    "completeError": "Impossibile segnare la faccenda come completata",
+    "filters": {
+      "householdLabel": "Nucleo domestico",
+      "householdAll": "Tutti i nuclei domestici",
+      "assigneeLabel": "Assegnatari",
+      "assigneeAll": "Tutti gli assegnatari",
+      "assigneeSearch": "Cerca membri…",
+      "assigneeEmpty": "Nessun membro trovato."
+    },
+    "credit": {
+      "title": "Completare “{{title}}”?",
+      "body": "Questa faccenda è assegnata a {{names}}. A chi va attribuito il completamento nella cronologia?",
+      "doneAsMe": "Fatto da me",
+      "doneAs": "Fatto da {{name}}"
+    }
+  },
   "chores": {
-    "title": "Faccende",
+    "title": "Gestione faccende",
     "new": "Nuova faccenda",
     "edit": "Modifica",
     "clone": "Clona",
@@ -117,6 +148,7 @@
     "emptyHint": "Aggiungi la prima con Nuova faccenda qui sopra.",
     "unassigned": "Non assegnata",
     "noTags": "Nessuna",
+    "noStart": "—",
     "andMore": "e altre {{count}}",
     "delete": "Elimina",
     "deleteConfirm": "Eliminare “{{title}}”?",
@@ -146,6 +178,7 @@
     "onTime": "Puntuale",
     "daysLate_one": "{{count}} giorno di ritardo",
     "daysLate_other": "{{count}} giorni di ritardo",
+    "notDue": "—",
     "unknownUser": "Sconosciuto",
     "undo": "Annulla",
     "undone": "Completamento annullato",
@@ -564,7 +597,7 @@
   },
   "options": {
     "repeat": {
-      "manual": "Manuale",
+      "manual": "Non pianificata",
       "daily": "Ogni giorno",
       "weekly": "Ogni settimana",
       "monthly": "Ogni mese",

@@ -50,7 +50,7 @@ export function repeatLabel(
   t: TFunction,
   chore: Pick<Chore, 'repeats' | 'repeat_interval' | 'weekdays'>,
 ): string {
-  // A one-off never recurs, so neither the interval nor the weekdays apply. Returning
+  // An unscheduled chore never recurs, so neither the interval nor the weekdays apply. Returning
   // here also narrows `repeats` to the four periods the keys below exist for.
   if (chore.repeats === 'manual') return t('options.repeat.manual')
 

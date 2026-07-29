@@ -4,7 +4,13 @@ import { Link } from 'react-router'
 import { format } from 'date-fns'
 import { CalendarIcon } from 'lucide-react'
 import { ApiError } from '@/lib/api'
-import { MAX_REPEAT_INTERVAL, assignmentOptions, formatDate, repeatOptions } from '@/lib/chores'
+import {
+  MAX_REPEAT_INTERVAL,
+  assignmentOptions,
+  formatDate,
+  repeatOptions,
+  todayISO,
+} from '@/lib/chores'
 import type { AssignmentType, HouseholdMember, RepeatPeriod, Tag } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -22,7 +28,7 @@ import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { TagMultiSelect } from '@/components/chores/TagMultiSelect'
 import { WeekdayPicker } from '@/components/chores/WeekdayPicker'
-import { AssigneeMultiSelect } from '@/components/home/AssigneeMultiSelect'
+import { AssigneeMultiSelect } from '@/components/chores/AssigneeMultiSelect'
 
 export type ChoreFormValues = {
   title: string
@@ -52,7 +58,9 @@ export type ChoreFormValues = {
 export type ChoreSubmit = {
   title: string
   description: string | null
-  start_date: string
+  // null for an unscheduled chore, which has no start date (the same asymmetry as
+  // description and weekdays below: the form holds '' where the API wants null).
+  start_date: string | null
   repeats: RepeatPeriod
   assignment_type: AssignmentType
   turn_length: number
@@ -148,7 +156,7 @@ export function ChoreForm({
     ? 1
     : Math.min(MAX_REPEAT_INTERVAL, Math.max(1, Math.trunc(Number(repeatInterval)) || 1))
   const weekdays = isWeekly ? values.weekdays : []
-  // The noun beside the interval input. Empty for a one-off, whose field is hidden, so
+  // The noun beside the interval input. Empty when unscheduled, whose field is hidden, so
   // the fallback never renders. Shares `interval` with the payload, so the word always
   // agrees with what will be saved. Compares `values.repeats` inline rather than reusing
   // `manualRepeat`: TypeScript will not narrow the union through the aliased boolean, and
@@ -166,7 +174,9 @@ export function ChoreForm({
       await onSubmit({
         title: values.title,
         description: values.description || null,
-        start_date: values.start_date,
+        // An unscheduled chore has no start date: its field is hidden above and the API
+        // would drop the value anyway, so send the null explicitly.
+        start_date: manualRepeat ? null : values.start_date,
         repeats: values.repeats,
         assignment_type: values.assignment_type,
         // A whole number >= 2 when taking turns, otherwise 1 (hand off every completion).
@@ -257,7 +267,19 @@ export function ChoreForm({
           </Label>
           <Select
             value={values.repeats}
-            onValueChange={(v) => setValues({ ...values, repeats: v as RepeatPeriod })}
+            onValueChange={(v) => {
+              const repeats = v as RepeatPeriod
+              setValues({
+                ...values,
+                repeats,
+                // Leaving "unscheduled" reveals the start-date field, which is required
+                // from here on and may be empty (an unscheduled chore stores no start
+                // date). Default it to today so the field can never render blank and the
+                // payload can never be rejected for a missing date.
+                start_date:
+                  repeats !== 'manual' && !values.start_date ? todayISO() : values.start_date,
+              })
+            }}
           >
             <SelectTrigger id="repeats" aria-labelledby="repeats-label" className="w-full">
               <SelectValue />
@@ -274,7 +296,7 @@ export function ChoreForm({
       </div>
 
       {/* Recurrence detail: how many periods between occurrences, and for a weekly chore
-          which weekdays it lands on. A one-off never recurs, so neither applies. Sits
+          which weekdays it lands on. An unscheduled chore never recurs, so neither applies. Sits
           right under the Repeats select, which is the grid's last element once it
           collapses to one column below sm. */}
       {!manualRepeat && (
@@ -383,36 +405,43 @@ export function ChoreForm({
         </div>
       )}
 
-      <div className="flex flex-col gap-1.5">
-        <Label id="start-date-label" htmlFor="start-date">
-          {t('choreCreate.startDate')}
-        </Label>
-        <Popover open={dateOpen} onOpenChange={setDateOpen}>
-          <PopoverTrigger asChild>
-            <button
-              id="start-date"
-              type="button"
-              aria-labelledby="start-date-label start-date-value"
-              className="flex h-10 w-full items-center justify-between rounded-input border border-input bg-transparent px-3 text-base outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30"
-            >
-              <span id="start-date-value">{formatDate(values.start_date)}</span>
-              <CalendarIcon className="size-4 text-muted-foreground" />
-            </button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0" align="start">
-            <Calendar
-              mode="single"
-              required
-              selected={new Date(`${values.start_date}T00:00:00`)}
-              onSelect={(d) => {
-                if (d) setValues({ ...values, start_date: format(d, 'yyyy-MM-dd') })
-                setDateOpen(false)
-              }}
-              autoFocus
-            />
-          </PopoverContent>
-        </Popover>
-      </div>
+      {/* An unscheduled chore starts nothing: it has no first due date to seed and never
+          becomes due, so the field would be dead config on screen. Hidden rather than
+          disabled, matching how the recurrence detail above disappears. The period select
+          refills an empty date on the way back out, so `values.start_date` is always set
+          whenever this block renders (the Calendar below would choke on an empty one). */}
+      {!manualRepeat && (
+        <div className="flex flex-col gap-1.5">
+          <Label id="start-date-label" htmlFor="start-date">
+            {t('choreCreate.startDate')}
+          </Label>
+          <Popover open={dateOpen} onOpenChange={setDateOpen}>
+            <PopoverTrigger asChild>
+              <button
+                id="start-date"
+                type="button"
+                aria-labelledby="start-date-label start-date-value"
+                className="flex h-10 w-full items-center justify-between rounded-input border border-input bg-transparent px-3 text-base outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30"
+              >
+                <span id="start-date-value">{formatDate(values.start_date)}</span>
+                <CalendarIcon className="size-4 text-muted-foreground" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="single"
+                required
+                selected={new Date(`${values.start_date}T00:00:00`)}
+                onSelect={(d) => {
+                  if (d) setValues({ ...values, start_date: format(d, 'yyyy-MM-dd') })
+                  setDateOpen(false)
+                }}
+                autoFocus
+              />
+            </PopoverContent>
+          </Popover>
+        </div>
+      )}
 
       <div className="flex flex-col gap-2">
         <Label id="tags-label">{t('choreCreate.tags')}</Label>

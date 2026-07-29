@@ -12,6 +12,7 @@ from app.models import (
     ChoreOccurrence,
     Household,
     OccurrenceStatus,
+    RepeatPeriod,
     User,
     UserStatus,
     household_members,
@@ -116,7 +117,9 @@ async def list_completions(
     order_by.append(ChoreOccurrence.id.desc() if descending else ChoreOccurrence.id.asc())
 
     result = await session.execute(
-        select(ChoreOccurrence, Household, User)
+        # Chore.repeats rides along so lateness can be suppressed for the unscheduled ones;
+        # the chore is joined for scoping anyway, so this costs nothing.
+        select(ChoreOccurrence, Household, User, Chore.repeats)
         .join(Chore, Chore.id == ChoreOccurrence.chore_id)  # to-one: no row multiplication
         .join(Household, Household.id == Chore.household_id)
         .outerjoin(User, User.id == ChoreOccurrence.completed_by_user_id)  # completer may be NULL
@@ -131,11 +134,16 @@ async def list_completions(
             title=occ.title,
             scheduled_for=occ.scheduled_for,
             completed_at=occ.completed_at,
-            days_late=days_late(occ.scheduled_for, occ.completed_at),
+            # An unscheduled chore has no deadline, so it can be neither late nor on time.
+            days_late=(
+                None
+                if repeats == RepeatPeriod.manual
+                else days_late(occ.scheduled_for, occ.completed_at)
+            ),
             completed_by=HouseholdMemberRead.model_validate(completer) if completer else None,
             household=ChoreHouseholdRead.model_validate(household),
         )
-        for occ, household, completer in result.all()
+        for occ, household, completer, repeats in result.all()
     ]
     return Page[HistoryEntryRead](items=items, total=total, page=page, page_size=page_size)
 
@@ -146,9 +154,10 @@ async def undo_completion(completion_id: int, user: CurrentUser, session: Sessio
     completion is credited to (completed_by) may undo it; the occurrence stores no
     separate record of who submitted it, so someone who completes a chore on another
     member's behalf cannot undo it themselves.
-    Undoing the chore's latest completion reopens that occurrence
-    (deleting the successor open occurrence first) so the chore is due again with its
-    original assignee; undoing an older one just removes that history row."""
+    Undoing the chore's latest completion (the most recently *completed* one, see below)
+    reopens that occurrence (deleting the successor open occurrence first) so the chore is
+    available again with its original assignee; undoing an older one just removes that
+    history row."""
     # Scope to the user's active households (same scope as the list): a done occurrence
     # outside it, or a missing id, is a 404.
     occ = (
@@ -170,14 +179,21 @@ async def undo_completion(completion_id: int, user: CurrentUser, session: Sessio
             detail="You can only undo your own completions",
         )
 
-    # Is this the chore's most recent completion? (scheduled_for is unique per chore.)
-    latest_done = await session.scalar(
-        select(func.max(ChoreOccurrence.scheduled_for)).where(
+    # Is this the chore's most recent completion? Ordered by `completed_at`, NOT by
+    # `scheduled_for`: slots only run in completion order while they come off a recurrence
+    # grid, and an unscheduled chore's successor is anchored at the moment it was completed.
+    # A chore switched to unscheduled while its slot was still in the future therefore ends
+    # up with a done row dated later than the open row that follows it, and ordering by slot
+    # would call the wrong completion the latest - reopening a future slot with a stale
+    # assignee while deleting the live open occurrence. `max` ignores NULLs, and no
+    # production path writes a done row without a completion time.
+    latest_completed_at = await session.scalar(
+        select(func.max(ChoreOccurrence.completed_at)).where(
             ChoreOccurrence.chore_id == occ.chore_id,
             ChoreOccurrence.status == OccurrenceStatus.done,
         )
     )
-    if occ.scheduled_for == latest_done:
+    if occ.completed_at is not None and occ.completed_at == latest_completed_at:
         # Reopen it: delete the successor open occurrence first (freeing the
         # one-open-per-chore slot), then flip this row back to open with its assignee.
         successor = (

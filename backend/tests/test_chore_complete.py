@@ -112,21 +112,66 @@ async def test_complete_deleted_chore_404(
     assert resp.status_code == 404
 
 
-async def test_complete_manual_one_off_twice_conflicts(
+async def test_complete_unscheduled_is_repeatable(
+    db_session: AsyncSession,
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
     auth_client: AuthClient,
 ) -> None:
+    # An unscheduled chore is done on demand, over and over: each completion reopens it, so
+    # three clicks record three completions and leave the chore still open.
     user = await make_user()
     household = await make_household(members=[user])
     today = datetime.now(UTC).date()
     chore = await make_chore(household=household, start_date=today, repeats=RepeatPeriod.manual)
     client = await auth_client(user)
 
+    for _ in range(3):
+        assert (await client.post(f"/api/v1/chores/{chore.id}/complete")).status_code == 201
+
+    rows = (
+        (
+            await db_session.execute(
+                select(ChoreOccurrence)
+                .where(ChoreOccurrence.chore_id == chore.id)
+                .order_by(ChoreOccurrence.scheduled_for)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [r.status for r in rows] == [
+        OccurrenceStatus.done,
+        OccurrenceStatus.done,
+        OccurrenceStatus.done,
+        OccurrenceStatus.open,
+    ]
+    # Each successor is anchored at the completion moment of the row before it, which is
+    # both what "available again since" means here and what keeps the slots distinct under
+    # uq_occurrence_chore_scheduled when a chore is done twice in one day.
+    done = [r for r in rows if r.status == OccurrenceStatus.done]
+    assert [r.scheduled_for for r in rows[1:]] == [r.completed_at for r in done]
+
+
+async def test_complete_unscheduled_reports_no_deadline_in_history(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # The slot of an unscheduled chore records availability, not a deadline, so History
+    # must not read the gap since it opened as lateness.
+    user = await make_user()
+    household = await make_household(members=[user])
+    long_ago = datetime.now(UTC).date() - timedelta(days=40)
+    chore = await make_chore(household=household, start_date=long_ago, repeats=RepeatPeriod.manual)
+    client = await auth_client(user)
+
     assert (await client.post(f"/api/v1/chores/{chore.id}/complete")).status_code == 201
-    # A one-off has no next occurrence, so a second completion is a conflict.
-    assert (await client.post(f"/api/v1/chores/{chore.id}/complete")).status_code == 409
+
+    entries = (await client.get("/api/v1/completions")).json()["items"]
+    assert [e["days_late"] for e in entries] == [None]
 
 
 async def test_complete_duplicate_occurrence_conflicts(
@@ -531,14 +576,15 @@ async def test_complete_fortnightly_pinned_weekday_spends_the_interval(
     assert resp.json()["days_until_due"] == 14
 
 
-async def test_complete_one_off_created_with_weekdays_still_has_no_successor(
+async def test_complete_unscheduled_created_with_a_schedule_ignores_it(
     make_user: MakeUser,
     make_household: MakeHousehold,
     auth_client: AuthClient,
 ) -> None:
     # Created through the API, so this proves the schema's normalisation reached the DB
-    # rather than being cosmetic in the response: a `manual` chore stays a one-off even
-    # when the payload carried weekdays and an interval.
+    # rather than being cosmetic in the response: an unscheduled chore keeps no schedule at
+    # all, whatever the payload carried, and reopens on each completion rather than stepping
+    # the interval and weekdays it was sent.
     user = await make_user()
     household = await make_household(members=[user])
     client = await auth_client(user)
@@ -559,7 +605,11 @@ async def test_complete_one_off_created_with_weekdays_still_has_no_successor(
     body = created.json()
     assert body["weekdays"] is None
     assert body["repeat_interval"] == 1
+    assert body["start_date"] is None
 
     chore_id = body["id"]
+    # Reopens at the completion moment, so it reads as due today rather than four weeks on.
+    first = await client.post(f"/api/v1/chores/{chore_id}/complete")
+    assert first.status_code == 201
+    assert first.json()["days_until_due"] == 0
     assert (await client.post(f"/api/v1/chores/{chore_id}/complete")).status_code == 201
-    assert (await client.post(f"/api/v1/chores/{chore_id}/complete")).status_code == 409

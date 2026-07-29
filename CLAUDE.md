@@ -229,10 +229,61 @@ pre-commit run --all-files                           # what the git hook runs
   an override lasts until the next turn boundary, because completing re-derives
   through `_successor_assignee` — which
   is what the `currentAssigneeTurnHint` copy promises the user, so keep them in
-  step. One dead end, pre-existing and not worth its own flag on `ChoreRead`: a
-  completed one-off (`repeats: 'manual'`, no open occurrence, a *different* field
-  from the strategy) makes `_reconcile_open_occurrence` return early, so the picker
-  silently does nothing there.
+  step. Every live chore has exactly one open occurrence whatever its period, so
+  `current_assignee: null` means unassigned/shared and never "nothing left to do".
+- **Unscheduled chores** (`repeats: 'manual'`, a *different* field from the `manual`
+  assignment strategy) are the chores you do ad hoc: **never due, never overdue,
+  repeatable on demand**. Completing one flips its occurrence to `done` and opens a
+  fresh one anchored at **the completion timestamp** (`next_occurrence_after`), so it
+  stays available forever. That timestamp, not its midnight, because
+  `uq_occurrence_chore_scheduled` is per (chore, `scheduled_for`) and a date would
+  collide the second time a chore was done in one day. They used to be one-offs that
+  terminated on completion; do NOT reintroduce that, and note the migration
+  (`3c1f04a7e9d2`) reopens the ones it left dead. Consequences worth knowing:
+  - **`chores.start_date` is nullable and NULL for every one of them.** It only ever
+    seeded the first slot, which for an unscheduled chore means nothing, so their first
+    occurrence opens at creation time instead (`_initial_slot`). The schema layer keeps
+    this true from both directions (`_normalised_schedule`): the date is silently
+    dropped for `manual` and **required** for every other period, the one part of the
+    schedule rejected rather than normalised. So a NULL `start_date` and `repeats ==
+    manual` are the same fact, and `ChoreForm` hides the field, submits `null`, and
+    refills it with today when the period stops being unscheduled.
+  - Their `scheduled_for` records **availability, not a deadline**. Nothing may read it
+    as one: `days_late` comes back `null` from History, and both `home.py` and `stats.py`
+    exclude `repeats == manual` outright. In stats that means counted in
+    `completed_in_range` / `completions_over_time` / `per_person` (work done is work
+    done) and excluded from `currently_overdue` / `status_breakdown` / `active_chores` /
+    `punctuality` / `on_time_rate`. The live snapshot needs only ONE predicate for the
+    first three (same query), which also preserves "the three buckets sum to
+    `active_chores`"; `punctuality` deliberately no longer sums to
+    `completed_in_range`, and `on_time_rate`'s denominator is the scheduled completions
+    alone.
+  - The view is `GET /api/v1/unscheduled` + `pages/Unscheduled.tsx`, ordered
+    **alphabetically** (sorting by slot would be a deadline in disguise) and reporting
+    `days_since_last_completion` instead of any due field. Its dot uses the
+    `--done-recent/week/stale` tokens, NOT `--due-*`: the scales cross over, since done
+    today is green while due today is yellow.
+  - **Their slots break three assumptions the grid used to guarantee**, every one of which
+    bit once already. The root cause each time: an unscheduled chore anchors its successors
+    at completion timestamps, so its done rows sit on **both sides** of its open one, and
+    "the open slot is later than every done slot" is no longer true:
+    - `undo_completion` finds the latest completion by `max(completed_at)`, NOT
+      `max(scheduled_for)`. Slots only run in completion order while they come off a grid;
+      switch a not-yet-due chore to unscheduled and its next done row is dated *earlier*
+      than the one before it, so ordering by slot reopens the wrong occurrence (resurrecting
+      a future slot with a stale assignee while deleting the live open row).
+    - `_reconcile_open_occurrence` takes a `was_unscheduled` flag, read in `update_chore`
+      *before* the payload overwrites `chore.repeats`. Unscheduled -> recurring must re-seed
+      the slot from the new `start_date` rather than `snap_to_slot` it: snapping is the
+      identity for every unpinned rule, so the chore would keep its last-completion moment
+      and read as overdue by however long ago that was, while the form said "start today".
+    - Every re-dated slot goes through `_free_slot_from`, which walks it past any slot the
+      chore has **already completed**. `first_occurrence` and every grid slot are both
+      midnight UTC, so re-dating onto a grid the chore has history on can land exactly on a
+      done row; `uq_occurrence_chore_scheduled` then fails the commit and `update_chore`
+      returns a 409 that retrying can never clear, since the same edit recomputes the same
+      occupied slot. "Did it today, parked it as unscheduled, later put it back on a
+      schedule" is enough to hit it, because the form pre-fills today's date.
 - **Frontend auth**: `useAuth()` from `src/auth/useAuth.ts`; API calls through the
   `api` wrapper in `src/lib/api.ts` (throws `ApiError`). Protected routes wrap in
   `RequireAuth` / `RequireAdmin` (`src/components/`); authenticated pages render
@@ -350,9 +401,11 @@ pre-commit run --all-files                           # what the git hook runs
   per-call classes (see Gotchas).
 - **Theme / dark mode**: `ThemeProvider` + `useTheme()` in `frontend/src/theme/`
   (context/provider/hook split, same rule as `src/auth/`). Light mode is the teal
-  brand; dark is derived. The toggle is in `TopBar`. Toasts: `toast.success(...)`
-  from `sonner`, a single `<Toaster />` in `main.tsx`. Feedback pattern: success
-  -> toast, errors -> inline text.
+  brand; dark is derived. The picker is the Profile page's **Appearance** section
+  (Catppuccin flavour + accent, saved optimistically with rollback, like
+  language), NOT `TopBar`. Toasts: `toast.success(...)` from `sonner`, a single
+  `<Toaster />` in `main.tsx`. Feedback pattern: success -> toast, errors ->
+  inline text.
 - **i18n**: `react-i18next` + `i18next`. `frontend/src/i18n/` mirrors `theme/`:
   `languages.ts` (the closed `Language` set `'en' | 'it'`, `LANGUAGES` autonyms,
   `DEFAULT_LANGUAGE` = `en`, `isLanguage` guard, `localeFor` -> BCP47),

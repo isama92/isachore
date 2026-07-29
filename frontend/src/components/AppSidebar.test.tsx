@@ -56,8 +56,15 @@ describe('AppSidebar', () => {
   it('renders the core nav items with the right destinations', () => {
     renderSidebar({ user: makeUser() })
     expect(screen.getByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('href', '/')
-    expect(screen.getByRole('link', { name: 'Chores' })).toHaveAttribute('href', '/chores')
+    expect(screen.getByRole('link', { name: 'Your Chores' })).toHaveAttribute('href', '/')
+    expect(screen.getByRole('link', { name: 'Unscheduled Chores' })).toHaveAttribute(
+      'href',
+      '/unscheduled',
+    )
+    expect(screen.getByRole('link', { name: 'Chores Management' })).toHaveAttribute(
+      'href',
+      '/chores',
+    )
     expect(screen.getByRole('link', { name: 'History' })).toHaveAttribute('href', '/history')
     expect(screen.getByRole('link', { name: 'Profile' })).toHaveAttribute('href', '/profile')
   })
@@ -67,11 +74,12 @@ describe('AppSidebar', () => {
     const nav = screen.getByRole('navigation', { name: 'Main navigation' })
     const labels = screen.getAllByRole('link').filter((el) => nav.contains(el))
     expect(labels.map((el) => el.textContent)).toEqual([
-      'Home',
+      'Your Chores',
+      'Unscheduled Chores',
       'History',
       'Statistics',
       'Tags',
-      'Chores',
+      'Chores Management',
       'Households',
       'Profile',
     ])
@@ -107,13 +115,22 @@ describe('AppSidebar', () => {
 
   it('marks the active section from the current route', () => {
     renderSidebar({ user: makeUser() }, '/chores')
-    expect(screen.getByRole('link', { name: 'Chores' })).toHaveAttribute('data-active', 'true')
-    expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('data-active', 'false')
+    expect(screen.getByRole('link', { name: 'Chores Management' })).toHaveAttribute(
+      'data-active',
+      'true',
+    )
+    expect(screen.getByRole('link', { name: 'Your Chores' })).toHaveAttribute(
+      'data-active',
+      'false',
+    )
   })
 
   it('keeps the Chores section active on its nested routes', () => {
     renderSidebar({ user: makeUser() }, '/chores/new')
-    expect(screen.getByRole('link', { name: 'Chores' })).toHaveAttribute('data-active', 'true')
+    expect(screen.getByRole('link', { name: 'Chores Management' })).toHaveAttribute(
+      'data-active',
+      'true',
+    )
   })
 
   it('logs out when the Log out button is clicked', async () => {

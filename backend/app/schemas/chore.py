@@ -15,11 +15,16 @@ from app.schemas.user import UserRead
 Weekday = Annotated[int, Field(ge=0, le=6)]
 
 
-def _normalised_recurrence(
-    repeats: RepeatPeriod, repeat_interval: int, weekdays: list[int] | None
-) -> tuple[int, list[int] | None]:
-    """The canonical (repeat_interval, weekdays) pair: weekdays sorted and deduplicated but
-    kept only for `weekly`, and the interval forced to 1 for `manual`, which never recurs.
+def _normalised_schedule(
+    repeats: RepeatPeriod,
+    start_date: date | None,
+    repeat_interval: int,
+    weekdays: list[int] | None,
+) -> tuple[date | None, int, list[int] | None]:
+    """The canonical (start_date, repeat_interval, weekdays) triple: weekdays sorted and
+    deduplicated but kept only for `weekly`, and the interval (forced to 1) plus the start
+    date (forced to None) dropped for `manual`, which never recurs and so has nothing to
+    start from - it opens at creation and reopens at each completion instead.
 
     Normalising rather than rejecting, because a 422 here would fire every time someone
     flipped the period from weekly to daily before the form cleared the weekday list -
@@ -27,11 +32,18 @@ def _normalised_recurrence(
     than merely ignoring it stops a stale weekday set silently reactivating on a switch
     back to weekly, and the read-back (`weekdays: null`) makes the drop visible. An empty
     list means what NULL means, unpinned, so it collapses to None too.
+
+    A *missing* start date is the one thing rejected rather than normalised, for the periods
+    that need one: defaulting it would silently invent a schedule, and `first_occurrence`
+    has no slot to open without it.
     """
-    interval = 1 if repeats == RepeatPeriod.manual else repeat_interval
+    if repeats == RepeatPeriod.manual:
+        return None, 1, None
+    if start_date is None:
+        raise ValueError("start_date is required unless the chore is unscheduled")
     if repeats != RepeatPeriod.weekly or not weekdays:
-        return interval, None
-    return interval, sorted(set(weekdays))
+        return start_date, repeat_interval, None
+    return start_date, repeat_interval, sorted(set(weekdays))
 
 
 class ChoreHouseholdRead(BaseModel):
@@ -50,7 +62,8 @@ class ChoreRead(BaseModel):
     id: int
     title: str
     description: str | None
-    start_date: date
+    # None for an unscheduled chore, which has no start date (see the model).
+    start_date: date | None
     repeats: RepeatPeriod
     assignment_type: AssignmentType
     # Completions one assignee holds before the chore hands off (1 = every completion).
@@ -67,7 +80,8 @@ class ChoreRead(BaseModel):
     # The full pool of people the chore can rotate between.
     assignees: list[UserRead]
     # Who is on the hook right now (the open occurrence's assignee); None when the
-    # chore is unassigned/shared or has no open occurrence (a completed one-off).
+    # chore is unassigned/shared. Every live chore has an open occurrence, whatever
+    # its period, so this is not a "no occurrence" signal.
     current_assignee: UserRead | None = None
     tags: list[TagRead]
 
@@ -76,7 +90,8 @@ class ChoreCreate(BaseModel):
     household_id: int
     title: str = Field(min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=2000)
-    start_date: date
+    # Required for every period but `manual`, where it is dropped; see _normalised_schedule.
+    start_date: date | None = None
     repeats: RepeatPeriod
     assignment_type: AssignmentType
     # >= 1; the "take turns" UI uses >= 2, 1 means hand off every completion.
@@ -93,11 +108,11 @@ class ChoreCreate(BaseModel):
     tag_ids: list[int] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _canonicalise_recurrence(self) -> Self:
+    def _canonicalise_schedule(self) -> Self:
         # Safe to assign in an "after" validator: validate_assignment is off, so this does
         # not re-trigger validation.
-        self.repeat_interval, self.weekdays = _normalised_recurrence(
-            self.repeats, self.repeat_interval, self.weekdays
+        self.start_date, self.repeat_interval, self.weekdays = _normalised_schedule(
+            self.repeats, self.start_date, self.repeat_interval, self.weekdays
         )
         return self
 
@@ -108,7 +123,7 @@ class ChoreUpdate(BaseModel):
 
     title: str = Field(min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=2000)
-    start_date: date
+    start_date: date | None = None
     repeats: RepeatPeriod
     assignment_type: AssignmentType
     turn_length: int = Field(default=1, ge=1)
@@ -119,8 +134,8 @@ class ChoreUpdate(BaseModel):
     tag_ids: list[int] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _canonicalise_recurrence(self) -> Self:
-        self.repeat_interval, self.weekdays = _normalised_recurrence(
-            self.repeats, self.repeat_interval, self.weekdays
+    def _canonicalise_schedule(self) -> Self:
+        self.start_date, self.repeat_interval, self.weekdays = _normalised_schedule(
+            self.repeats, self.start_date, self.repeat_interval, self.weekdays
         )
         return self

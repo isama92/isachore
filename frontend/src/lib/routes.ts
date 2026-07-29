@@ -16,6 +16,7 @@ export const routes = {
   invite: '/invite',
 
   home: '/',
+  unscheduled: '/unscheduled',
   profile: '/profile',
   history: '/history',
   statistics: '/statistics',

@@ -120,7 +120,10 @@ export default function ChoreCreate() {
   const initial: ChoreFormValues = {
     title: clone?.title ?? '',
     description: clone?.description ?? '',
-    start_date: clone?.start_date ?? todayISO(),
+    // `||`, not `??`: cloning an unscheduled chore carries '' (it has no start date), and
+    // the field should be ready with today's date if the period is switched to a recurring
+    // one. The form drops the value while the period stays unscheduled.
+    start_date: clone?.start_date || todayISO(),
     repeats: clone?.repeats ?? 'weekly',
     assignment_type: clone?.assignment_type ?? 'manual',
     turn_length: clone?.turn_length ?? 1,

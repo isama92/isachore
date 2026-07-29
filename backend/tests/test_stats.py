@@ -5,7 +5,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Chore, ChoreOccurrence, Household, OccurrenceStatus, User
+from app.models import Chore, ChoreOccurrence, Household, OccurrenceStatus, RepeatPeriod, User
 
 MakeUser = Callable[..., Awaitable[User]]
 MakeHousehold = Callable[..., Awaitable[Household]]
@@ -409,3 +409,106 @@ async def test_stats_null_completer_counts_in_totals_but_not_per_person(
     assert body["kpis"]["completed_in_range"] == 1
     assert body["punctuality"] == {"on_time": 1, "late": 0, "early": 0}
     assert body["per_person"] == []
+
+
+# --- unscheduled chores: counted as work done, ignored where a deadline is needed ---
+
+
+async def test_stats_unscheduled_is_absent_from_the_live_snapshot(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # An unscheduled chore's open occurrence has no due date to bucket, so it must not land
+    # in the status donut, "overdue now" or "active chores". Its slot sits weeks in the past
+    # on purpose: under a scheduled period that would read as overdue.
+    user = await make_user()
+    household = await make_household(members=[user])
+    await make_chore(
+        household=household,
+        title="Unscheduled",
+        start_date=NOW.date() - timedelta(days=20),
+        repeats=RepeatPeriod.manual,
+    )
+    await make_chore(
+        household=household,
+        title="Scheduled",
+        start_date=NOW.date() - timedelta(days=3),
+        repeats=RepeatPeriod.weekly,
+    )
+    client = await auth_client(user)
+
+    body = (await client.get("/api/v1/stats")).json()
+    # Only the scheduled chore counts, and the three buckets still sum to active_chores.
+    assert body["kpis"]["active_chores"] == 1
+    assert body["kpis"]["currently_overdue"] == 1
+    assert body["status_breakdown"] == {"overdue": 1, "today": 0, "soon": 0}
+    assert sum(body["status_breakdown"].values()) == body["kpis"]["active_chores"]
+
+
+async def test_stats_unscheduled_completion_counts_but_is_not_punctual(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    # Doing an unscheduled chore is work done: it counts in the total, the time chart and the
+    # per-person ranking. It just cannot be punctual, because its slot records when the chore
+    # became available rather than a deadline - read as lateness, this one would have scored
+    # 10 days late and dragged the on-time rate down with it.
+    user = await make_user()
+    household = await make_household(members=[user])
+    unscheduled = await make_chore(
+        household=household, repeats=RepeatPeriod.manual, with_occurrence=False
+    )
+    await make_occurrence(
+        chore=unscheduled,
+        scheduled_for=TODAY_START - timedelta(days=10),
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=NOW,
+    )
+    client = await auth_client(user)
+
+    body = (await client.get("/api/v1/stats")).json()
+    assert body["kpis"]["completed_in_range"] == 1
+    assert _buckets(body)[NOW.date().isoformat()] == 1
+    assert [(p["user_id"], p["count"]) for p in body["per_person"]] == [(user.id, 1)]
+    # Nothing punctual to report, so the rate is None rather than 0.0 or 1.0 - and
+    # punctuality deliberately does NOT sum to completed_in_range.
+    assert body["punctuality"] == {"on_time": 0, "late": 0, "early": 0}
+    assert body["kpis"]["on_time_rate"] is None
+
+
+async def test_stats_on_time_rate_ignores_unscheduled_completions(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    # The rate's denominator is the scheduled completions alone. One scheduled chore done on
+    # time plus one unscheduled chore done gives 1.0, not the 0.5 a total-based denominator
+    # would produce.
+    user = await make_user()
+    household = await make_household(members=[user])
+    scheduled = await make_chore(household=household, with_occurrence=False)
+    unscheduled = await make_chore(
+        household=household, repeats=RepeatPeriod.manual, with_occurrence=False
+    )
+    for chore in (scheduled, unscheduled):
+        await make_occurrence(
+            chore=chore,
+            scheduled_for=TODAY_START,
+            status=OccurrenceStatus.done,
+            completed_by=user,
+            completed_at=NOW,
+        )
+    client = await auth_client(user)
+
+    body = (await client.get("/api/v1/stats")).json()
+    assert body["kpis"]["completed_in_range"] == 2
+    assert body["punctuality"] == {"on_time": 1, "late": 0, "early": 0}
+    assert body["kpis"]["on_time_rate"] == 1.0

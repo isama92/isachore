@@ -27,6 +27,27 @@ class DueChoreRead(BaseModel):
     assignees: list[HouseholdMemberRead]
 
 
+class UnscheduledChoreRead(BaseModel):
+    """An unscheduled chore, as its own view lists it. Deliberately carries no due state:
+    there is no deadline to report, and keeping `next_due` / `days_until_due` / `status` off
+    the wire is what stops the due vocabulary creeping back into a view that has none. It
+    reports how long since the chore was last done instead, which is what you actually want
+    to know about something you do ad hoc. `repeats` is omitted too: every item here is
+    unscheduled, so the label would be noise."""
+
+    id: int
+    title: str
+    # Whole UTC days since the last completion (0 = earlier today), or None if the chore has
+    # never been done. Drives both the row's label and its recency dot.
+    days_since_last_completion: int | None
+    household: ChoreHouseholdRead
+    assignees: list[HouseholdMemberRead]
+
+
+class UnscheduledRead(BaseModel):
+    items: list[UnscheduledChoreRead]
+
+
 class ProgressRead(BaseModel):
     """Today's progress: how many of the overdue-or-due-today chores are done."""
 
@@ -49,8 +70,9 @@ class CompleteChoreRequest(BaseModel):
 
 
 class CompletionRead(BaseModel):
-    """The result of marking a chore done: the recorded completion plus the
-    chore's recomputed due state (None fields when a manual one-off is now done)."""
+    """The result of marking a chore done: the recorded completion plus the chore's
+    recomputed due state. Always populated, since completing a chore always reopens it
+    (an unscheduled chore reopens at the completion moment, so it reads as due today)."""
 
     id: int
     chore_id: int
@@ -58,6 +80,6 @@ class CompletionRead(BaseModel):
     scheduled_for: datetime
     completed_by_user_id: int | None
     created_at: datetime
-    next_due: datetime | None
-    days_until_due: int | None
-    status: DueStatus | None
+    next_due: datetime
+    days_until_due: int
+    status: DueStatus

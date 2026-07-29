@@ -6,6 +6,8 @@ from app.schemas.home import (
     DueChoreRead,
     HomeRead,
     ProgressRead,
+    UnscheduledChoreRead,
+    UnscheduledRead,
 )
 from app.schemas.household import (
     HouseholdCreate,
@@ -69,6 +71,8 @@ __all__ = [
     "TwoFactorDisableRequest",
     "TwoFactorSetupRead",
     "TwoFactorVerifyRequest",
+    "UnscheduledChoreRead",
+    "UnscheduledRead",
     "UserCreate",
     "UserRead",
     "UserUpdate",

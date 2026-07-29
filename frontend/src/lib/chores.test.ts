@@ -84,9 +84,9 @@ describe('repeatLabel', () => {
     expect(repeatLabel(t, schedule('weekly', 1, []))).toBe('Weekly')
   })
 
-  it('never applies an interval or weekdays to a one-off', () => {
-    expect(repeatLabel(t, schedule('manual'))).toBe('Manual')
-    expect(repeatLabel(t, schedule('manual', 3, [1]))).toBe('Manual')
+  it('never applies an interval or weekdays to an unscheduled chore', () => {
+    expect(repeatLabel(t, schedule('manual'))).toBe('Unscheduled')
+    expect(repeatLabel(t, schedule('manual', 3, [1]))).toBe('Unscheduled')
   })
 
   it('drops an out-of-range weekday rather than rendering a missing key', () => {
