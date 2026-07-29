@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import { api, setUnauthorizedHandler } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
 import type { LoginResponse, Me, User } from '../lib/types'
-import { clearTableSettings } from '../components/data-table/useServerTable'
+import { claimTableSettings, clearTableSettings } from '../components/data-table/useServerTable'
 import { useTheme } from '../theme/useTheme'
 import i18n, { changeLanguage } from '../i18n/i18n'
 import { AuthContext } from './context'
@@ -38,6 +38,13 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       .get<Me>(endpoints.auth.me)
       .then((me) => {
         if (cancelled) return
+        // Every place a user is adopted claims the remembered table settings: here,
+        // login, verifyTwoFactor, and refresh (which is where impersonation starting
+        // and stopping both land). Filters name colleagues and households and the
+        // admin tables save search terms, so they must not cross accounts; the claim
+        // clears them only when the account actually differs, since a profile save
+        // refreshes too. Session ENDS clear outright, in handleExpiry and logout.
+        claimTableSettings(me.id)
         setUser(me)
         setImpersonating(me.impersonating)
         syncAppearance(me)
@@ -83,22 +90,10 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     return () => setUnauthorizedHandler(null)
   }, [handleExpiry])
 
-  // Remembered table settings include filters that name colleagues and households,
-  // and free-text search terms on the admin tables, so they must never cross from one
-  // account to another. Called wherever the identity behind the session changes: a
-  // different login, and impersonation starting or stopping (both of which land here
-  // through refresh). Deliberately keyed on the id changing rather than on being
-  // called, because every profile save also refreshes, and forgetting your own
-  // filters on each of those would be its own bug. Session *ends* clear
-  // unconditionally instead, in logout and handleExpiry.
-  const forgetTablesIfDifferentUser = useCallback((next: User) => {
-    if (userRef.current && userRef.current.id !== next.id) clearTableSettings()
-  }, [])
-
   const refresh = useCallback(async () => {
     try {
       const me = await api.get<Me>(endpoints.auth.me)
-      forgetTablesIfDifferentUser(me)
+      claimTableSettings(me.id)
       setUser(me)
       setImpersonating(me.impersonating)
       syncAppearance(me)
@@ -106,7 +101,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null)
       setImpersonating(false)
     }
-  }, [syncAppearance, forgetTablesIfDifferentUser])
+  }, [syncAppearance])
 
   const login = useCallback(
     async (email: string, password: string, remember: boolean) => {
@@ -116,24 +111,24 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       if (res.two_factor_required || !res.user) {
         return { twoFactorRequired: res.two_factor_required }
       }
-      forgetTablesIfDifferentUser(res.user)
+      claimTableSettings(res.user.id)
       setUser(res.user)
       setImpersonating(false)
       syncAppearance(res.user)
       return { twoFactorRequired: false }
     },
-    [syncAppearance, forgetTablesIfDifferentUser],
+    [syncAppearance],
   )
 
   const verifyTwoFactor = useCallback(
     async (code: string) => {
       const me = await api.post<User>(endpoints.auth.verifyTwoFactor, { code })
-      forgetTablesIfDifferentUser(me)
+      claimTableSettings(me.id)
       setUser(me)
       setImpersonating(false)
       syncAppearance(me)
     },
-    [syncAppearance, forgetTablesIfDifferentUser],
+    [syncAppearance],
   )
 
   const logout = useCallback(async () => {

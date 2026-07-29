@@ -141,19 +141,57 @@ function clearSettings(key: string): void {
   }
 }
 
+// Which account the remembered settings belong to. Deliberately outside
+// STORAGE_PREFIX so the sweep below can never mistake it for some table's settings,
+// and removed alongside them.
+const OWNER_KEY = 'isachore-tables-owner'
+
 /**
- * Forget every table's remembered settings. Called on logout: the saved filters
- * name colleagues and households (`user_id`, `household_id`) and the admin tables
- * save name/email search terms, so on a shared device the next person to sign in
- * would otherwise inherit them. Keyed off the prefix rather than a list, so a table
- * added later is covered without anyone remembering to register it.
+ * Forget every table's remembered settings. Called when a session ends (logout, a
+ * 401 expiry): the saved filters name colleagues and households (`user_id`,
+ * `household_id`) and the admin tables save name/email search terms, so on a shared
+ * device the next person to sign in would otherwise inherit them. Keyed off the
+ * prefix rather than a list, so a table added later is covered without anyone
+ * remembering to register it.
  */
 export function clearTableSettings(): void {
   try {
     const keys = Object.keys(localStorage).filter((key) => key.startsWith(STORAGE_PREFIX))
     for (const key of keys) localStorage.removeItem(key)
+    localStorage.removeItem(OWNER_KEY)
   } catch {
     // Storage unavailable: nothing was saved to forget.
+  }
+}
+
+/**
+ * Hand the remembered settings to `userId`, forgetting them first if they belonged
+ * to anyone else.
+ *
+ * The owner is persisted rather than compared in memory so the check survives a page
+ * load, which is the whole point: someone who closes the tab without logging out
+ * leaves no id behind, and once their cookie lapses the next account to sign in would
+ * inherit their filters. Ids get pruned by the pages that offer them, but the admin
+ * tables' name/email search terms do not, so that is the value this protects.
+ *
+ * Settings with no recorded owner cannot be attributed, so they are forgotten too.
+ * That costs everyone their table preferences once, on the first sign-in after this
+ * ships, and is a no-op on a browser that has none.
+ *
+ * Storing the last account's id is itself a small identifier, and a far smaller one
+ * than the search terms it stops leaking.
+ */
+export function claimTableSettings(userId: number): void {
+  try {
+    const owner = localStorage.getItem(OWNER_KEY)
+    if (owner !== String(userId)) {
+      const unattributed =
+        owner === null && Object.keys(localStorage).some((key) => key.startsWith(STORAGE_PREFIX))
+      if (owner !== null || unattributed) clearTableSettings()
+    }
+    localStorage.setItem(OWNER_KEY, String(userId))
+  } catch {
+    // Storage unavailable: nothing is remembered, so nothing can leak.
   }
 }
 
@@ -311,9 +349,14 @@ export function useServerTable<Row, Filters extends FilterSet = FilterSet>({
         // reload recovers. Resetting also stops the write effect persisting the
         // rejected value again. Only the param-validation statuses: a 401/403/404/5xx
         // is not the stored state's fault, and throwing away a valid saved sort over
-        // a network blip would be its own bug. A rejected value spelled out in the
-        // URL is deliberately left alone: it is not storage's doing, and the user can
-        // navigate away from it.
+        // a network blip would be its own bug.
+        //
+        // It does not check WHERE the rejected parameter came from, so opening a stale
+        // shared link also forgets that table's saved settings, even though storage
+        // was innocent. Accepted rather than fixed: telling the two apart would mean
+        // tracking each parameter's origin, and the cost is one preference set on a
+        // link that was already broken. The URL itself is left as it is, since nothing
+        // here navigates and the user can leave it.
         if (storageKey && err instanceof ApiError && (err.status === 400 || err.status === 422)) {
           clearSettings(storageKey)
           setDefaults(pageDefaults)

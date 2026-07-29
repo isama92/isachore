@@ -225,8 +225,9 @@ pre-commit run --all-files                           # what the git hook runs
   non-empty pool. The load-bearing part is that `current_assignee_id` stays derived
   against the live pool: that is what lets the payload gate more loosely than the
   render (on the strategy, not also on the pool) and still never submit a stale or
-  hidden value, since an empty pool forces `null` either way. For the auto strategies an override lasts until the next
-  turn boundary, since completing re-derives through `_successor_assignee` — which
+  hidden value, since an empty pool forces `null` either way. For the auto strategies
+  an override lasts until the next turn boundary, because completing re-derives
+  through `_successor_assignee` — which
   is what the `currentAssigneeTurnHint` copy promises the user, so keep them in
   step. One dead end, pre-existing and not worth its own flag on `ChoreRead`: a
   completed one-off (`repeats: 'manual'`, no open occurrence, a *different* field
