@@ -27,6 +27,7 @@ import Profile from './pages/Profile'
 import TagCreate from './pages/TagCreate'
 import TagEdit from './pages/TagEdit'
 import Tags from './pages/Tags'
+import Unscheduled from './pages/Unscheduled'
 
 // Recharts is heavy and only the Statistics page uses it, so that page is
 // code-split into its own chunk and loaded on demand (kept out of the initial
@@ -52,6 +53,7 @@ export default function App() {
       <Route path={routes.invite} element={<AcceptInvite />} />
       <Route element={<RequireAuth />}>
         <Route path={routes.home} element={<Home />} />
+        <Route path={routes.unscheduled} element={<Unscheduled />} />
         <Route path={routes.profile} element={<Profile />} />
         <Route path={routes.chores.list} element={<Chores />} />
         <Route path={routes.chores.new} element={<ChoreCreate />} />

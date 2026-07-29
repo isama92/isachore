@@ -442,10 +442,12 @@ async def test_seed_creates_expected_dataset(db_session) -> None:
     ).all()
     assert dupes == []
 
-    # A completed one-off keeps its done row but has no open occurrence (gone from Home).
+    # A completed unscheduled chore keeps its done row AND stays open: it is repeatable on
+    # demand, so it never terminates. It also stores no start date.
     bookshelf = await db_session.scalar(
         select(Chore).where(Chore.title == "Assemble the bookshelf")
     )
+    assert bookshelf.start_date is None
     open_for_bookshelf = await db_session.scalar(
         select(func.count())
         .select_from(ChoreOccurrence)
@@ -454,7 +456,16 @@ async def test_seed_creates_expected_dataset(db_session) -> None:
             ChoreOccurrence.status == OccurrenceStatus.open,
         )
     )
-    assert open_for_bookshelf == 0
+    assert open_for_bookshelf == 1
+    done_for_bookshelf = await db_session.scalar(
+        select(func.count())
+        .select_from(ChoreOccurrence)
+        .where(
+            ChoreOccurrence.chore_id == bookshelf.id,
+            ChoreOccurrence.status == OccurrenceStatus.done,
+        )
+    )
+    assert done_for_bookshelf == 1
 
     # An unassigned (shared) chore exists: its open occurrence has no assignee.
     tidy = await db_session.scalar(select(Chore).where(Chore.title == "Tidy the shared shelf"))

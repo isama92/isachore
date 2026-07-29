@@ -6,7 +6,8 @@ fall on the recurrence grid. `first_occurrence` gives a chore's opening slot, an
 `next_occurrence_after` gives the slot that follows completing one: it stays on the
 grid, so an early completion advances exactly one slot while an overdue one skips the
 missed slots and jumps to the next future one (see `advance_anchor`, its internal
-helper). `manual` chores are one-offs with no next occurrence.
+helper). `manual` chores are unscheduled rather than one-off: they have no grid, so they
+reopen at the moment they were completed and are never treated as due.
 
 A `RecurrenceRule` bundles the period with how many periods to skip (`interval`) and,
 for `weekly`, which weekdays the chore lands on. The rule deliberately does NOT carry
@@ -130,8 +131,8 @@ def _weekly_step(weekday: int, rule: RecurrenceRule) -> int:
 
 def next_slot_after(dt: datetime, rule: RecurrenceRule) -> datetime:
     """The next slot strictly after `dt`, preserving its time-of-day and tzinfo. Never
-    call with `manual`, which has no interval (`next_occurrence_after` returns None for a
-    one-off before it gets here)."""
+    call with `manual`, which has no grid to step along (`next_occurrence_after` reopens an
+    unscheduled chore at its completion moment before it gets here)."""
     match rule.repeats:
         case RepeatPeriod.daily:
             return dt + timedelta(days=rule.interval)
@@ -185,7 +186,9 @@ def advance_anchor(
     long-neglected daily chore costs a few thousand trivial iterations once.
     """
     if rule.repeats == RepeatPeriod.manual:
-        # A one-off has no interval; next_occurrence_after returns None for it anyway.
+        # Unreachable from next_occurrence_after, which handles `manual` before it gets
+        # here. Kept so a direct call cannot reach next_slot_after's ValueError: an
+        # unscheduled chore has no grid to roll forward on, so its slot stands.
         return scheduled_for
     completed_date = completed_at.astimezone(UTC).date()
     anchor = scheduled_for
@@ -209,16 +212,23 @@ def first_occurrence(start_date: date, rule: RecurrenceRule) -> datetime:
 
 def next_occurrence_after(
     scheduled_for: datetime, completed_at: datetime, rule: RecurrenceRule
-) -> datetime | None:
+) -> datetime:
     """The due datetime of the occurrence following completion of `scheduled_for` at
-    `completed_at`, or None for a `manual` one-off (which has no next occurrence).
+    `completed_at`. Every period yields one, so a chore always has an open occurrence.
 
-    Composes advance_anchor (roll forward on the grid, skipping occurrences on or before
-    the completion date) with one more step, so an early completion advances exactly one
-    slot and an overdue one jumps to the next future slot - schedule-anchored recurrence,
-    stamped onto the successor occurrence row."""
+    For `manual` that is the completion moment itself: an unscheduled chore is repeatable
+    on demand, so it reopens immediately, and its `scheduled_for` reads as "open since"
+    rather than a deadline (nothing ever treats an unscheduled chore as due, see
+    `app/api/v1/unscheduled.py`). The full timestamp, not its midnight, because
+    `uq_occurrence_chore_scheduled` is per (chore, scheduled_for): a date would collide
+    the second time the chore was done in one day.
+
+    For the recurring periods, composes advance_anchor (roll forward on the grid, skipping
+    occurrences on or before the completion date) with one more step, so an early completion
+    advances exactly one slot and an overdue one jumps to the next future slot -
+    schedule-anchored recurrence, stamped onto the successor occurrence row."""
     if rule.repeats == RepeatPeriod.manual:
-        return None
+        return completed_at
     return next_slot_after(advance_anchor(scheduled_for, completed_at, rule), rule)
 
 
@@ -226,6 +236,14 @@ def days_until_due(due: datetime, now: datetime) -> int:
     """Whole days from now's UTC date to the due date (negative = overdue).
     Date-based so a chore due at 00:00 today reads as due today, not overdue."""
     return (due.astimezone(UTC).date() - now.astimezone(UTC).date()).days
+
+
+def days_since(moment: datetime, now: datetime) -> int:
+    """Whole days from `moment`'s UTC date to now's (0 = earlier today, 1 = yesterday).
+    The mirror of days_until_due for a past moment, on the same date-based UTC-day
+    convention: what the unscheduled view reports instead of a due date, since those
+    chores are measured by how long since they were last done."""
+    return (now.astimezone(UTC).date() - moment.astimezone(UTC).date()).days
 
 
 def days_late(scheduled_for: datetime, completed_at: datetime) -> int:

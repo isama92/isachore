@@ -15,6 +15,7 @@ from app.api.v1 import (
     stats,
     tags,
     two_factor,
+    unscheduled,
     users,
 )
 
@@ -27,6 +28,7 @@ api_router.include_router(server_settings.router, prefix="/settings", tags=["set
 api_router.include_router(profile.router, prefix="/profile", tags=["profile"])
 api_router.include_router(two_factor.router, prefix="/profile/2fa", tags=["two-factor"])
 api_router.include_router(home.router, prefix="/home", tags=["home"])
+api_router.include_router(unscheduled.router, prefix="/unscheduled", tags=["unscheduled"])
 api_router.include_router(households.router, prefix="/households", tags=["households"])
 api_router.include_router(
     admin_households.router, prefix="/admin/households", tags=["admin-households"]

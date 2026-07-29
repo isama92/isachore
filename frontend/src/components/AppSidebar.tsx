@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation } from 'react-router'
 import {
+  CalendarOff,
   ChartColumn,
   ChevronRight,
   CircleUser,
@@ -47,6 +48,7 @@ export default function AppSidebar() {
 
   const items = [
     { to: routes.home, icon: Home, label: t('sidebar.home') },
+    { to: routes.unscheduled, icon: CalendarOff, label: t('sidebar.unscheduled') },
     { to: routes.history, icon: History, label: t('sidebar.history') },
     { to: routes.statistics, icon: ChartColumn, label: t('sidebar.statistics') },
     { to: routes.tags.list, icon: TagIcon, label: t('sidebar.tags') },

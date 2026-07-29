@@ -24,6 +24,8 @@ export const endpoints = {
   },
 
   home: `${V1}/home`,
+  // The chores with no schedule, which the due view above deliberately omits.
+  unscheduled: `${V1}/unscheduled`,
 
   profile: {
     root: `${V1}/profile`,

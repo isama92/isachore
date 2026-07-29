@@ -908,21 +908,32 @@ async def test_update_chore_start_date_moves_due_date_before_completion(
     assert occ.scheduled_for == datetime(2026, 8, 1, tzinfo=UTC)
 
 
-async def test_update_chore_revives_completed_one_off_into_recurring(
+async def test_update_chore_revives_a_chore_with_no_open_occurrence(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
     auth_client: AuthClient,
 ) -> None:
-    # Editing a done one-off into a recurring chore materialises a fresh open
-    # occurrence, so it becomes due (and completable) again instead of staying dead.
+    # A chore with completion history but no open occurrence: what the pre-unscheduled
+    # one-off semantics left behind (the migration reopens those, and a concurrent undo can
+    # produce it too). Editing it materialises a fresh open occurrence rather than leaving a
+    # chore nothing can ever complete.
     user = await make_user()
     household = await make_household(members=[user])
     today = datetime.now(UTC).date()
-    chore = await make_chore(household=household, start_date=today, repeats=RepeatPeriod.manual)
+    chore = await make_chore(
+        household=household, repeats=RepeatPeriod.manual, with_occurrence=False
+    )
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=datetime(2026, 7, 14, tzinfo=UTC),
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=datetime(2026, 7, 14, 9, 0, tzinfo=UTC),
+    )
     client = await auth_client(user)
 
-    assert (await client.post(f"/api/v1/chores/{chore.id}/complete")).status_code == 201
     assert (await client.post(f"/api/v1/chores/{chore.id}/complete")).status_code == 409  # dead
 
     resp = await client.patch(
@@ -1107,7 +1118,7 @@ async def test_create_chore_drops_weekdays_for_a_non_weekly_period(
     assert resp.json()["weekdays"] is None
 
 
-async def test_create_chore_forces_interval_to_one_for_a_one_off(
+async def test_create_chore_forces_interval_to_one_when_unscheduled(
     make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
 ) -> None:
     # A `manual` chore never recurs, so repeat_interval > 1 in the DB always implies
@@ -1122,6 +1133,48 @@ async def test_create_chore_forces_interval_to_one_for_a_one_off(
     )
     assert resp.status_code == 201
     assert resp.json()["repeat_interval"] == 1
+
+
+async def test_create_unscheduled_chore_drops_the_start_date(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    # An unscheduled chore has no start: the date is dropped rather than rejected (the same
+    # ignore-when-irrelevant rule as repeat_interval above, so a form that has not cleared
+    # the field yet still works), and its first occurrence opens at creation time instead.
+    user = await make_user()
+    household = await make_household(members=[user])
+    client = await auth_client(user)
+    before = datetime.now(UTC)
+
+    resp = await client.post(
+        "/api/v1/chores",
+        json=_payload(household_id=household.id, repeats="manual", start_date="2020-01-01"),
+    )
+    assert resp.status_code == 201
+    assert resp.json()["start_date"] is None
+    # Opened now, NOT at the 2020 date it was told: an unscheduled chore that dated its slot
+    # from a stale payload would read as "waiting since 2020".
+    assert before <= await _open_slot(db_session, resp.json()["id"]) <= datetime.now(UTC)
+
+
+async def test_create_chore_without_start_date_is_rejected_when_it_recurs(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    # The one part of the schedule that is rejected rather than normalised: a recurring chore
+    # needs a start date to seed its first slot, and defaulting it would silently invent a
+    # schedule. Sent WITH a recurring period, so this pins the requirement rather than the
+    # unscheduled path that drops the field.
+    user = await make_user()
+    household = await make_household(members=[user])
+    client = await auth_client(user)
+
+    payload = _payload(household_id=household.id, repeats="weekly")
+    del payload["start_date"]
+    resp = await client.post("/api/v1/chores", json=payload)
+    assert resp.status_code == 422
 
 
 async def test_create_chore_defaults_the_recurrence_fields(
@@ -1349,10 +1402,55 @@ async def test_update_chore_weekly_to_manual_keeps_the_slot_and_completes_once(
     resp = await client.patch(f"/api/v1/chores/{chore.id}", json=_payload(repeats="manual"))
     assert resp.status_code == 200
     assert resp.json()["weekdays"] is None
-    # A one-off keeps the due date it already had, then dies after a single completion.
+    # Going unscheduled drops the start date, and the open slot stands: there is no grid
+    # left to snap it to, and it now records availability rather than a due date.
+    assert resp.json()["start_date"] is None
     assert await _open_slot(db_session, chore.id) == datetime(2026, 7, 21, tzinfo=UTC)
+    # ...and it stays completable, over and over, rather than dying after one completion.
     assert (await client.post(f"/api/v1/chores/{chore.id}/complete")).status_code == 201
-    assert (await client.post(f"/api/v1/chores/{chore.id}/complete")).status_code == 409
+    assert (await client.post(f"/api/v1/chores/{chore.id}/complete")).status_code == 201
+
+
+async def test_update_chore_unscheduled_to_recurring_restarts_from_the_new_date(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    # An unscheduled chore's open slot is its last completion moment ("available since"), not
+    # a grid position, so giving the chore a schedule has to re-seed the slot from the start
+    # date the user picked. Snapping it instead would hand a non-deadline to the due
+    # machinery and land a chore dated "today" a month overdue.
+    user = await make_user()
+    household = await make_household(members=[user])
+    today = datetime.now(UTC).date()
+    chore = await make_chore(
+        household=household, repeats=RepeatPeriod.manual, with_occurrence=False
+    )
+    # Done 30 days ago, and reopened at that moment (what completing an unscheduled chore
+    # writes). The completion is what makes this the case snap_to_slot used to mishandle.
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=datetime.now(UTC) - timedelta(days=40),
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=datetime.now(UTC) - timedelta(days=30),
+    )
+    await make_occurrence(chore=chore, scheduled_for=datetime.now(UTC) - timedelta(days=30))
+    client = await auth_client(user)
+
+    resp = await client.patch(
+        f"/api/v1/chores/{chore.id}", json=_payload(repeats="daily", start_date=today.isoformat())
+    )
+    assert resp.status_code == 200
+
+    midnight_today = datetime(today.year, today.month, today.day, tzinfo=UTC)
+    assert await _open_slot(db_session, chore.id) == midnight_today
+    # ...and it therefore reads as due today rather than a month overdue.
+    home = (await client.get("/api/v1/home")).json()
+    assert [(i["title"], i["days_until_due"]) for i in home["items"]] == [(chore.title, 0)]
 
 
 async def test_update_chore_full_replace_resets_the_recurrence_fields(

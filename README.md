@@ -6,8 +6,10 @@ mobile clients can join later.
 
 Features: multi-user households with invitations and ownership transfer, chores
 with four assignment strategies (manual, alphabetical, least-done, random) and
-turn-taking rotation, a Home due view with one-tap completion and daily progress,
-completion history, per-household tags, a Statistics page, admin user and
+turn-taking rotation, a Your Chores due view with one-tap completion and daily
+progress, a separate Unscheduled Chores view for the ones you do whenever you feel
+like it (never due, repeatable on demand, showing how long since each was last
+done), completion history, per-household tags, a Statistics page, admin user and
 household management with impersonation, English/Italian UI, per-user theming,
 optional TOTP two-factor authentication, and optional email-based account
 confirmation.
@@ -547,7 +549,6 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
 
 ### Todo
 
-- [ ] Occasional tasks should be show in another panel
 - [ ] Add a skip button (next to complete), and change the charts to also show the skipped chores
 - [ ] Live updates when a housemate completes a chore (websocket)
 - [ ] Chore change log (who changed what)

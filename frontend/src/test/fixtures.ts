@@ -10,6 +10,7 @@ import type {
   ServerSettings,
   StatsData,
   Tag,
+  UnscheduledChore,
   User,
 } from '../lib/types'
 
@@ -169,6 +170,19 @@ export function makeDueChore(overrides: Partial<DueChore> = {}): DueChore {
     next_due: '2026-07-20T09:00:00Z',
     days_until_due: 2,
     status: 'soon',
+    household: { id: 1, name: 'Test Household' },
+    assignees: [],
+    ...overrides,
+  }
+}
+
+// A row of the unscheduled view. Defaults to "done four days ago", i.e. the middle
+// (amber) recency bucket, so a test has to opt in to the today/never edges.
+export function makeUnscheduledChore(overrides: Partial<UnscheduledChore> = {}): UnscheduledChore {
+  return {
+    id: 1,
+    title: 'Descale the kettle',
+    days_since_last_completion: 4,
     household: { id: 1, name: 'Test Household' },
     assignees: [],
     ...overrides,

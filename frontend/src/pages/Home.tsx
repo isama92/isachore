@@ -1,135 +1,29 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { TFunction } from 'i18next'
-import { CheckIcon } from 'lucide-react'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
 import { repeatLabel } from '../lib/chores'
 import { formatDateTime } from '../lib/format'
 import { dueDotClass, groupByDue, relativeDueLabel } from '../lib/home'
-import { fullName } from '../lib/user'
-import type { DueChore, HistoryFilterOptions, HomeData } from '../lib/types'
-import { AssigneeMultiSelect } from '@/components/home/AssigneeMultiSelect'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
-import { Button } from '@/components/ui/button'
+import type { DueChore, HomeData } from '../lib/types'
+import ChoreFilters from '@/components/chores/ChoreFilters'
+import ChoreRow from '@/components/chores/ChoreRow'
+import CreditDialog from '@/components/chores/CreditDialog'
+import { useFilterOptions } from '@/components/chores/useFilterOptions'
+import { fullName } from '@/lib/user'
 import { Progress } from '@/components/ui/progress'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 
 // How long the row's exit animation runs; the row is removed from the list once
-// it finishes. Kept in sync with the `duration-[..]` classes on DueRow.
+// it finishes. Kept in sync with the `duration-[..]` classes on ChoreRow.
 const EXIT_MS = 420
-
-// Radix Selects can't hold an empty value, so the "all" option uses a sentinel
-// that maps back to an omitted filter (same pattern as History).
-const ALL = 'all'
-
-const EMPTY_OPTIONS: HistoryFilterOptions = { households: [], members: [] }
 
 function prefersReducedMotion(): boolean {
   return (
     typeof window !== 'undefined' &&
     typeof window.matchMedia === 'function' &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  )
-}
-
-// One due chore: a colour-coded status dot + title + a short due label / date /
-// repeat, the assignee ("who is this for"), and a "Done" button. On completion
-// the row plays an exit animation driven by `exiting`, so the rows below glide
-// up. Module-local (not exported) so Home.tsx keeps a single default export
-// (react-refresh only-export-components).
-function DueRow({
-  chore,
-  t,
-  showHousehold,
-  exiting,
-  onComplete,
-}: {
-  chore: DueChore
-  t: TFunction
-  showHousehold: boolean
-  exiting: boolean
-  onComplete: (chore: DueChore) => void
-}) {
-  const assignee =
-    chore.assignees.length === 0 ? t('home.unassigned') : chore.assignees.map(fullName).join(', ')
-  return (
-    <li
-      data-exiting={exiting || undefined}
-      className={cn(
-        'group grid grid-rows-[1fr] mb-2 transition-[grid-template-rows,opacity,margin] duration-[420ms] ease-out last:mb-0 motion-reduce:transition-none',
-        'data-[exiting]:pointer-events-none data-[exiting]:mb-0 data-[exiting]:grid-rows-[0fr] data-[exiting]:opacity-0',
-      )}
-    >
-      <div className="overflow-hidden">
-        <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-3.5 transition-transform duration-[420ms] ease-out group-data-[exiting]:-translate-x-3 group-data-[exiting]:scale-[0.97] motion-reduce:transition-none">
-          <span
-            className={cn('inline-block size-2.5 shrink-0 rounded-full', dueDotClass(chore))}
-            aria-hidden
-          />
-          <div className="min-w-0 flex-1">
-            <p className="truncate font-semibold">{chore.title}</p>
-            <p className="mt-0.5 text-[13px] font-medium text-muted-foreground">
-              {relativeDueLabel(t, chore)}
-              {' · '}
-              {formatDateTime(chore.next_due)}
-              {' · '}
-              {repeatLabel(t, chore)}
-            </p>
-            {/* On mobile the right-hand column is too cramped, so the assignee
-                (and household, for multi-household users) stack here under the
-                due line. Hidden from sm up, where the right column takes over. */}
-            <p className="mt-0.5 truncate text-[13px] font-medium text-muted-foreground sm:hidden">
-              {assignee}
-              {showHousehold && (
-                <span className="text-muted-foreground/70"> · {chore.household.name}</span>
-              )}
-            </p>
-          </div>
-          {/* From sm up: who this is for, and (for multi-household users) which
-              household, right-aligned in its own column. */}
-          <div className="hidden max-w-[9rem] shrink-0 flex-col items-end text-right sm:flex">
-            <span className="w-full truncate text-[13px] font-medium text-muted-foreground">
-              {assignee}
-            </span>
-            {showHousehold && (
-              <span className="w-full truncate text-[11px] font-medium text-muted-foreground/70">
-                {chore.household.name}
-              </span>
-            )}
-          </div>
-          {/* Outline pill in the active accent (--primary) that fills on hover. */}
-          <Button
-            type="button"
-            variant="ghost"
-            disabled={exiting}
-            aria-label={t('home.markDone', { title: chore.title })}
-            onClick={() => onComplete(chore)}
-            className="shrink-0 border-primary text-primary hover:bg-primary hover:text-primary-foreground hover:shadow-glow dark:hover:bg-primary"
-          >
-            <CheckIcon />
-            {t('home.done')}
-          </Button>
-        </div>
-      </div>
-    </li>
   )
 }
 
@@ -145,7 +39,7 @@ export default function Home() {
   // when completing a chore assigned to someone other than the current user.
   const [creditFor, setCreditFor] = useState<DueChore | null>(null)
 
-  const [options, setOptions] = useState<HistoryFilterOptions>(EMPTY_OPTIONS)
+  const options = useFilterOptions()
   const [householdId, setHouseholdId] = useState('')
   // Default view: your chores + shared. Seed the assignee filter with yourself;
   // adding members widens it, clearing it shows the whole household.
@@ -154,22 +48,6 @@ export default function Home() {
   // Monotonic request id so a slow response (a filter change or a completion
   // refetch) can't overwrite a newer one; only the latest applies.
   const reqRef = useRef(0)
-
-  // The household + member option lists for the filters (shared with History).
-  useEffect(() => {
-    let cancelled = false
-    api
-      .get<HistoryFilterOptions>(endpoints.completions.filters)
-      .then((opts) => {
-        if (!cancelled) setOptions(opts)
-      })
-      .catch(() => {
-        if (!cancelled) setOptions(EMPTY_OPTIONS)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
 
   // The current query URL: the filters are per-request state appended to the path.
   const query = useMemo(() => {
@@ -213,8 +91,8 @@ export default function Home() {
     if (exiting.has(chore.id)) return // ignore repeat clicks while a row animates out
     setError(null)
     // Play the exit animation for responsiveness, then reconcile the whole view
-    // from the server rather than guessing locally: a completed one-off
-    // disappears and a recurring chore reappears at its next occurrence.
+    // from the server rather than guessing locally: a recurring chore reappears at
+    // its next occurrence, at a date this page may no longer be showing.
     setExiting((s) => new Set(s).add(chore.id))
 
     const stopExiting = () =>
@@ -265,67 +143,41 @@ export default function Home() {
     if (chore) completeChore(chore, completedByUserId)
   }
 
-  const isPersonal = !!user && assigneeIds.length === 1 && assigneeIds[0] === user.id
-  const heading = isPersonal ? t('home.titleMine') : t('home.titleHousehold')
   const left = data ? data.progress.total_today - data.progress.done_today : 0
   const pct =
     data && data.progress.total_today > 0
       ? Math.min(100, Math.round((data.progress.done_today / data.progress.total_today) * 100))
       : 0
 
-  const showFilters = options.households.length > 1 || options.members.length > 1
   // Only label the household when the user actually spans more than one.
   const multiHousehold = options.households.length > 1
 
+  // The page carries no heading: the sidebar already says which view this is, and the
+  // filters are what the user reaches for. Which block comes first therefore depends on
+  // state, so each top-level block drops its own top margin when it lands first
+  // (`first:mt-0`) and sits flush against main's own py-8.
   return (
     <main className="mx-auto w-full max-w-3xl px-5 py-8">
-      <h1 className="font-display text-2xl font-bold tracking-tight">{heading}</h1>
+      {error && <p className="mt-4 text-[13px] font-bold text-danger first:mt-0">{error}</p>}
 
-      {error && <p className="mt-4 text-[13px] font-bold text-danger">{error}</p>}
-
-      {showFilters && (
-        <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-          {options.households.length > 1 && (
-            <Select
-              value={householdId || ALL}
-              onValueChange={(v) => setHouseholdId(v === ALL ? '' : v)}
-            >
-              <SelectTrigger className="sm:w-56" aria-label={t('home.filters.householdLabel')}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>{t('home.filters.householdAll')}</SelectItem>
-                {options.households.map((h) => (
-                  <SelectItem key={h.id} value={String(h.id)}>
-                    {h.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-          {options.members.length > 1 && (
-            <AssigneeMultiSelect
-              members={options.members}
-              value={assigneeIds}
-              onChange={setAssigneeIds}
-              label={t('home.filters.assigneeLabel')}
-              placeholder={t('home.filters.assigneeAll')}
-              searchPlaceholder={t('home.filters.assigneeSearch')}
-              emptyText={t('home.filters.assigneeEmpty')}
-              className="sm:w-56"
-            />
-          )}
-        </div>
-      )}
+      <ChoreFilters
+        group="home"
+        options={options}
+        householdId={householdId}
+        onHouseholdChange={setHouseholdId}
+        assigneeIds={assigneeIds}
+        onAssigneeChange={setAssigneeIds}
+        className="mt-6 first:mt-0"
+      />
 
       {loading && !data && (
-        <p className="mt-6 font-medium text-muted-foreground">{t('common.loading')}</p>
+        <p className="mt-6 font-medium text-muted-foreground first:mt-0">{t('common.loading')}</p>
       )}
 
       {data && (
         <>
           {data.progress.total_today > 0 && (
-            <div className="mt-6 rounded-xl border border-border bg-card p-4">
+            <div className="mt-6 rounded-xl border border-border bg-card p-4 first:mt-0">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <span className="font-semibold">
                   {t('home.progress.doneToday', {
@@ -344,8 +196,8 @@ export default function Home() {
           {data.items.length > 0 ? (
             /* One list, not one per section: it stays a single list to a screen
                reader (the sections carry no heading to be labelled by), and
-               DueRow's `last:mb-0` keeps resolving against the real final row. */
-            <ul className="mt-6 flex flex-col">
+               ChoreRow's `last:mb-0` keeps resolving against the real final row. */
+            <ul className="mt-6 flex flex-col first:mt-0">
               {groupByDue(data.items).map((group, i, all) => {
                 // A section keeps its rows until the post-completion refetch, so
                 // emptying one leaves the rule with nothing to divide for the
@@ -360,7 +212,7 @@ export default function Home() {
                   <Fragment key={group.key}>
                     {/* The rule between sections. Decoration, so aria-hidden
                         keeps it out of the list; margins rather than a flex gap,
-                        because a gap is not animated away (see DueRow). */}
+                        because a gap is not animated away (see ChoreRow). */}
                     {i > 0 && (
                       <li
                         aria-hidden
@@ -372,13 +224,21 @@ export default function Home() {
                       />
                     )}
                     {group.items.map((chore) => (
-                      <DueRow
+                      <ChoreRow
                         key={chore.id}
-                        chore={chore}
-                        t={t}
-                        showHousehold={multiHousehold}
+                        title={chore.title}
+                        dotClass={dueDotClass(chore)}
+                        detail={`${relativeDueLabel(t, chore)} · ${formatDateTime(chore.next_due)} · ${repeatLabel(t, chore)}`}
+                        assignee={
+                          chore.assignees.length === 0
+                            ? t('home.unassigned')
+                            : chore.assignees.map(fullName).join(', ')
+                        }
+                        householdName={multiHousehold ? chore.household.name : undefined}
                         exiting={exiting.has(chore.id)}
-                        onComplete={requestComplete}
+                        doneText={t('home.done')}
+                        doneLabel={t('home.markDone', { title: chore.title })}
+                        onComplete={() => requestComplete(chore)}
                       />
                     ))}
                   </Fragment>
@@ -396,31 +256,12 @@ export default function Home() {
         </>
       )}
 
-      <AlertDialog open={creditFor !== null} onOpenChange={(open) => !open && setCreditFor(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t('home.credit.title', { title: creditFor?.title ?? '' })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('home.credit.body', {
-                names: creditFor ? creditFor.assignees.map(fullName).join(', ') : '',
-              })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-            {creditFor?.assignees.map((a) => (
-              <AlertDialogAction key={a.id} onClick={() => creditAndComplete(a.id)}>
-                {t('home.credit.doneAs', { name: fullName(a) })}
-              </AlertDialogAction>
-            ))}
-            <AlertDialogAction onClick={() => creditAndComplete()}>
-              {t('home.credit.doneAsMe')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <CreditDialog
+        group="home"
+        chore={creditFor}
+        onClose={() => setCreditFor(null)}
+        onConfirm={creditAndComplete}
+      />
     </main>
   )
 }

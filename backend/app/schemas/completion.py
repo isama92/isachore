@@ -12,7 +12,10 @@ class HistoryEntryRead(BaseModel):
     `title` is the snapshot taken at completion time (survives a later rename or a
     soft-deleted chore); `completed_at` is when it was actually checked off and
     `scheduled_for` is the occurrence's due datetime, so `days_late` (>0 late, <=0
-    on time/early) is the date-based difference between them. `completed_by` is
+    on time/early) is the date-based difference between them. It is None for an
+    unscheduled chore, which had no due date to be late against: there the slot merely
+    records when the chore became available, so subtracting it would report the gap since
+    the last completion as lateness. `completed_by` is
     None when the completer's account has been hard-deleted (users are normally
     soft-deleted, so in practice it stays set). Names only on `completed_by`
     (HouseholdMemberRead is data-minimised: no email)."""
@@ -21,7 +24,7 @@ class HistoryEntryRead(BaseModel):
     title: str
     scheduled_for: datetime
     completed_at: datetime
-    days_late: int
+    days_late: int | None
     completed_by: HouseholdMemberRead | None
     household: ChoreHouseholdRead
 

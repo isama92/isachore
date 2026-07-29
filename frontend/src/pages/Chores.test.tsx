@@ -252,7 +252,20 @@ describe('Chores', () => {
     // in the viewer's timezone and the suite pins none. The two dates are deliberately
     // months apart, so this fails if the column renders start_date by mistake.
     expect(within(row).getByText(formatDateTime(chore.created_at))).toBeInTheDocument()
-    expect(within(row).getByText(formatDate(chore.start_date))).toBeInTheDocument()
+    expect(within(row).getByText(formatDate(chore.start_date!))).toBeInTheDocument()
+  })
+
+  it('places a placeholder in Start for an unscheduled chore', async () => {
+    // An unscheduled chore has no start date at all. The Repeats cell beside it already
+    // says "Unscheduled", so the date cell only needs to not render an empty gap.
+    stubFetch({
+      chores: [makeChore({ title: 'Sort the loft', repeats: 'manual', start_date: null })],
+    })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+
+    const row = (await screen.findByText('Sort the loft')).closest('tr')!
+    expect(within(row).getByText('Unscheduled')).toBeInTheDocument()
+    expect(within(row).getByText('—')).toBeInTheDocument()
   })
 
   it('sorts ascending when the Created header is clicked', async () => {

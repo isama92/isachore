@@ -58,7 +58,12 @@ class Chore(Base):
     )
     title: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(String(2000))
-    start_date: Mapped[date] = mapped_column(Date)
+    # When the chore starts, which is only ever used to seed the first occurrence's slot;
+    # every later slot is walked from the previous one. NULL means unscheduled (`manual`),
+    # which has no start: its first occurrence opens at creation time and each completion
+    # reopens it at the completion moment. The schema layer keeps the two in step, forcing
+    # NULL for `manual` and requiring a date for every other period.
+    start_date: Mapped[date | None] = mapped_column(Date)
     repeats: Mapped[RepeatPeriod] = mapped_column(SAEnum(RepeatPeriod, name="repeat_period"))
     assignment_type: Mapped[AssignmentType] = mapped_column(
         SAEnum(AssignmentType, name="assignment_type")

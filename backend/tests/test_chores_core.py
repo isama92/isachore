@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta, timezone
 
 import pytest
 
@@ -6,6 +6,7 @@ from app.core.chores import (
     DueStatus,
     RecurrenceRule,
     advance_anchor,
+    days_since,
     days_until_due,
     due_status,
     first_occurrence,
@@ -270,6 +271,19 @@ def test_due_status_buckets() -> None:
     assert due_status(5) == DueStatus.soon
 
 
+def test_days_since_is_date_based_and_normalises_tz() -> None:
+    now = datetime(2026, 7, 18, 12, 0, tzinfo=UTC)
+    # Anything earlier today reads as 0, whatever the time, so "Last done today" holds for
+    # a completion at 00:01 and at 11:59 alike.
+    assert days_since(datetime(2026, 7, 18, 0, 1, tzinfo=UTC), now) == 0
+    assert days_since(datetime(2026, 7, 18, 11, 59, tzinfo=UTC), now) == 0
+    assert days_since(datetime(2026, 7, 17, 23, 0, tzinfo=UTC), now) == 1
+    assert days_since(datetime(2026, 7, 4, tzinfo=UTC), now) == 14
+    # A non-UTC input is normalised, not compared naively: 01:00 in +02:00 is still the
+    # 17th in UTC, so this is yesterday rather than today.
+    assert days_since(datetime(2026, 7, 18, 1, 0, tzinfo=timezone(timedelta(hours=2))), now) == 1
+
+
 # --- advance_anchor (schedule-anchored recurrence) ------------------------
 
 
@@ -356,7 +370,9 @@ def test_advance_anchor_normalises_away_completion_time_of_day() -> None:
 
 
 def test_advance_anchor_manual_returns_scheduled_for() -> None:
-    # A one-off has no interval; the anchor is just marked non-null.
+    # An unscheduled chore has no grid to roll forward on, so its slot stands. Unreachable
+    # from next_occurrence_after (which handles `manual` itself), but the guard is what
+    # keeps a direct call off next_slot_after's ValueError.
     scheduled = datetime(2026, 7, 20, tzinfo=UTC)
     assert advance_anchor(scheduled, datetime(2026, 7, 25, tzinfo=UTC), MANUAL) == scheduled
 
@@ -438,16 +454,31 @@ def test_next_occurrence_after_monthly_clamps_day_of_month() -> None:
     ) == datetime(2026, 2, 28, tzinfo=UTC)
 
 
-def test_next_occurrence_after_manual_is_none() -> None:
-    # Even with an interval and weekdays set, a one-off has no successor.
+def test_next_occurrence_after_manual_reopens_at_the_completion_moment() -> None:
+    # An unscheduled chore is repeatable on demand, so it reopens immediately, anchored at
+    # the completion moment rather than stepping any grid. Interval and weekdays are set
+    # here to prove they are ignored (RecurrenceRule.of drops the weekdays anyway).
+    completed_at = datetime(2026, 7, 25, 14, 37, tzinfo=UTC)
     assert (
         next_occurrence_after(
             datetime(2026, 7, 20, tzinfo=UTC),
-            datetime(2026, 7, 25, tzinfo=UTC),
+            completed_at,
             RecurrenceRule.of(RepeatPeriod.manual, 3, [TUE, FRI]),
         )
-        is None
+        == completed_at
     )
+
+
+def test_next_occurrence_after_manual_keeps_the_time_of_day() -> None:
+    # The full timestamp, NOT its midnight: uq_occurrence_chore_scheduled is per
+    # (chore, scheduled_for), so a date would collide the second time an unscheduled chore
+    # was done in one day. Two same-day completions must yield two distinct slots.
+    morning = datetime(2026, 7, 25, 8, 0, tzinfo=UTC)
+    evening = datetime(2026, 7, 25, 20, 0, tzinfo=UTC)
+    first = next_occurrence_after(datetime(2026, 7, 20, tzinfo=UTC), morning, MANUAL)
+    second = next_occurrence_after(first, evening, MANUAL)
+    assert first != second
+    assert (first, second) == (morning, evening)
 
 
 # --- occurrence helpers: intervals and pinned weekdays ----------------------

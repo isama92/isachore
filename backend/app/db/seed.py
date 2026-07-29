@@ -71,7 +71,11 @@ class ChoreSpec:
     `weekdays` pins a `weekly` chore to Monday-first weekdays (0 = Mon .. 6 = Sun) and is
     ignored for every other period. Note that pinning weekdays or raising
     `repeat_interval` fits fewer slots into the same window, so such specs need a larger
-    `start_days_ago` to seed any history."""
+    `start_days_ago` to seed any history.
+
+    For a `manual` (unscheduled) chore the written `start_date` is NULL whatever this says,
+    since those have none; `start_days_ago` still dates the occurrence chain, so it controls
+    how long ago the chore looks like it was last done."""
 
     title: str
     repeats: RepeatPeriod
@@ -166,6 +170,12 @@ _SHARED_CHORES = [
         current_email="bram@example.com",
         tags=["kitchen"],
     ),
+    # The four unscheduled chores that follow cover every state of the unscheduled view's
+    # recency dot between them: never done (grey), done today (green), done this week
+    # (yellow) and done long ago (grey with a date). "Bleed the radiators" needs three
+    # completions to land one today, because each completion reopens the chore at its own
+    # timestamp and the loop in _create_chore only completes slots strictly before today:
+    # 1 day ago at 00:00 -> 08:00 -> 16:00 -> today 00:00.
     ChoreSpec(
         "Fix the leaky tap",
         RepeatPeriod.manual,
@@ -183,6 +193,23 @@ _SHARED_CHORES = [
         start_days_ago=2,
         completions=1,
         current_email="dan@example.com",
+    ),
+    ChoreSpec(
+        "Bleed the radiators",
+        RepeatPeriod.manual,
+        AssignmentType.manual,
+        ["bram@example.com"],
+        start_days_ago=1,
+        completions=3,
+        current_email="bram@example.com",
+    ),
+    ChoreSpec(
+        "Sort out the loft",
+        RepeatPeriod.manual,
+        AssignmentType.alphabetical,
+        ["admin@example.com", "eve@example.com"],
+        start_days_ago=25,
+        completions=1,
     ),
     ChoreSpec(
         "Tidy the shared shelf",
@@ -362,7 +389,10 @@ def _seed_chore(
         household_id=household_id,
         title=spec.title,
         description=None,
-        start_date=start,
+        # An unscheduled chore has no start date (the API's canonicalisation guarantees it).
+        # `start_days_ago` still dates its occurrence chain below, which is how a seeded one
+        # can look like it has been sitting around for a fortnight.
+        start_date=None if spec.repeats == RepeatPeriod.manual else start,
         repeats=spec.repeats,
         assignment_type=spec.assignment,
         turn_length=spec.turn_length,
@@ -376,7 +406,7 @@ def _seed_chore(
     session.add(chore)
 
     assignee = current if current is not None else initial_assignee(spec.assignment, pool, rng=rng)
-    scheduled: datetime | None = first_occurrence(start, rule)
+    scheduled = first_occurrence(start, rule)
     counts: dict[int, int] = {}
     occurrences = 0
     today = now.date()
@@ -385,7 +415,7 @@ def _seed_chore(
     for done in range(1, spec.completions + 1):
         # Never complete an occurrence that isn't in the past: today's/future slots stay
         # open (the terminal row below).
-        if scheduled is None or scheduled.date() >= today:
+        if scheduled.date() >= today:
             break
         completed_at = min(scheduled + timedelta(hours=8), now)
         session.add(
@@ -404,9 +434,6 @@ def _seed_chore(
         if assignee is not None:
             counts[assignee.id] = counts.get(assignee.id, 0) + 1
         nxt = next_occurrence_after(scheduled, completed_at, rule)
-        if nxt is None:  # a completed manual one-off has no successor
-            scheduled = None
-            break
         if (
             spec.assignment != AssignmentType.manual
             and pool
@@ -415,17 +442,17 @@ def _seed_chore(
             assignee = next_assignee(spec.assignment, pool, assignee, counts, rng=rng)
         scheduled = nxt
 
-    # The single terminal open occurrence (unless this was a completed one-off).
-    if scheduled is not None:
-        session.add(
-            ChoreOccurrence(
-                chore=chore,
-                scheduled_for=scheduled,
-                assignee_id=assignee.id if assignee is not None else None,
-                status=OccurrenceStatus.open,
-            )
+    # The single terminal open occurrence. Every chore gets one, whatever its period: an
+    # unscheduled chore reopens at each completion rather than terminating.
+    session.add(
+        ChoreOccurrence(
+            chore=chore,
+            scheduled_for=scheduled,
+            assignee_id=assignee.id if assignee is not None else None,
+            status=OccurrenceStatus.open,
         )
-        occurrences += 1
+    )
+    occurrences += 1
     return chore, occurrences
 
 

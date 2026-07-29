@@ -52,7 +52,7 @@ function homeGets(fetchMock: ReturnType<typeof mockFetch>): string[] {
 }
 
 describe('Home', () => {
-  it('renders the personal heading, progress, and status-coded due rows', async () => {
+  it('renders the progress and status-coded due rows', async () => {
     mockFetch([
       { path: FILTERS, method: 'GET', body: SOLO_OPTIONS },
       {
@@ -84,10 +84,12 @@ describe('Home', () => {
     ])
     renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
 
-    // Default (assignee filter = me) -> personal heading.
-    expect(screen.getByText('Your chores')).toBeInTheDocument()
     expect(await screen.findByText('5 of 8 done today')).toBeInTheDocument()
     expect(screen.getByText('3 left')).toBeInTheDocument()
+    // The page carries no heading of its own: the sidebar names the view, and the filters
+    // (hidden here, since this user has one household and one member) come first. Asserted
+    // after the data lands, or it would pass against the loading state whatever happened.
+    expect(screen.queryByRole('heading')).not.toBeInTheDocument()
 
     const overdue = screen.getByText('Clean the bathroom').closest('li')!
     expect(overdue.querySelector('.bg-due-overdue')).toBeTruthy()
@@ -252,7 +254,7 @@ describe('Home', () => {
     await waitFor(() => expect(homeGets(fetchMock)[0]).toContain('assignee_id=1'))
   })
 
-  it('completes an unassigned chore: posts (no body), refetches, and the one-off disappears', async () => {
+  it('completes an unassigned chore: posts (no body), refetches, and the row goes', async () => {
     let homeCalls = 0
     const fetchMock = mockFetch([
       { path: FILTERS, method: 'GET', body: SOLO_OPTIONS },
@@ -438,7 +440,7 @@ describe('Home', () => {
     expect(await screen.findByText('Failed to load your due chores')).toBeInTheDocument()
   })
 
-  it('widening the assignee filter switches the heading and sends assignee_id', async () => {
+  it('widening the assignee filter sends every selected assignee_id', async () => {
     const fetchMock = mockFetch([
       { path: FILTERS, method: 'GET', body: MULTI_OPTIONS },
       { path: HOME, method: 'GET', body: homeBody(0, 0, []) },
@@ -446,12 +448,9 @@ describe('Home', () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
 
-    expect(await screen.findByText('Your chores')).toBeInTheDocument()
-
     await user.click(await screen.findByRole('button', { name: 'Assignees' }))
     await user.click(await screen.findByRole('option', { name: /Bram Bakker/ }))
 
-    expect(await screen.findByText('Household chores')).toBeInTheDocument()
     await waitFor(() => {
       const last = homeGets(fetchMock).at(-1)!
       expect(last).toContain('assignee_id=1')

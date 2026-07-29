@@ -38,7 +38,9 @@ async def test_home_lists_and_sorts_due_chores(
             household=household,
             title=title,
             start_date=today + timedelta(days=offset),
-            repeats=RepeatPeriod.manual,
+            # Any scheduled period puts the first occurrence on midnight of the start date;
+            # `yearly` is used simply because it cannot recur again inside the test.
+            repeats=RepeatPeriod.yearly,
         )
     client = await auth_client(user)
 
@@ -287,29 +289,58 @@ async def test_home_progress_ignores_completions_before_today(
     assert resp.json()["progress"] == {"done_today": 0, "total_today": 1}
 
 
-async def test_home_manual_one_off_disappears_after_completion(
+async def test_home_never_lists_unscheduled_chores(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
     auth_client: AuthClient,
 ) -> None:
+    # An unscheduled chore has no due date, so it can never be overdue or due today: it
+    # belongs to /unscheduled and must not appear here even with a long-past first slot,
+    # which under a scheduled period would read as overdue.
     user = await make_user()
     household = await make_household(members=[user])
     today = datetime.now(UTC).date()
-    chore = await make_chore(
-        household=household, title="OneOff", start_date=today, repeats=RepeatPeriod.manual
+    await make_chore(
+        household=household,
+        title="Unscheduled",
+        start_date=today - timedelta(days=30),
+        repeats=RepeatPeriod.manual,
+    )
+    await make_chore(
+        household=household, title="Scheduled", start_date=today, repeats=RepeatPeriod.weekly
     )
     client = await auth_client(user)
 
-    before = await client.get("/api/v1/home")
-    assert [i["title"] for i in before.json()["items"]] == ["OneOff"]
+    body = (await client.get("/api/v1/home")).json()
+    assert [i["title"] for i in body["items"]] == ["Scheduled"]
 
-    assert (await client.post(f"/api/v1/chores/{chore.id}/complete")).status_code == 201
 
-    after = await client.get("/api/v1/home")
-    body = after.json()
-    assert body["items"] == []  # a completed one-off never comes back
-    assert body["progress"] == {"done_today": 1, "total_today": 1}
+async def test_home_progress_ignores_unscheduled_chores(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # Completing an unscheduled chore is real work, but not work this view is tracking:
+    # counting it would move a denominator the page can never show a row for. The
+    # scheduled chore is what keeps the progress card non-empty, so an unscheduled
+    # completion leaking in would be visible as 1-of-2 rather than 0-of-1.
+    user = await make_user()
+    household = await make_household(members=[user])
+    today = datetime.now(UTC).date()
+    unscheduled = await make_chore(
+        household=household, title="Unscheduled", start_date=today, repeats=RepeatPeriod.manual
+    )
+    await make_chore(
+        household=household, title="Scheduled", start_date=today, repeats=RepeatPeriod.weekly
+    )
+    client = await auth_client(user)
+
+    assert (await client.post(f"/api/v1/chores/{unscheduled.id}/complete")).status_code == 201
+
+    body = (await client.get("/api/v1/home")).json()
+    assert body["progress"] == {"done_today": 0, "total_today": 1}
 
 
 async def test_home_empty_when_user_has_no_chores(

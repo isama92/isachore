@@ -12,7 +12,7 @@ describe('i18n', () => {
   it('translates keys into Italian after changeLanguage', async () => {
     await i18n.changeLanguage('it')
     expect(i18n.t('common.cancel')).toBe('Annulla')
-    expect(i18n.t('chores.title')).toBe('Faccende')
+    expect(i18n.t('chores.title')).toBe('Gestione faccende')
   })
 
   it('interpolates variables in both languages', async () => {

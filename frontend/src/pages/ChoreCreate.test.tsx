@@ -3,6 +3,7 @@ import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router'
 import ChoreCreate from './ChoreCreate'
+import { todayISO } from '../lib/chores'
 import { mockFetch, renderWithProviders } from '../test/utils'
 import { makeChore, makeHousehold, makeHouseholdMember, makeTag, makeUser } from '../test/fixtures'
 import type { Page } from '../lib/types'
@@ -181,22 +182,54 @@ describe('ChoreCreate', () => {
     expect(postBody(fetchMock)).toMatchObject({ repeats: 'daily', repeat_interval: 14 })
   })
 
-  it('hides both recurrence controls for a one-off and submits them unset', async () => {
+  it('hides the schedule controls for an unscheduled chore and submits them unset', async () => {
     const fetchMock = singleHouseholdMocks()
     withRoutes()
 
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     await user.type(await screen.findByLabelText('Title'), 'Fix the shelf')
+    // The start date is on screen for the default (weekly) period, so its disappearance
+    // below is the switch's doing rather than something the form never rendered. Matched by
+    // role: the trigger's accessible name carries the formatted date as well as the label.
+    expect(screen.getByRole('button', { name: /Start date/ })).toBeInTheDocument()
     await user.click(screen.getByRole('combobox', { name: 'Repeats' }))
-    await user.click(await screen.findByRole('option', { name: 'Manual' }))
+    await user.click(await screen.findByRole('option', { name: 'Unscheduled' }))
 
     expect(screen.queryByLabelText('Repeat every')).not.toBeInTheDocument()
     expect(screen.queryByRole('toolbar', { name: 'On these days' })).not.toBeInTheDocument()
     expect(screen.queryByText(/without pinning a day/)).not.toBeInTheDocument()
+    // Nothing about an unscheduled chore is dated, so the start date goes too.
+    expect(screen.queryByRole('button', { name: /Start date/ })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Add chore' }))
 
     await screen.findByText('chores-list')
-    expect(postBody(fetchMock)).toMatchObject({ repeat_interval: 1, weekdays: null })
+    expect(postBody(fetchMock)).toMatchObject({
+      repeats: 'manual',
+      repeat_interval: 1,
+      weekdays: null,
+      start_date: null,
+    })
+  })
+
+  it('restores the start date when the period stops being unscheduled', async () => {
+    // Round trip: an unscheduled chore holds no start date, so switching back to a period
+    // that needs one must refill it rather than leaving the field blank (which the API
+    // would reject) - and it must be visible again for the user to change.
+    const fetchMock = singleHouseholdMocks()
+    withRoutes()
+
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    await user.type(await screen.findByLabelText('Title'), 'Water the plants')
+    await user.click(screen.getByRole('combobox', { name: 'Repeats' }))
+    await user.click(await screen.findByRole('option', { name: 'Unscheduled' }))
+    await user.click(screen.getByRole('combobox', { name: 'Repeats' }))
+    await user.click(await screen.findByRole('option', { name: 'Daily' }))
+
+    expect(screen.getByRole('button', { name: /Start date/ })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Add chore' }))
+
+    await screen.findByText('chores-list')
+    expect(postBody(fetchMock)).toMatchObject({ repeats: 'daily', start_date: todayISO() })
   })
 
   it('drops pinned weekdays when the period stops being weekly, keeping the interval', async () => {

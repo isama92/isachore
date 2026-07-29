@@ -85,7 +85,9 @@ export type Chore = {
   id: number
   title: string
   description: string | null
-  start_date: string
+  // null for an unscheduled chore, which has no start date: nothing about it is
+  // dated, so the form hides the field and the list shows a placeholder.
+  start_date: string | null
   repeats: RepeatPeriod
   assignment_type: AssignmentType
   // Completions one assignee holds before the chore hands off (1 = every
@@ -105,7 +107,8 @@ export type Chore = {
   // The full pool of people the chore rotates between.
   assignees: User[]
   // Who is on the hook right now (the open occurrence's assignee); null when the
-  // chore is unassigned/shared or has no open occurrence (a completed one-off).
+  // chore is unassigned/shared. Every live chore has an open occurrence, whatever
+  // its period, so this is not a "nothing left to do" signal.
   current_assignee: User | null
   tags: Tag[]
 }
@@ -114,13 +117,14 @@ export type Chore = {
 // `title` is the snapshot taken at completion (survives a rename/soft-delete);
 // `completed_at` is when it was checked off and `scheduled_for` the occurrence's
 // due datetime, so `days_late` (>0 late, <=0 on time/early) is their date diff.
-// `completed_by` is null when the completer's account was hard-deleted.
+// `completed_by` is null when the completer's account was hard-deleted, and
+// `days_late` is null for an unscheduled chore, which had no due date to miss.
 export type HistoryEntry = {
   id: number
   title: string
   scheduled_for: string
   completed_at: string
-  days_late: number
+  days_late: number | null
   completed_by: HouseholdMember | null
   household: { id: number; name: string }
 }
@@ -141,9 +145,12 @@ export type StatsRange = '7d' | '30d' | '90d'
 // `range` echoes the request; `granularity` ('day' for 7d/30d, 'week' for 90d)
 // tells the time-series chart how to label its axis. KPIs: `completed_in_range`
 // and `on_time_rate` follow the range; `currently_overdue` and `active_chores`
-// are a live snapshot. `on_time_rate` (fraction not late) is null when nothing
-// was completed in range. status_breakdown sums to active_chores; punctuality
-// sums to completed_in_range.
+// are a live snapshot. `on_time_rate` (fraction not late) is null when none of
+// the range's completions had a due date. status_breakdown sums to active_chores.
+// Unscheduled chores count in completed_in_range, completions_over_time and
+// per_person, but have no due date and so are excluded from currently_overdue,
+// active_chores, status_breakdown, punctuality and on_time_rate: punctuality
+// therefore does NOT sum to completed_in_range.
 export type StatsData = {
   range: StatsRange
   granularity: 'day' | 'week'
@@ -187,6 +194,21 @@ export type HomeData = {
   items: DueChore[]
 }
 
+// A chore with no schedule: GET /api/v1/unscheduled. Deliberately carries no due
+// state (there is no deadline) and no `repeats` (every item here is unscheduled).
+// `days_since_last_completion` is whole UTC days since it was last done, 0 for
+// earlier today, or null if it never has been; it drives both the row's label and
+// its recency dot.
+export type UnscheduledChore = {
+  id: number
+  title: string
+  days_since_last_completion: number | null
+  household: { id: number; name: string }
+  assignees: HouseholdMember[]
+}
+
+export type UnscheduledData = { items: UnscheduledChore[] }
+
 // Prefill payload carried in router state when cloning a chore. Mirrors the
 // creation form's fields plus the source household, so ChoreCreate can seed the
 // form and default to the source household (see Chores' clone action).
@@ -194,6 +216,8 @@ export type ChoreCloneState = {
   household_id: number
   title: string
   description: string
+  // '' when the source chore is unscheduled and so has no start date, matching the
+  // form's own spelling of "unset" (and keeping router state plain, as below).
   start_date: string
   repeats: RepeatPeriod
   assignment_type: AssignmentType

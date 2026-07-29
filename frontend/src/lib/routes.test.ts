@@ -17,6 +17,7 @@ describe('routes', () => {
     expect(routes.confirm).toBe('/confirm')
     expect(routes.invite).toBe('/invite')
     expect(routes.home).toBe('/')
+    expect(routes.unscheduled).toBe('/unscheduled')
     expect(routes.profile).toBe('/profile')
     expect(routes.history).toBe('/history')
     expect(routes.statistics).toBe('/statistics')

@@ -74,7 +74,9 @@ export default function ChoreEdit() {
           initial={{
             title: chore.title,
             description: chore.description ?? '',
-            start_date: chore.start_date,
+            // '' is the form's spelling of "no start date" (an unscheduled chore); the
+            // form hides the field and refills it if the period ever stops being manual.
+            start_date: chore.start_date ?? '',
             repeats: chore.repeats,
             assignment_type: chore.assignment_type,
             turn_length: chore.turn_length,
