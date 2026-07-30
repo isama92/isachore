@@ -55,6 +55,100 @@
       transparent
     );
   }
+
+  /* Rendered rich text: the description field's sanitised HTML, both inside the
+     editor and in the read-only dialog. One class for both, so what you type
+     looks like what you later read.
+
+     Styled by hand rather than with @tailwindcss/typography on purpose. The
+     allowlist in backend/app/core/richtext.py is only twelve tags, and `prose`
+     ships opinionated rules for dozens more that can never appear here; worse,
+     its colours key off `dark:prose-invert`, while this app themes through four
+     Catppuccin flavours and fourteen accents on data-attributes, so every colour
+     would need a --tw-prose-* override anyway. Everything below resolves through
+     the runtime vars, so it tracks flavour and accent with no extra tokens.
+
+     Keep the selector list in step with ALLOWED_TAGS: a tag the sanitiser permits
+     but nothing here styles renders as unstyled browser default. */
+  .rich-text {
+    font-size: 0.875rem;
+    line-height: 1.6;
+    overflow-wrap: break-word;
+  }
+  /* Paragraph rhythm via margin-block rather than space-y, because the content is
+     set with innerHTML and has no React children for a utility to sit between. */
+  .rich-text > * + * {
+    margin-block-start: 0.625rem;
+  }
+  .rich-text strong {
+    font-weight: 700;
+  }
+  .rich-text em {
+    font-style: italic;
+  }
+  .rich-text u {
+    text-decoration-line: underline;
+    text-underline-offset: 2px;
+  }
+  .rich-text s {
+    text-decoration-line: line-through;
+    /* Struck text is text someone has decided no longer applies, so it recedes. */
+    color: var(--muted-foreground);
+  }
+  .rich-text ul,
+  .rich-text ol {
+    padding-inline-start: 1.375rem;
+  }
+  .rich-text ul {
+    list-style-type: disc;
+  }
+  .rich-text ol {
+    list-style-type: decimal;
+  }
+  .rich-text li + li {
+    margin-block-start: 0.25rem;
+  }
+  /* Nested lists are reachable by keyboard in the editor even without a toolbar
+     button, so they get a marker that reads as a second level. */
+  .rich-text ul ul {
+    list-style-type: circle;
+  }
+  .rich-text a {
+    color: var(--primary);
+    text-decoration-line: underline;
+    text-underline-offset: 2px;
+  }
+  .rich-text a:hover {
+    text-decoration-thickness: 2px;
+  }
+  .rich-text code {
+    padding: 0.0625rem 0.25rem;
+    border-radius: 4px;
+    background-color: var(--muted);
+    font-family: ui-monospace, monospace;
+    font-size: 0.8125em;
+  }
+  .rich-text blockquote {
+    padding-inline-start: 0.75rem;
+    border-inline-start: 2px solid var(--border);
+    color: var(--muted-foreground);
+  }
+  /* Placeholder, sitting on the first line where a real input's would be. Tiptap's Placeholder
+     extension supplies both hooks: the is-editor-empty class and the data-placeholder attribute.
+     float + height:0 is the upstream recipe, and it is load-bearing rather than stylistic - it
+     takes the text out of flow so it overlays the empty paragraph instead of pushing the caret
+     down a line. pointer-events:none so clicking the hint still lands in the editor.
+
+     Matches ui/input.tsx's placeholder colour token, so an empty description reads the same as an
+     empty text field. It is invisible to assistive tech (CSS content always is), which is why
+     RichTextEditor also sets aria-placeholder. */
+  .rich-text p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    pointer-events: none;
+    color: var(--muted-foreground);
+  }
 }
 
 @theme inline {

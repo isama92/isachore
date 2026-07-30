@@ -85,6 +85,16 @@ async def get_home(
                 next_due=occ.scheduled_for,
                 days_until_due=days,
                 status=due_status(days),
+                # No extra query: the chore is already selectinloaded. Not free of bytes,
+                # though - that eager load pulls every column including description, so the
+                # HTML still crosses from Postgres to the app even though it never reaches the
+                # client. Fine at household scale; if it ever matters, select a labelled
+                # `description IS NOT NULL` and defer the column (a bare defer() would turn
+                # this attribute access into an async lazy load).
+                #
+                # NULL is the only "no description" (app/core/richtext.py collapses
+                # visually-empty HTML), so this needs no emptiness check.
+                has_description=occ.chore.description is not None,
                 household=ChoreHouseholdRead.model_validate(occ.chore.household),
                 # Only the current assignee shows on Home (the pool lives on the chore).
                 assignees=(

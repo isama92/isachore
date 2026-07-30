@@ -340,9 +340,14 @@ async def _reconcile_open_occurrence(
             if latest_done is not None
             else _initial_slot(payload.start_date, rule, datetime.now(UTC))
         )
-        current = _resolve_current_assignee(pool, payload.current_assignee_id) or initial_assignee(
-            chore.assignment_type, pool
-        )
+        # Same shape as create_chore's version below, deliberately: the ternary this replaces
+        # relied on `or` binding tighter than the conditional expression, which parsed correctly
+        # but read as though the `or` might attach to the whole else branch.
+        current = None
+        if not payload.clear_current_assignee:
+            current = _resolve_current_assignee(
+                pool, payload.current_assignee_id
+            ) or initial_assignee(chore.assignment_type, pool)
         session.add(
             ChoreOccurrence(
                 chore_id=chore.id,
@@ -353,10 +358,18 @@ async def _reconcile_open_occurrence(
         )
         return
 
-    # Reconcile the current assignee: honour an explicit choice, keep a still-valid
-    # assignee, else recompute from the strategy.
+    # Reconcile the current assignee: clear it if asked, else honour an explicit choice, keep a
+    # still-valid assignee, else recompute from the strategy.
+    #
+    # The clear branch has to come first AND stop here, because "unassigned" is a destination,
+    # not an absence: falling through to the elif below would immediately re-derive somebody
+    # from the strategy and undo it. For the auto strategies this lasts until the next
+    # completion, like any other override (`_successor_assignee` re-derives); for `manual` it
+    # stands until someone sets an assignee again.
     explicit = _resolve_current_assignee(pool, payload.current_assignee_id)
-    if explicit is not None:
+    if payload.clear_current_assignee:
+        occ.assignee_id = None
+    elif explicit is not None:
         occ.assignee_id = explicit.id
     elif occ.assignee_id is None or not any(a.id == occ.assignee_id for a in pool):
         nxt = initial_assignee(chore.assignment_type, pool)
@@ -409,11 +422,14 @@ async def create_chore(payload: ChoreCreate, user: CurrentUser, session: Session
     )
     session.add(chore)
     await session.flush()  # assign chore.id before creating its first occurrence
-    # The initial current assignee: an explicit choice (validated), else derived from
-    # the strategy (manual with several members has no auto-pick -> unassigned/shared).
-    current = _resolve_current_assignee(assignees, payload.current_assignee_id)
-    if current is None:
-        current = initial_assignee(payload.assignment_type, assignees)
+    # The initial current assignee: unassigned if asked for, else an explicit choice
+    # (validated), else derived from the strategy (manual with several members has no
+    # auto-pick -> unassigned/shared anyway).
+    current = None
+    if not payload.clear_current_assignee:
+        current = _resolve_current_assignee(assignees, payload.current_assignee_id)
+        if current is None:
+            current = initial_assignee(payload.assignment_type, assignees)
     session.add(
         ChoreOccurrence(
             chore_id=chore.id,

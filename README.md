@@ -552,3 +552,36 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
 - [ ] Add a skip button (next to complete), and change the charts to also show the skipped chores
 - [ ] Live updates when a housemate completes a chore (websocket)
 - [ ] Chore change log (who changed what)
+- [ ] The due below the chore in the "your chores" page doesn't consider timezone but only utc, so at 1am it still doesn't show today's task but yesterday's
+- [ ] Make validation errors (422) readable instead of showing "Unprocessable Entity"
+
+  FastAPI returns `detail` as a **list** of error objects for a 422, but `handle()` in
+  `frontend/src/lib/api.ts:25` only reads `detail` when it is a *string*. So every validation
+  failure falls through to `res.statusText` and the user is shown the raw, untranslated HTTP
+  reason phrase.
+
+  This is app-wide, not one form: a title over 255 characters, a repeat interval above
+  `MAX_INTERVAL`, a bad weekday, or a description over `MAX_RICH_TEXT_LENGTH` all land here.
+
+  The fix belongs in `api.ts`, which is the only place that knows the wire shape: detect the
+  list form and turn it into something readable. Worth deciding whether to surface pydantic's
+  English `msg` (quick, but untranslated and phrased for developers) or to map the error's
+  `loc`/`type` onto our own i18n keys (better, and the reason this is not a one-liner). Noticed
+  while reviewing PR #33; predates it.
+
+- [ ] Stop `GET /chores` sending every chore's full description
+
+  The management list serialises `ChoreRead` in full for every row, description included, at up
+  to 100 rows a page (`backend/app/api/v1/chores.py:445`). Rich text raised the per-field cap
+  from 2000 to 20000 characters, so the worst-case payload for that one endpoint grew roughly
+  tenfold.
+
+  Home and Unscheduled already avoid this: they send `has_description: bool` and the dialog
+  fetches the chore on open. The management list is the one that did not get that treatment,
+  because the field is **load-bearing** there — `frontend/src/pages/Chores.tsx:159` builds the
+  clone payload straight from the row, so simply dropping it would break "clone a chore".
+
+  So it needs a small redesign rather than a deletion. Either send `has_description` here too
+  and have the clone action fetch `GET /chores/{id}` first (consistent with the dialog, one
+  extra request on a deliberate action), or give the list a `fields`/`slim` switch. No urgency
+  at household scale; revisit if the list ever feels heavy.

@@ -13,8 +13,6 @@ import UserCreate from './pages/admin/UserCreate'
 import UserEdit from './pages/admin/UserEdit'
 import Users from './pages/admin/Users'
 import AcceptInvite from './pages/AcceptInvite'
-import ChoreCreate from './pages/ChoreCreate'
-import ChoreEdit from './pages/ChoreEdit'
 import Chores from './pages/Chores'
 import ConfirmAccount from './pages/ConfirmAccount'
 import History from './pages/History'
@@ -29,13 +27,21 @@ import TagEdit from './pages/TagEdit'
 import Tags from './pages/Tags'
 import Unscheduled from './pages/Unscheduled'
 
-// Recharts is heavy and only the Statistics page uses it, so that page is
-// code-split into its own chunk and loaded on demand (kept out of the initial
-// bundle). Every other page stays eagerly imported.
+// Two heavy dependencies, each confined to the handful of pages that need it and loaded on
+// demand rather than in the initial bundle. Every other page stays eagerly imported.
+//
+// - Recharts, for Statistics.
+// - Tiptap, for the chore form's rich text description. Only ChoreCreate and ChoreEdit reach
+//   ChoreForm, so splitting the two of them is what keeps that chunk (~146 kB gzipped, more
+//   than half the pre-Tiptap bundle) off every other route. This app is installed to phone home
+//   screens, so the initial download is not a rounding error. If a third page ever renders
+//   ChoreForm, it needs splitting too or the editor lands back in the main chunk.
 const Statistics = lazy(() => import('./pages/Statistics'))
+const ChoreCreate = lazy(() => import('./pages/ChoreCreate'))
+const ChoreEdit = lazy(() => import('./pages/ChoreEdit'))
 
-// Shown briefly while the Statistics chunk downloads; the page then renders its
-// own skeletons.
+// Shown briefly while a split chunk downloads; the page then renders its own
+// skeletons.
 function RouteFallback() {
   const { t } = useTranslation()
   return (
@@ -56,8 +62,22 @@ export default function App() {
         <Route path={routes.unscheduled} element={<Unscheduled />} />
         <Route path={routes.profile} element={<Profile />} />
         <Route path={routes.chores.list} element={<Chores />} />
-        <Route path={routes.chores.new} element={<ChoreCreate />} />
-        <Route path={routes.chores.edit.pattern} element={<ChoreEdit />} />
+        <Route
+          path={routes.chores.new}
+          element={
+            <Suspense fallback={<RouteFallback />}>
+              <ChoreCreate />
+            </Suspense>
+          }
+        />
+        <Route
+          path={routes.chores.edit.pattern}
+          element={
+            <Suspense fallback={<RouteFallback />}>
+              <ChoreEdit />
+            </Suspense>
+          }
+        />
         <Route path={routes.history} element={<History />} />
         <Route
           path={routes.statistics}

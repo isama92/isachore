@@ -10,6 +10,7 @@ import type { DueChore, HomeData } from '../lib/types'
 import ChoreFilters from '@/components/chores/ChoreFilters'
 import ChoreRow from '@/components/chores/ChoreRow'
 import CreditDialog from '@/components/chores/CreditDialog'
+import DescriptionDialog from '@/components/chores/DescriptionDialog'
 import { useFilterOptions } from '@/components/chores/useFilterOptions'
 import { fullName } from '@/lib/user'
 import { Progress } from '@/components/ui/progress'
@@ -38,6 +39,8 @@ export default function Home() {
   // The chore whose "who gets credit" dialog is open (null = closed). Only shown
   // when completing a chore assigned to someone other than the current user.
   const [creditFor, setCreditFor] = useState<DueChore | null>(null)
+  // Which chore's instructions are on screen; non-null opens the dialog, as with creditFor.
+  const [descriptionFor, setDescriptionFor] = useState<DueChore | null>(null)
 
   const options = useFilterOptions()
   const [householdId, setHouseholdId] = useState('')
@@ -242,6 +245,10 @@ export default function Home() {
                         exiting={exiting.has(chore.id)}
                         doneText={t('home.done')}
                         doneLabel={t('home.markDone', { title: chore.title })}
+                        descriptionLabel={t('home.showDescription', { title: chore.title })}
+                        onShowDescription={
+                          chore.has_description ? () => setDescriptionFor(chore) : undefined
+                        }
                         onComplete={() => requestComplete(chore)}
                       />
                     ))}
@@ -266,6 +273,8 @@ export default function Home() {
         onClose={() => setCreditFor(null)}
         onConfirm={creditAndComplete}
       />
+
+      <DescriptionDialog chore={descriptionFor} onClose={() => setDescriptionFor(null)} />
     </main>
   )
 }

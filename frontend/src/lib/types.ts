@@ -183,6 +183,10 @@ export type DueChore = {
   next_due: string
   days_until_due: number
   status: DueStatus
+  // Whether the chore carries written instructions, NOT the instructions themselves. Drives the
+  // marker icon on the row; the dialog fetches the chore itself on open, so a household's
+  // descriptions never ride along on the landing page's payload.
+  has_description: boolean
   household: { id: number; name: string }
   assignees: HouseholdMember[]
 }
@@ -203,6 +207,9 @@ export type UnscheduledChore = {
   id: number
   title: string
   days_since_last_completion: number | null
+  // See DueChore: a flag, not the description. Not due state, so it does not breach the "no due
+  // vocabulary in this view" rule above.
+  has_description: boolean
   household: { id: number; name: string }
   assignees: HouseholdMember[]
 }

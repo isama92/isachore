@@ -60,11 +60,15 @@ async def test_unscheduled_omits_due_state_entirely(
     await make_chore(household=household, repeats=RepeatPeriod.manual)
     client = await auth_client(user)
 
+    # Deliberately an exact set, not a subset: the point is that no due field can appear, and
+    # a subset check would pass while one crept in. Adding a genuinely new field here means
+    # extending this list on purpose, which is the review moment worth keeping.
     item = (await client.get("/api/v1/unscheduled")).json()["items"][0]
     assert set(item) == {
         "id",
         "title",
         "days_since_last_completion",
+        "has_description",
         "household",
         "assignees",
     }
@@ -249,3 +253,26 @@ async def test_unscheduled_reports_only_the_current_assignee(
     assert [a["id"] for a in item["assignees"]] == [anna.id]
     # Data-minimised member shape, as everywhere else: names, never emails.
     assert set(item["assignees"][0]) == {"id", "first_name", "last_name"}
+
+
+async def test_unscheduled_flags_which_chores_carry_a_description(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    await make_chore(
+        household=household,
+        title="With",
+        repeats=RepeatPeriod.manual,
+        description="<p>Scrub the tub</p>",
+    )
+    await make_chore(household=household, title="Without", repeats=RepeatPeriod.manual)
+    client = await auth_client(user)
+
+    items = (await client.get("/api/v1/unscheduled")).json()["items"]
+    flags = {i["title"]: i["has_description"] for i in items}
+    assert flags == {"With": True, "Without": False}
+    assert all("description" not in i for i in items)

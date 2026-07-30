@@ -1,9 +1,10 @@
 from datetime import date, datetime
 from typing import Annotated, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 from app.core.chores import MAX_INTERVAL
+from app.core.richtext import MAX_RICH_TEXT_LENGTH, sanitise_description
 from app.models import AssignmentType, RepeatPeriod
 from app.schemas.tag import TagRead
 from app.schemas.user import UserRead
@@ -13,6 +14,24 @@ from app.schemas.user import UserRead
 # `Date.getDay()`, which starts at Sunday: the frontend indexes a Monday-first key array
 # rather than calling getDay(), so the two agree.
 Weekday = Annotated[int, Field(ge=0, le=6)]
+
+# A rich text field: length-checked on the raw markup, then reduced to the allowlist in
+# `app.core.richtext`, which is where the format and the reasoning behind it live.
+#
+# The cap sits *inside* the Annotated rather than on the field so the ordering is visible
+# where it is defined. Pydantic runs constraints before an AfterValidator either way, and
+# that is the order we want: the cap bounds what the server agrees to parse, and sanitising
+# can only shrink from there, never rescue an oversized payload.
+#
+# This is the mirror image of NormalisedEmail (schemas/user.py), where the None sits outside
+# the alias so the validator only sees the non-None member. Here it is inside, so the
+# validator also runs for a missing value - deliberate, because collapsing blank HTML to
+# NULL is the same job and `sanitise_description` handles None itself.
+SanitisedHtml = Annotated[
+    str | None,
+    Field(max_length=MAX_RICH_TEXT_LENGTH),
+    AfterValidator(sanitise_description),
+]
 
 
 def _normalised_schedule(
@@ -89,7 +108,7 @@ class ChoreRead(BaseModel):
 class ChoreCreate(BaseModel):
     household_id: int
     title: str = Field(min_length=1, max_length=255)
-    description: str | None = Field(default=None, max_length=2000)
+    description: SanitisedHtml = None
     # Required for every period but `manual`, where it is dropped; see _normalised_schedule.
     start_date: date | None = None
     repeats: RepeatPeriod
@@ -105,6 +124,17 @@ class ChoreCreate(BaseModel):
     # Who starts on the hook. Used for `manual` (you set it); for the auto strategies
     # the initial assignee is derived, but an explicit pool member is honoured.
     current_assignee_id: int | None = None
+    # Make the chore unassigned/shared, so it shows for every household member. Takes
+    # precedence over `current_assignee_id`.
+    #
+    # A separate field because `current_assignee_id: null` already means something else, and
+    # cannot be reinterpreted: it means "no explicit choice", and the update path then keeps a
+    # still-valid assignee rather than clearing it (see _reconcile_open_occurrence). That
+    # matters because `ChoreForm` submits null routinely whenever its picker is hidden - an
+    # empty pool, or an auto strategy on the create page - so if null cleared the assignee,
+    # editing a random chore's title would silently unassign it. "Nobody" and "no opinion" are
+    # two different messages and each needs its own way to be said.
+    clear_current_assignee: bool = False
     tag_ids: list[int] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -122,7 +152,7 @@ class ChoreUpdate(BaseModel):
     intentionally not editable here."""
 
     title: str = Field(min_length=1, max_length=255)
-    description: str | None = Field(default=None, max_length=2000)
+    description: SanitisedHtml = None
     start_date: date | None = None
     repeats: RepeatPeriod
     assignment_type: AssignmentType
@@ -131,6 +161,17 @@ class ChoreUpdate(BaseModel):
     weekdays: list[Weekday] | None = None
     assignee_ids: list[int] = Field(default_factory=list)
     current_assignee_id: int | None = None
+    # Make the chore unassigned/shared, so it shows for every household member. Takes
+    # precedence over `current_assignee_id`.
+    #
+    # A separate field because `current_assignee_id: null` already means something else, and
+    # cannot be reinterpreted: it means "no explicit choice", and the update path then keeps a
+    # still-valid assignee rather than clearing it (see _reconcile_open_occurrence). That
+    # matters because `ChoreForm` submits null routinely whenever its picker is hidden - an
+    # empty pool, or an auto strategy on the create page - so if null cleared the assignee,
+    # editing a random chore's title would silently unassign it. "Nobody" and "no opinion" are
+    # two different messages and each needs its own way to be said.
+    clear_current_assignee: bool = False
     tag_ids: list[int] = Field(default_factory=list)
 
     @model_validator(mode="after")
