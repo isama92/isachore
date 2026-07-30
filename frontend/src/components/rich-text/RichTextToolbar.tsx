@@ -17,7 +17,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { RICH_TEXT_LINK_PROTOCOLS } from '@/components/rich-text/format'
+import { isAllowedRichTextUri, RICH_TEXT_LINK_PROTOCOLS } from '@/components/rich-text/format'
 import { cn } from '@/lib/utils'
 
 // Nine buttons in one row, grouped by kind. At 28px each (icon-sm) plus gap-0.5 that is 268px,
@@ -91,6 +91,9 @@ export default function RichTextToolbar({
   const { t } = useTranslation()
   const [linkOpen, setLinkOpen] = useState(false)
   const [href, setHref] = useState('')
+  // Set when setLink refuses the href; cleared on every edit and on reopening, so a stale
+  // rejection cannot outlive the value that caused it.
+  const [linkError, setLinkError] = useState<string | null>(null)
 
   // Tiptap v3's React binding does NOT re-render on transactions, so `editor.isActive(...)`
   // read straight from render would return the state the editor had at mount and never change:
@@ -150,6 +153,19 @@ export default function RichTextToolbar({
     const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(trimmed)
       ? trimmed
       : `https://${trimmed.replace(/^\/+/, '')}`
+    // Checked here rather than by reading `run()`'s false: the chain begins with `focus()`, whose
+    // effect on the DOM is not transactional, so letting it run and fail would yank the caret out
+    // of this input and into the document while the error appeared beside a field the user was no
+    // longer in. Same predicate the Link extension is configured with, so the two cannot disagree.
+    //
+    // Keeping the popover open and saying so also beats the alternative, which was closing on
+    // nothing: a user types `tel:...`, presses Apply, and the popover vanishes having done
+    // nothing at all. The scheme hint is already on screen, but a hint is not an answer to "I
+    // just pressed the button".
+    if (!isAllowedRichTextUri(withScheme)) {
+      setLinkError(t('richText.linkRejected', { schemes: RICH_TEXT_LINK_PROTOCOLS.join(', ') }))
+      return
+    }
     editor.chain().focus().extendMarkRange('link').setLink({ href: withScheme }).run()
     setLinkOpen(false)
   }
@@ -205,6 +221,7 @@ export default function RichTextToolbar({
             // Prefill from the selection so opening it on an existing link edits rather than
             // silently replaces. getAttributes returns {} off a link, hence the fallback.
             if (open) setHref((editor.getAttributes('link').href as string | undefined) ?? '')
+            setLinkError(null)
           }}
         >
           <Tooltip>
@@ -228,9 +245,13 @@ export default function RichTextToolbar({
           <PopoverContent className="flex w-72 flex-col gap-2">
             <Input
               value={href}
-              onChange={(e) => setHref(e.target.value)}
+              onChange={(e) => {
+                setHref(e.target.value)
+                setLinkError(null)
+              }}
               placeholder={t('richText.linkPlaceholder')}
               aria-label={t('richText.linkUrl')}
+              aria-invalid={linkError !== null || undefined}
               // Enter inside a popover that lives inside ChoreForm's <form> would submit the
               // chore. Apply the link instead.
               onKeyDown={(e) => {
@@ -249,9 +270,15 @@ export default function RichTextToolbar({
                 {t('richText.linkApply')}
               </Button>
             </div>
-            <p className="text-[13px] font-medium text-muted-foreground">
-              {t('richText.linkSchemes', { schemes: RICH_TEXT_LINK_PROTOCOLS.join(', ') })}
-            </p>
+            {linkError !== null ? (
+              <p role="alert" className="text-[13px] font-bold text-danger">
+                {linkError}
+              </p>
+            ) : (
+              <p className="text-[13px] font-medium text-muted-foreground">
+                {t('richText.linkSchemes', { schemes: RICH_TEXT_LINK_PROTOCOLS.join(', ') })}
+              </p>
+            )}
           </PopoverContent>
         </Popover>
       </div>

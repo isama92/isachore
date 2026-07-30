@@ -312,7 +312,8 @@
     "linkPlaceholder": "example.com",
     "linkApply": "Apply",
     "linkRemove": "Remove link",
-    "linkSchemes": "Allowed: {{schemes}}"
+    "linkSchemes": "Allowed: {{schemes}}",
+    "linkRejected": "That link cannot be saved. Use {{schemes}}."
   },
   "descriptionDialog": {
     "loading": "Loading the description…",

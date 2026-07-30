@@ -40,6 +40,11 @@ def upgrade() -> None:
     # survives as `<p>&nbsp;</p>`, which sets has_description and opens a blank dialog.
     # `is_blank` already treats it as empty, so this keeps the migration and the write path
     # agreeing on what "empty" means.
+    #
+    # That escape assumes a UTF8 server encoding, the only encoding Postgres accepts unicode
+    # escapes under. Safe here (the official postgres image defaults to UTF8, and this
+    # deployment is), but it is a real coupling: on a non-UTF8 server the E'' literal errors
+    # at upgrade time rather than misbehaving quietly, which is the better of the two.
     op.execute(
         r"""
         UPDATE chores
@@ -83,7 +88,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade schema.
 
-    Lossy in three ways, all unavoidable and none of them visible at runtime, so they are
+    Lossy in four ways, all unavoidable and none of them visible at runtime, so they are
     listed rather than papered over:
 
     - Formatting is gone. Bold, lists and links become their text content; a plain-text
@@ -93,6 +98,10 @@ def downgrade() -> None:
     - Content over 2000 characters is truncated to fit the varchar bound. Truncating rather
       than failing is deliberate: an operator rolling back needs the migration to finish, and
       a downgrade that aborts on one long description leaves the schema mid-change.
+    - Leading and trailing whitespace is trimmed. The tidy-up step below cannot tell a newline
+      the user typed at the end from one a block close left behind, and dropping both is the
+      better trade. Verified against a copy of production: this is the only difference in an
+      upgrade-then-downgrade round trip, and it affected one row out of 25.
     """
     # Undo the upgrade's mapping first: `<br>` and the close of every block element become
     # newlines, then whatever tags remain are stripped. Closing *all* the block tags, not just

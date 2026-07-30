@@ -359,8 +359,34 @@ describe('RichTextEditor', () => {
         // No anchor at all: the editor declined the mark rather than producing one that would
         // lose its href server-side.
         expect(emitted()).not.toContain('<a')
+        // And it says so, in place. Refusing silently would close the popover having done
+        // nothing, which reads as the button being broken.
+        expect(await screen.findByRole('alert')).toHaveTextContent(
+          'That link cannot be saved. Use http, https, mailto.',
+        )
+        expect(screen.getByRole('dialog')).toBeInTheDocument()
       },
     )
+
+    it('clears the rejection once the address is edited', async () => {
+      // A stale error next to a value the user has since fixed is worse than none.
+      renderWithProviders(<Harness />)
+      const user = await type('towels')
+      await user.keyboard('{Control>}a{/Control}')
+      await user.click(screen.getByRole('button', { name: 'Link' }))
+      const pop = within(await screen.findByRole('dialog'))
+
+      await user.type(pop.getByLabelText('Link address'), 'tel:123')
+      await user.click(pop.getByRole('button', { name: 'Apply' }))
+      expect(await screen.findByRole('alert')).toBeInTheDocument()
+
+      await user.clear(pop.getByLabelText('Link address'))
+      await user.type(pop.getByLabelText('Link address'), 'example.com')
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+      await user.click(pop.getByRole('button', { name: 'Apply' }))
+      expect(emitted()).toContain('href="https://example.com"')
+    })
 
     it('turns scheme-relative and root-relative input into a real URL', async () => {
       // The server denies relative hrefs outright (url_relative="deny"), so the editor must not

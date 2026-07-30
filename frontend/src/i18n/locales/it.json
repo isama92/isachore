@@ -312,7 +312,8 @@
     "linkPlaceholder": "esempio.com",
     "linkApply": "Applica",
     "linkRemove": "Rimuovi collegamento",
-    "linkSchemes": "Consentiti: {{schemes}}"
+    "linkSchemes": "Consentiti: {{schemes}}",
+    "linkRejected": "Questo collegamento non può essere salvato. Usa {{schemes}}."
   },
   "descriptionDialog": {
     "loading": "Caricamento della descrizione…",
