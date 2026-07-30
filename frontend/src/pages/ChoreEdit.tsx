@@ -87,7 +87,13 @@ export default function ChoreEdit() {
             // Seeded from the chore's actual state: an already-unassigned chore opens with
             // "Nobody in particular" selected rather than an empty picker, so saving an
             // unrelated edit cannot quietly re-derive an assignee for it.
-            clear_current_assignee: chore.current_assignee === null,
+            //
+            // The pool check matters. A chore with no assignees is *necessarily* unassigned, so
+            // without it the flag seeds true for a null nobody chose - and then adding people to
+            // the pool and saving would keep the chore unassigned where it used to derive
+            // somebody from the strategy. That is the same "forced null vs chosen null"
+            // distinction this flag exists to draw against current_assignee_id.
+            clear_current_assignee: chore.current_assignee === null && chore.assignees.length > 0,
             tag_ids: chore.tags.map((tag) => tag.id),
           }}
           submitLabel={t('choreEdit.submit')}

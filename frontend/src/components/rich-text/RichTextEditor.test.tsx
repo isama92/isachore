@@ -342,6 +342,41 @@ describe('RichTextEditor', () => {
       expect(emitted()).toContain('href="mailto:a@example.com"')
     })
 
+    // Tiptap's `protocols` option cannot express this: it only APPENDS to a hardcoded ten
+    // schemes, so `tel:`, `ftp:`, `sms:`, `xmpp:`, `callto:`, `cid:` and `ftps:` were all
+    // accepted by the editor and all seven dropped by the sanitiser on save - the href gone with
+    // nothing shown to the user. isAllowedUri is what actually narrows it.
+    it.each(['tel:+31201234567', 'ftp://a.example/x', 'sms:+3120', 'xmpp:a@b.test'])(
+      'refuses %s, which the server would strip',
+      async (bad) => {
+        renderWithProviders(<Harness />)
+        const user = await type('towels')
+        await user.keyboard('{Control>}a{/Control}')
+        await user.click(screen.getByRole('button', { name: 'Link' }))
+        const pop = within(await screen.findByRole('dialog'))
+        await user.type(pop.getByLabelText('Link address'), bad)
+        await user.click(pop.getByRole('button', { name: 'Apply' }))
+        // No anchor at all: the editor declined the mark rather than producing one that would
+        // lose its href server-side.
+        expect(emitted()).not.toContain('<a')
+      },
+    )
+
+    it('turns scheme-relative and root-relative input into a real URL', async () => {
+      // The server denies relative hrefs outright (url_relative="deny"), so the editor must not
+      // produce one. Naive prefixing used to yield `https:////example.com/x`, which looks
+      // well-formed and is not what anyone typed.
+      renderWithProviders(<Harness />)
+      const user = await type('towels')
+      await user.keyboard('{Control>}a{/Control}')
+      await user.click(screen.getByRole('button', { name: 'Link' }))
+      const pop = within(await screen.findByRole('dialog'))
+      await user.type(pop.getByLabelText('Link address'), '//example.com/guide')
+      await user.click(pop.getByRole('button', { name: 'Apply' }))
+      expect(emitted()).toContain('href="https://example.com/guide"')
+      expect(emitted()).not.toContain('https:///')
+    })
+
     it('applies on Enter without submitting the form', async () => {
       const onSubmit = vi.fn((e: React.FormEvent) => e.preventDefault())
       renderWithProviders(

@@ -340,12 +340,14 @@ async def _reconcile_open_occurrence(
             if latest_done is not None
             else _initial_slot(payload.start_date, rule, datetime.now(UTC))
         )
-        current = (
-            None
-            if payload.clear_current_assignee
-            else _resolve_current_assignee(pool, payload.current_assignee_id)
-            or initial_assignee(chore.assignment_type, pool)
-        )
+        # Same shape as create_chore's version below, deliberately: the ternary this replaces
+        # relied on `or` binding tighter than the conditional expression, which parsed correctly
+        # but read as though the `or` might attach to the whole else branch.
+        current = None
+        if not payload.clear_current_assignee:
+            current = _resolve_current_assignee(
+                pool, payload.current_assignee_id
+            ) or initial_assignee(chore.assignment_type, pool)
         session.add(
             ChoreOccurrence(
                 chore_id=chore.id,

@@ -421,6 +421,42 @@ describe('clearing the current assignee', () => {
     })
   })
 
+  it('does not treat an empty pool as a choice of "nobody"', async () => {
+    // A chore with no assignees is *necessarily* unassigned, so seeding the flag from
+    // current_assignee alone would set it from a null nobody chose. The user then adds people to
+    // the pool - which makes the picker appear - and saving would keep the chore unassigned,
+    // where before the flag existed the strategy would have derived somebody. Same "forced null
+    // vs chosen null" distinction the flag exists to draw against current_assignee_id.
+    const empty = makeChore({
+      id: 7,
+      title: 'Dishes',
+      assignment_type: 'random',
+      household: { id: 4, name: 'Beach House' },
+      assignees: [],
+      current_assignee: null,
+    })
+    const fetchMock = mockFetch(mocks(empty))
+    renderEdit()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    await screen.findByDisplayValue('Dishes')
+    // No picker yet: it needs a non-empty pool.
+    expect(
+      screen.queryByRole('combobox', { name: 'Currently assigned to' }),
+    ).not.toBeInTheDocument()
+
+    // Add somebody, which reveals the picker.
+    await user.click(screen.getByRole('button', { name: 'Assignees' }))
+    await user.click(await screen.findByRole('option', { name: 'Jo Ng' }))
+    await user.keyboard('{Escape}')
+    expect(screen.getByRole('combobox', { name: 'Currently assigned to' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('chores-list')
+    // The strategy gets to pick, exactly as it did before this flag existed.
+    expect(patchBody(fetchMock)).toMatchObject({ clear_current_assignee: false })
+  })
+
   it('opens on "nobody" for a chore that is already unassigned', async () => {
     // Seeded from the chore, so saving an unrelated edit cannot quietly re-derive an assignee
     // for a chore someone deliberately shared. The pool is non-empty, which is what makes the

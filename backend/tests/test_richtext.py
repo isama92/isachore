@@ -88,6 +88,18 @@ def test_strips_scripts_handlers_styles_and_images() -> None:
         assert sanitise_html(raw) == expected, raw
 
 
+def test_drops_relative_and_scheme_relative_hrefs() -> None:
+    """ALLOWED_SCHEMES only bounds *absolute* URLs, and nh3 defaults relative ones to
+    "pass_through", so without url_relative="deny" these survive untouched - `//evil.example/x`
+    resolving off-site without ever passing the allowlist. The toolbar cannot produce one, so the
+    arrival path is raw HTML from a non-browser client: precisely what this module defends."""
+    for href in ("//evil.example/x", "/admin/users", "../up", "x/y"):
+        cleaned = sanitise_html(f'<a href="{href}">click</a>')
+        assert "href" not in cleaned, href
+        # The anchor itself survives, same as for a disallowed scheme: the text stays readable.
+        assert ">click</a>" in cleaned, href
+
+
 def test_drops_disallowed_url_schemes_but_keeps_the_element() -> None:
     # nh3 removes the offending attribute rather than the anchor, so a poisoned link
     # degrades to unclickable text instead of disappearing mid-sentence.

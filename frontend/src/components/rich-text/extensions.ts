@@ -1,6 +1,6 @@
 import StarterKit from '@tiptap/starter-kit'
 import { Placeholder } from '@tiptap/extensions'
-import { RICH_TEXT_LINK_PROTOCOLS } from '@/components/rich-text/format'
+import { isAllowedRichTextUri } from '@/components/rich-text/format'
 
 // The editor's extension set: what a user is able to produce.
 //
@@ -22,10 +22,14 @@ export function richTextExtensions({ placeholder }: { placeholder?: string } = {
       // the last block. It is a real node, so it serialises: left on, getHTML() ends in `<p></p>`
       // and every document looks non-empty to anything checking.
       trailingNode: false,
-      // openOnClick would navigate away from a half-written chore on a stray click. `protocols`
-      // has to stay identical to ALLOWED_SCHEMES on the server, or a link the editor accepts
-      // loses its href on save.
-      link: { openOnClick: false, protocols: [...RICH_TEXT_LINK_PROTOCOLS] },
+      // openOnClick would navigate away from a half-written chore on a stray click.
+      //
+      // `isAllowedUri`, NOT `protocols`: the latter only appends to Tiptap's hardcoded ten
+      // schemes, so passing our three (already among them) narrows nothing and the editor would
+      // accept `tel:`, `ftp:`, `sms:` and friends that the server then strips on save. See
+      // isAllowedRichTextUri in format.ts, which derives the rule from the same constant the
+      // server list mirrors.
+      link: { openOnClick: false, isAllowedUri: isAllowedRichTextUri },
     }),
     // Unlike the extensions above, Placeholder adds no node and changes no document: it is a
     // ProseMirror decoration that sets a data-placeholder attribute and an is-editor-empty class,

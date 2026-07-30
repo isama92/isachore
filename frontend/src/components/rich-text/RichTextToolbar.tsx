@@ -139,10 +139,17 @@ export default function RichTextToolbar({
   function applyLink() {
     const trimmed = href.trim()
     if (trimmed === '') return
-    // Tiptap's Link validates against `protocols`, but a user typing "example.com" means https,
-    // and a schemeless href would otherwise resolve against the app's own origin. Adding the
-    // scheme here is also what keeps the value inside the server's ALLOWED_SCHEMES.
-    const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(trimmed) ? trimmed : `https://${trimmed}`
+    // A user typing "example.com" means https, and a schemeless href would otherwise resolve
+    // against the app's own origin. Prefixing here is also what keeps the value inside the
+    // server's ALLOWED_SCHEMES, which rejects relative URLs outright (url_relative="deny").
+    //
+    // The leading slashes have to go with it: "//example.com/x" and "/admin/users" are not hosts,
+    // so a naive prefix produced "https:////example.com/x" - a well-formed-looking href that is
+    // not what anyone typed. Stripping them turns both into a plain https URL, which the editor
+    // and the server then agree on.
+    const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(trimmed)
+      ? trimmed
+      : `https://${trimmed.replace(/^\/+/, '')}`
     editor.chain().focus().extendMarkRange('link').setLink({ href: withScheme }).run()
     setLinkOpen(false)
   }
@@ -158,9 +165,13 @@ export default function RichTextToolbar({
     // and in its own tests - without the tooltips throwing for want of a provider.
     <TooltipProvider>
       <div
-        // Not role="toolbar": that implies one tab stop with arrow-key navigation between the
-        // buttons, which would need a focus manager. Nine ordinary tab stops is honest, and it
-        // keeps the field usable by keyboard without one.
+        // role="group", not "toolbar": toolbar implies a single tab stop with arrow-key
+        // navigation between the buttons, which would need a focus manager, and nine ordinary tab
+        // stops is both honest and usable. But the role is not optional either - a bare <div>
+        // computes as `generic`, which the ARIA spec prohibits naming, so the aria-label below
+        // was not reliably reaching assistive tech. `group` supports a name and carries no
+        // focus-management contract.
+        role="group"
         data-slot="rich-text-toolbar"
         aria-label={t('richText.toolbar')}
         className="flex flex-wrap items-center gap-0.5 border-b border-input px-1.5 py-1"

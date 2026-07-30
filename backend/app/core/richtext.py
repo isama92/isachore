@@ -90,6 +90,14 @@ def sanitise_html(value: str) -> str:
         tags=ALLOWED_TAGS,
         attributes=ALLOWED_ATTRIBUTES,
         url_schemes=ALLOWED_SCHEMES,
+        # ALLOWED_SCHEMES only bounds *absolute* URLs, and nh3 defaults relative ones to
+        # "pass_through", so without this `//evil.example/x` and `/admin/users` survive untouched -
+        # the first resolving off-site without ever passing the allowlist. Not a script vector
+        # (`javascript:` and `data:` are still dropped either way), but the arrival path is exactly
+        # the one this module defends: raw HTML posted by a non-browser client. Denying them also
+        # matches the intent of forcing `target="_blank"`, under which an in-app relative link
+        # would open the app in a second tab.
+        url_relative="deny",
         link_rel=LINK_REL,
         set_tag_attribute_values=FORCED_ATTRIBUTES,
     )

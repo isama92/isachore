@@ -298,7 +298,7 @@ pre-commit run --all-files                           # what the git hook runs
 - **Rich text descriptions**: `chores.description` is sanitised HTML in a `Text` column,
   authored in Tiptap v3. `backend/app/core/richtext.py` is the **single definition of the
   format** and the security boundary; the editor's `extensions.ts` and `index.css`'s
-  `.rich-text` are downstream of it. Five things to keep straight:
+  `.rich-text` are downstream of it. Six things to keep straight:
   - **Sanitising happens on write, server-side, and that is not negotiable.** `/api/v1` is a
     JSON API with future non-browser clients, so a browser-side allowlist proves nothing:
     `curl` skips it. `SanitisedHtml` in `schemas/chore.py` puts `max_length` *inside* the
@@ -308,6 +308,16 @@ pre-commit run --all-files                           # what the git hook runs
     (nh3's `set_tag_attribute_values`), not merely allowed, so a payload posted with
     `target="_self"` is overridden rather than obeyed. Tightening the allowlist later does
     NOT clean old rows; that needs its own data migration.
+  - **Links: the editor's rule is `isAllowedUri`, never Tiptap's `protocols` option.**
+    `protocols` only *appends* to a hardcoded ten schemes (http, https, ftp, ftps, mailto, tel,
+    callto, sms, cid, xmpp), so passing our three - all already in that list - narrows nothing.
+    Left that way the editor accepts a `tel:` or `ftp:` link, renders it, and the server drops
+    the href on save with nothing shown to the user: the exact silent formatting loss this
+    design exists to prevent. `isAllowedRichTextUri` in `rich-text/format.ts` derives the rule
+    from `RICH_TEXT_LINK_PROTOCOLS`, and `sanitise_html` passes `url_relative="deny"` because
+    `ALLOWED_SCHEMES` bounds absolute URLs only - nh3 otherwise passes `//evil.example/x`
+    straight through. The two sides must keep agreeing: whatever the server strips, the editor
+    has to refuse, or the loss is silent again.
   - **"Empty" is not one value in HTML.** Every WYSIWYG emits `<p></p>`, `<p><br></p>` or
     `<p>&nbsp;</p>` for an untouched editor and all three are truthy, which is what makes a
     bare `if description:` wrong. `sanitise_description` collapses them to `NULL`, and

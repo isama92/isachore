@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import i18n from '@/i18n/i18n'
 import { api, ApiError } from '@/lib/api'
 import type { Chore } from '@/lib/types'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -25,13 +26,18 @@ function DescriptionBody({ choreId }: { choreId: number }) {
         if (!cancelled) setHtml(full.description ?? '')
       })
       .catch((e: unknown) => {
-        if (!cancelled)
-          setError(e instanceof ApiError ? e.message : t('descriptionDialog.loadError'))
+        // Read through the i18n singleton rather than the render-time `t`. Closing over `t` puts
+        // it in the dependency list, so switching language with the dialog open would refetch the
+        // chore for nothing. (Profile's language toast reaches for `i18n.t` too, for the
+        // mirror-image reason: there it is to get the *new* language, here to shed a dependency.)
+        if (!cancelled) {
+          setError(e instanceof ApiError ? e.message : i18n.t('descriptionDialog.loadError'))
+        }
       })
     return () => {
       cancelled = true
     }
-  }, [choreId, t])
+  }, [choreId])
 
   if (error !== null) return <p className="text-[13px] font-bold text-danger">{error}</p>
   if (html === null) return <Spinner label={t('descriptionDialog.loading')} />
