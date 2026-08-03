@@ -32,7 +32,7 @@ const savedChore = makeChore({
   title: 'Scrub the tub',
   description: 'Old notes',
   household: { id: 4, name: 'Beach House' },
-  assignees: [makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' })],
+  assignees: [makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })],
   tags: [makeTag({ id: 3, name: 'deep-clean' })],
 })
 
@@ -91,7 +91,7 @@ describe('ChoreEdit', () => {
       assignment_type: 'alphabetical',
       turn_length: 3,
       household: { id: 4, name: 'Beach House' },
-      assignees: [makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' })],
+      assignees: [makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })],
     })
     mockFetch([
       { path: '/api/v1/chores/7', method: 'GET', body: rotating },
@@ -191,7 +191,7 @@ describe('ChoreEdit', () => {
   })
 
   it('pre-fills the current assignee for a manual chore', async () => {
-    const jo = makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' })
+    const jo = makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })
     const manual = makeChore({
       id: 7,
       title: 'Dishes',
@@ -218,8 +218,8 @@ describe('ChoreEdit', () => {
   })
 
   it('lets an auto-rotating chore be handed to someone else, and says it is one turn', async () => {
-    const jo = makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' })
-    const sam = makeUser({ id: 3, first_name: 'Sam', last_name: 'Lee' })
+    const jo = makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })
+    const sam = makeHouseholdMember({ id: 3, first_name: 'Sam', last_name: 'Lee' })
     const rotating = makeChore({
       id: 7,
       title: 'Dishes',
@@ -291,7 +291,7 @@ describe('ChoreEdit', () => {
   })
 
   it('does not offer the turn hint for a manual chore, whose pick is not temporary', async () => {
-    const jo = makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' })
+    const jo = makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })
     mockFetch([
       {
         path: '/api/v1/chores/7',
@@ -352,10 +352,10 @@ describe('ChoreEdit', () => {
 })
 
 describe('clearing the current assignee', () => {
-  // makeUser for the chore's own assignees (ChoreRead embeds the full user), makeHouseholdMember
-  // for the members endpoint (data-minimised: no email). Same split as the tests above.
-  const jo = makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' })
-  const sam = makeUser({ id: 3, first_name: 'Sam', last_name: 'Lee' })
+  // makeHouseholdMember for both the chore's own assignees and the members endpoint: the
+  // chore read is data-minimised too now, so there is no longer a split to keep.
+  const jo = makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })
+  const sam = makeHouseholdMember({ id: 3, first_name: 'Sam', last_name: 'Lee' })
   const members = [
     makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' }),
     makeHouseholdMember({ id: 3, first_name: 'Sam', last_name: 'Lee' }),

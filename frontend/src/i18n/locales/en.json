@@ -336,8 +336,8 @@
     "leaveConfirmAction": "Leave",
     "left": "You left the household",
     "leaveError": "Could not leave the household",
-    "adminBadge": "Admin",
     "adminLabel": "Household admin",
+    "adminRole": "Admin",
     "roles": {
       "organiser": "Organiser",
       "deputy": "Deputy",
@@ -347,7 +347,7 @@
     "roleUpdated": "{{name}}'s role updated",
     "roleError": "Could not update the role",
     "transferConfirm": "Make {{name}} the household admin?",
-    "transferConfirmBody": "They become the only member who can edit this household and manage its members.",
+    "transferConfirmBody": "They become the only member who can rename or delete this household, remove members and transfer it on again.",
     "transferConfirmAction": "Transfer",
     "transferred": "Household admin updated",
     "transferError": "Could not update the household admin",

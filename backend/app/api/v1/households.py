@@ -16,6 +16,8 @@ from app.core.households import (
     is_active_member,
     member_count_column,
     member_of,
+    require_role,
+    role_in_household,
 )
 from app.core.invitations import round_up_to_hour
 from app.core.security import INVITATION_TOKEN_TTL, generate_token
@@ -44,8 +46,9 @@ HouseholdSortBy = Literal["id", "name", "created_at"]
 MemberSortBy = Literal["id", "name"]
 SortDir = Literal["asc", "desc"]
 
-# The most outstanding (pending) invitations a household may have at once; the
-# owner must revoke one (or have someone accept) to add more.
+# The most outstanding (pending) invitations a household may have at once; someone must
+# revoke one (or have it accepted) to add more. Per household, not per inviter, so the
+# organisers who can now invite share one budget.
 MAX_PENDING_INVITATIONS = 5
 
 
@@ -276,13 +279,29 @@ async def _get_my_household_or_404(
 
 async def _get_owned_household(session: SessionDep, user_id: int, household_id: int) -> Household:
     """A household the caller both belongs to (404 otherwise) and owns (403
-    otherwise). Gates the edit / delete / member-management endpoints."""
+    otherwise). Gates renaming, deleting and removing members - the things that stay the
+    owner's alone. Managing *people* is one step wider, see `_get_organised_household`."""
     household = await _get_my_household_or_404(session, user_id, household_id)
     if household.admin_id != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the household admin can do this",
         )
+    return household
+
+
+async def _get_organised_household(
+    session: SessionDep, user_id: int, household_id: int
+) -> Household:
+    """A household the caller belongs to (404 otherwise) and organises (403 otherwise).
+
+    Gates inviting and role-setting, which the owner shares with the household's organisers:
+    a house with several adults should not route every membership change through one person.
+    The owner passes because owners are always organisers. What it does NOT cover is the
+    narrower rule on *which* roles an organiser may set - that is caller-and-target specific,
+    so it lives in `update_household_member`."""
+    household = await _get_my_household_or_404(session, user_id, household_id)
+    await require_role(session, household_id, user_id, HouseholdRole.organiser)
     return household
 
 
@@ -386,15 +405,20 @@ async def update_household_member(
     user: CurrentUser,
     session: SessionDep,
 ) -> HouseholdMemberRoleRead:
-    """Set one member's role. Owner-only.
+    """Set one member's role. The owner may set any of the three; an organiser may only move
+    people between deputy and helper.
 
-    The owner's own row is refused (409) rather than silently ignored: they are always an
-    organiser, and the way to change who holds that is to transfer ownership
-    (`PATCH /households/{id}` with `admin_id`), which promotes the new owner. That also
-    means nobody can demote themselves out of managing their own household. Organisers
-    cannot reach this endpoint yet; letting them invite and set roles is a separate step.
+    That asymmetry is the point: an organiser can share the day-to-day load without being able
+    to grow the set of people who could demote them. So they may not hand out `organiser`, may
+    not touch a row that already holds it, and therefore may not demote themselves either -
+    that last one falls out of the same rule rather than needing its own check.
+
+    The checks are ordered deliberately. The owner's row is refused with a 409 **before** any
+    caller-specific rule, because "the owner is always an organiser" is a property of the
+    target: everyone gets the same actionable answer (transfer ownership, which promotes the
+    new owner) instead of an organiser getting a 403 about a rule that is not the real reason.
     """
-    household = await _get_owned_household(session, user.id, household_id)
+    household = await _get_organised_household(session, user.id, household_id)
     if household.admin_id == user_id:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -406,6 +430,13 @@ async def update_household_member(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Household member not found"
         )
+    if household.admin_id != user.id:
+        target_role = await role_in_household(session, household_id, user_id)
+        if target_role == HouseholdRole.organiser or payload.role == HouseholdRole.organiser:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the household admin can grant or change the organiser role",
+            )
     await session.execute(
         update(household_members)
         .where(
@@ -440,7 +471,7 @@ async def leave_household(household_id: int, user: CurrentUser, session: Session
     await remove_member(session, household_id, user.id)
 
 
-# --- invitations (owner-managed) ----------------------------------------
+# --- invitations (owner and organisers) ---------------------------------
 
 
 def _invitation_url(token: str) -> str:
@@ -490,10 +521,20 @@ async def _get_invitation_or_404(
 async def create_invitation(
     household_id: int, user: CurrentUser, session: SessionDep
 ) -> HouseholdInvitationRead:
-    await _get_owned_household(session, user.id, household_id)
+    await _get_organised_household(session, user.id, household_id)
     # Cap outstanding invites: only pending ones count (expired/accepted/revoked
     # don't). The hourly sweep keeps `status` current, so a stale pending row
     # only lingers in the count for up to the sweep interval.
+    #
+    # A count, not a constraint, so it does NOT hold under concurrency, and the overshoot is
+    # not bounded: two organisers clicking at the same moment cost one extra invite, but a
+    # caller firing N requests in parallel has all N read the same count and insert, defeating
+    # the cap entirely. Accepted, because the cap is hygiene rather than a security boundary -
+    # anyone who can reach this endpoint can already mint invites indefinitely by revoking and
+    # re-creating, every token is single-use and expiring, and an invitee lands as a helper in
+    # a household that caller already organises. So there is nothing to gain by racing it.
+    # `SELECT pg_advisory_xact_lock(household_id)` before the count would close it in one
+    # statement if invitations ever carry a cost (rate limiting, email, a paid tier).
     live_pending = await session.scalar(
         select(func.count())
         .select_from(HouseholdInvitation)
@@ -505,8 +546,11 @@ async def create_invitation(
     if (live_pending or 0) >= MAX_PENDING_INVITATIONS:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
+            # "This household", not "you": any organiser can now invite, so the 5 pending
+            # ones are as likely to be somebody else's, and this string is rendered verbatim.
             detail=(
-                f"You already have {MAX_PENDING_INVITATIONS} pending invitations; revoke one first."
+                f"This household already has {MAX_PENDING_INVITATIONS} pending invitations; "
+                "revoke one first."
             ),
         )
     invitation = HouseholdInvitation(
@@ -527,7 +571,7 @@ async def create_invitation(
 async def list_invitations(
     household_id: int, user: CurrentUser, session: SessionDep
 ) -> list[HouseholdInvitationRead]:
-    await _get_owned_household(session, user.id, household_id)
+    await _get_organised_household(session, user.id, household_id)
     # Newest first; accepted/revoked/expired invitations are kept until deleted.
     result = await session.execute(
         select(HouseholdInvitation)
@@ -543,7 +587,7 @@ async def list_invitations(
 async def revoke_invitation(
     household_id: int, invitation_id: int, user: CurrentUser, session: SessionDep
 ) -> HouseholdInvitationRead:
-    await _get_owned_household(session, user.id, household_id)
+    await _get_organised_household(session, user.id, household_id)
     invitation = await _get_invitation_or_404(session, household_id, invitation_id)
     if not _is_live_pending(invitation):
         raise HTTPException(
@@ -562,7 +606,7 @@ async def revoke_invitation(
 async def delete_invitation(
     household_id: int, invitation_id: int, user: CurrentUser, session: SessionDep
 ) -> None:
-    await _get_owned_household(session, user.id, household_id)
+    await _get_organised_household(session, user.id, household_id)
     invitation = await _get_invitation_or_404(session, household_id, invitation_id)
     # A live pending invite must be revoked, not deleted; accepted / revoked /
     # expired ones are deletable.

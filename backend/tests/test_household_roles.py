@@ -288,7 +288,85 @@ async def test_owners_own_role_cannot_be_set(
     assert await _stored_role(db_session, household.id, owner.id) == HouseholdRole.organiser
 
 
-async def test_only_the_owner_may_set_roles(
+async def test_below_organiser_cannot_set_any_role(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    owner = await make_user(email="owner@example.com")
+    deputy = await make_user(email="deputy@example.com")
+    helper = await make_user(email="helper@example.com")
+    household = await make_household(
+        members=[owner, deputy, helper],
+        roles={deputy.id: HouseholdRole.deputy, helper.id: HouseholdRole.helper},
+    )
+
+    for caller in (deputy, helper):
+        client = await auth_client(caller)
+        for role in (HouseholdRole.organiser, HouseholdRole.deputy):
+            resp = await client.patch(
+                f"/api/v1/households/{household.id}/members/{helper.id}",
+                json={"role": role},
+            )
+            assert resp.status_code == 403, f"{caller.email} -> {role}"
+            assert resp.json()["detail"] == "Only household organisers can do this"
+    assert await _stored_role(db_session, household.id, helper.id) == HouseholdRole.helper
+
+
+async def test_an_organiser_moves_people_between_deputy_and_helper(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    # The whole point of widening this: a house with several adults should not route every
+    # membership change through one person.
+    owner = await make_user(email="owner@example.com")
+    organiser = await make_user(email="organiser@example.com")
+    member = await make_user(email="member@example.com")
+    household = await make_household(
+        members=[owner, organiser, member], roles={member.id: HouseholdRole.helper}
+    )
+    client = await auth_client(organiser)
+
+    for role in (HouseholdRole.deputy, HouseholdRole.helper):
+        resp = await client.patch(
+            f"/api/v1/households/{household.id}/members/{member.id}", json={"role": role}
+        )
+        assert resp.status_code == 200, role
+        assert resp.json()["role"] == role
+        assert await _stored_role(db_session, household.id, member.id) == role
+
+
+async def test_an_organiser_cannot_hand_out_the_organiser_role(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    # The asymmetry that makes the widening safe: an organiser can share the load without
+    # being able to grow the set of people who could demote them.
+    owner = await make_user(email="owner@example.com")
+    organiser = await make_user(email="organiser@example.com")
+    helper = await make_user(email="helper@example.com")
+    household = await make_household(
+        members=[owner, organiser, helper], roles={helper.id: HouseholdRole.helper}
+    )
+    client = await auth_client(organiser)
+
+    resp = await client.patch(
+        f"/api/v1/households/{household.id}/members/{helper.id}",
+        json={"role": HouseholdRole.organiser},
+    )
+    assert resp.status_code == 403
+    assert (
+        resp.json()["detail"] == "Only the household admin can grant or change the organiser role"
+    )
+    assert await _stored_role(db_session, household.id, helper.id) == HouseholdRole.helper
+
+
+async def test_an_organiser_cannot_change_another_organiser(
     make_user: MakeUser,
     make_household: MakeHousehold,
     auth_client: AuthClient,
@@ -296,25 +374,116 @@ async def test_only_the_owner_may_set_roles(
 ) -> None:
     owner = await make_user(email="owner@example.com")
     organiser = await make_user(email="organiser@example.com")
-    deputy = await make_user(email="deputy@example.com")
-    helper = await make_user(email="helper@example.com")
-    household = await make_household(
-        members=[owner, organiser, deputy, helper],
-        roles={deputy.id: HouseholdRole.deputy, helper.id: HouseholdRole.helper},
-    )
+    peer = await make_user(email="peer@example.com")
+    # `peer` takes make_household's organiser default, which is the role under test here.
+    household = await make_household(members=[owner, organiser, peer])
+    client = await auth_client(organiser)
 
-    # Every non-owner role, including a full organiser: setting roles (like inviting) is
-    # the owner's alone for now, which is what keeps this PR from needing an
-    # escalation rule about who may hand out the organiser role.
-    for caller in (organiser, deputy, helper):
-        client = await auth_client(caller)
-        resp = await client.patch(
-            f"/api/v1/households/{household.id}/members/{helper.id}",
-            json={"role": HouseholdRole.organiser},
-        )
-        assert resp.status_code == 403, caller.email
+    resp = await client.patch(
+        f"/api/v1/households/{household.id}/members/{peer.id}",
+        json={"role": HouseholdRole.helper},
+    )
+    assert resp.status_code == 403
+    assert await _stored_role(db_session, household.id, peer.id) == HouseholdRole.organiser
+
+
+async def test_an_organiser_cannot_demote_themselves(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    # Falls out of the "cannot change an organiser" rule rather than needing its own check,
+    # but it is the case a reader will come looking for, so pin it separately.
+    owner = await make_user(email="owner@example.com")
+    organiser = await make_user(email="organiser@example.com")
+    household = await make_household(members=[owner, organiser])
+    client = await auth_client(organiser)
+
+    resp = await client.patch(
+        f"/api/v1/households/{household.id}/members/{organiser.id}",
+        json={"role": HouseholdRole.helper},
+    )
+    assert resp.status_code == 403
+    assert await _stored_role(db_session, household.id, organiser.id) == HouseholdRole.organiser
+
+
+async def test_an_organiser_targeting_the_owner_gets_the_owner_rule(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    """409, not the organiser 403: the ordering of the two checks is deliberate.
+
+    "The owner is always an organiser" is a property of the *target*, so everyone gets the
+    same actionable answer - transfer ownership - rather than an organiser being told about a
+    rule that is not the real reason they were refused.
+    """
+    owner = await make_user(email="owner@example.com")
+    organiser = await make_user(email="organiser@example.com")
+    household = await make_household(members=[owner, organiser])
+    client = await auth_client(organiser)
+
+    resp = await client.patch(
+        f"/api/v1/households/{household.id}/members/{owner.id}",
+        json={"role": HouseholdRole.helper},
+    )
+    assert resp.status_code == 409
+    assert "transfer ownership" in resp.json()["detail"].lower()
+
+
+async def test_an_organiser_manages_invitations(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    auth_client: AuthClient,
+) -> None:
+    """Inviting moved from owner-only to organiser-level along with role-setting: both are
+    managing people, which is the load a second adult should be able to share."""
+    owner = await make_user(email="owner@example.com")
+    organiser = await make_user(email="organiser@example.com")
+    household = await make_household(members=[owner, organiser])
+    client = await auth_client(organiser)
+
+    created = await client.post(f"/api/v1/households/{household.id}/invitations")
+    assert created.status_code == 201
+    invitation_id = created.json()["id"]
+
+    listed = await client.get(f"/api/v1/households/{household.id}/invitations")
+    assert listed.status_code == 200
+    assert [i["id"] for i in listed.json()] == [invitation_id]
+
+    revoked = await client.post(
+        f"/api/v1/households/{household.id}/invitations/{invitation_id}/revoke"
+    )
+    assert revoked.status_code == 200
+    assert revoked.json()["status"] == "revoked"
+
+    # Deleting is only allowed once revoked, which is why it comes last.
+    deleted = await client.delete(f"/api/v1/households/{household.id}/invitations/{invitation_id}")
+    assert deleted.status_code == 204
+
+
+async def test_renaming_deleting_and_removing_stay_owner_only(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    """The line the widening did NOT cross. An organiser manages people; the household itself
+    and who is in it at all remain the owner's."""
+    owner = await make_user(email="owner@example.com")
+    organiser = await make_user(email="organiser@example.com")
+    spare = await make_user(email="spare@example.com")
+    household = await make_household(
+        members=[owner, organiser, spare], roles={spare.id: HouseholdRole.helper}
+    )
+    client = await auth_client(organiser)
+
+    for method, url, body in (
+        ("patch", f"/api/v1/households/{household.id}", {"name": "Renamed"}),
+        ("delete", f"/api/v1/households/{household.id}", None),
+        # An ordinary member, not the owner: targeting the owner would collide with
+        # remove_member's own 409 and pass without testing the endpoint's gate at all.
+        ("delete", f"/api/v1/households/{household.id}/members/{spare.id}", None),
+    ):
+        resp = await getattr(client, method)(url, **({"json": body} if body else {}))
+        assert resp.status_code == 403, f"{method} {url}"
         assert resp.json()["detail"] == "Only the household admin can do this"
-    assert await _stored_role(db_session, household.id, helper.id) == HouseholdRole.helper
 
 
 async def test_setting_a_role_in_someone_elses_household_is_404(
@@ -557,6 +726,63 @@ async def test_reading_one_chore_stays_open_to_every_role(
     resp = await client.get(f"/api/v1/chores/{chore.id}")
     assert resp.status_code == 200
     assert resp.json()["description"] == "<p>Under the sink</p>"
+
+
+async def test_the_open_chore_read_carries_no_personal_data(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    """The counterweight to the test above: this read is open to every role, so it must not
+    ship anything a helper should not have.
+
+    It used to serialise each assignee as a full `UserRead` - email, is_admin, status,
+    confirmed_at, created_at, the appearance preferences, two_factor_enabled and avatar_url -
+    which handed a helper their housemates' email addresses over an endpoint they legitimately
+    need for the description dialog. Asserting the exact key set rather than `"email" not in`,
+    so re-widening the schema by any field fails here rather than only the one field somebody
+    thought to check.
+    """
+    owner = await make_user(email="owner@example.com", first_name="Olive", last_name="Owner")
+    helper = await make_user(email="helper@example.com")
+    household = await make_household(
+        members=[owner, helper], roles={helper.id: HouseholdRole.helper}
+    )
+    chore = await make_chore(household=household, assignees=[owner], current_assignee=owner)
+    client = await auth_client(helper)
+
+    body = (await client.get(f"/api/v1/chores/{chore.id}")).json()
+    assert body["assignees"] == [{"id": owner.id, "first_name": "Olive", "last_name": "Owner"}]
+    assert set(body["current_assignee"]) == {"id", "first_name", "last_name"}
+
+    # The same shape on the management list and on a write response, since all three share the
+    # schema. This half has to run as the OWNER: the list is narrowed to organised households,
+    # so a helper's page is empty and a loop over it would assert nothing at all.
+    client = await auth_client(owner)
+    listed_resp = await client.get("/api/v1/chores")
+    assert listed_resp.status_code == 200
+    listed = listed_resp.json()
+    assert listed["items"], "the owner organises this household, so the page must not be empty"
+    for row in listed["items"]:
+        for assignee in row["assignees"]:
+            assert set(assignee) == {"id", "first_name", "last_name"}
+    patched_resp = await client.patch(
+        f"/api/v1/chores/{chore.id}",
+        json={
+            "title": chore.title,
+            "start_date": "2026-08-01",
+            "repeats": "weekly",
+            "assignment_type": "manual",
+            "turn_length": 1,
+            "repeat_interval": 1,
+            "weekdays": None,
+            "assignee_ids": [owner.id],
+            "tag_ids": [],
+        },
+    )
+    assert patched_resp.status_code == 200
+    assert set(patched_resp.json()["assignees"][0]) == {"id", "first_name", "last_name"}
 
 
 async def test_chores_list_only_shows_organised_households(

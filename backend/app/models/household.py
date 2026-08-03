@@ -22,8 +22,10 @@ class HouseholdRole(StrEnum):
     deputy can do; deputy adds History and Statistics to what a helper can do;
     helper can only tick chores off. Household *ownership* stays a separate fact
     (`Household.admin_id`) and outranks all three: the owner is always an
-    organiser, and only they rename or delete the household, manage members and
-    set roles.
+    organiser, and only they rename or delete the household, remove members or
+    transfer it. Setting roles and inviting are organiser-level, with one
+    asymmetry - an organiser may not grant `organiser` or change a row that
+    already holds it, so only the owner can grow that set.
     """
 
     organiser = "organiser"
@@ -52,9 +54,10 @@ class Household(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
-    # The household owner: the only member allowed to edit the household and
-    # manage its members. Always references a current member (see the household
-    # endpoints); users are soft-deleted, never hard-deleted, so no cascade.
+    # The household owner: the only member allowed to edit or delete the household, remove
+    # members and transfer it (organisers set roles and invite). Always references a current
+    # member (see the household endpoints); users are soft-deleted, never hard-deleted, so
+    # no cascade.
     admin_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     # Soft delete: NULL means active, a timestamp means the household is deleted
     # and hidden from the user surface (admins can still view and restore it).

@@ -71,7 +71,7 @@ describe('AdminHouseholdEdit', () => {
 
   it('shows roles read-only on the admin surface', async () => {
     // This page passes canManage unconditionally (a site admin may remove members here), so
-    // roles would be editable too if canEditRoles were folded into that one prop. It is not:
+    // roles would be editable too if the role props were folded into that one. They are not:
     // the admin router has no member-PATCH endpoint, so the Select would call nothing. A site
     // admin who needs to change a role impersonates the household owner.
     const fetchMock = stubFetch({

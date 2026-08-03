@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router'
 import { toast } from 'sonner'
 import Households from './Households'
-import { renderWithProviders } from '../test/utils'
+import { renderWithProviders, membershipsFor } from '../test/utils'
 import { makeHousehold, makeUser } from '../test/fixtures'
 import type { Household } from '../lib/types'
 
@@ -79,14 +79,43 @@ describe('Households', () => {
     expect(screen.getByRole('link', { name: 'Edit' })).toHaveAttribute('href', '/households/7/edit')
   })
 
-  it('shows View (not Edit/Delete) for a household the user does not own', async () => {
+  it('shows View (not Edit/Delete) for a household the user only helps in', async () => {
     stubFetch({ households: [makeHousehold({ id: 8, name: 'Not Mine', admin_id: 99 })] })
-    renderWithProviders(<Households />, { authValue: { user: me } })
+    renderWithProviders(<Households />, {
+      authValue: { user: me, memberships: membershipsFor('helper', 8) },
+    })
 
     await screen.findByText('Not Mine')
     expect(screen.getByRole('link', { name: 'View' })).toHaveAttribute('href', '/households/8/edit')
     expect(screen.queryByRole('link', { name: 'Edit' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
+  })
+
+  it('shows Edit to an organiser who does not own the household, but no Delete', async () => {
+    // An organiser cannot rename or delete it, but they DO set deputy and helper roles and
+    // manage its invitations on that page, so an eye labelled "View" hid a real capability.
+    // Delete stays owner-only, which is what keeps the two rows distinguishable.
+    stubFetch({ households: [makeHousehold({ id: 8, name: 'Not Mine', admin_id: 99 })] })
+    renderWithProviders(<Households />, {
+      authValue: { user: me, memberships: membershipsFor('organiser', 8) },
+    })
+
+    await screen.findByText('Not Mine')
+    expect(screen.getByRole('link', { name: 'Edit' })).toHaveAttribute('href', '/households/8/edit')
+    expect(screen.queryByRole('link', { name: 'View' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
+  })
+
+  it('shows View to a deputy, so the pencil really tracks the role', async () => {
+    // The other side of the clause: same non-owner household, one role lower.
+    stubFetch({ households: [makeHousehold({ id: 8, name: 'Not Mine', admin_id: 99 })] })
+    renderWithProviders(<Households />, {
+      authValue: { user: me, memberships: membershipsFor('deputy', 8) },
+    })
+
+    await screen.findByText('Not Mine')
+    expect(screen.getByRole('link', { name: 'View' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Edit' })).not.toBeInTheDocument()
   })
 
   it('debounces the name filter into the request query', async () => {

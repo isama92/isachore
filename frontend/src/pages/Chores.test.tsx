@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import Chores from './Chores'
 import { renderWithProviders, membershipsFor } from '../test/utils'
 import { formatDate, formatDateTime } from '../lib/chores'
-import { makeChore, makeHousehold, makeTag, makeUser } from '../test/fixtures'
+import { makeChore, makeHousehold, makeHouseholdMember, makeTag, makeUser } from '../test/fixtures'
 import type { Chore, Household } from '../lib/types'
 
 // Reads the router state pushed by the clone action so a test can assert it.
@@ -72,8 +72,8 @@ describe('Chores', () => {
       title: 'Scrub the tub',
       household: { id: 4, name: 'Beach House' },
       assignees: [
-        makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' }),
-        makeUser({ id: 3, first_name: 'Sam', last_name: 'Lee' }),
+        makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' }),
+        makeHouseholdMember({ id: 3, first_name: 'Sam', last_name: 'Lee' }),
       ],
       tags: [makeTag({ id: 3, name: 'deep-clean', color: '#0d9488' })],
       repeats: 'daily',
@@ -108,7 +108,7 @@ describe('Chores', () => {
   })
 
   it('shows the current assignee next to the assignment strategy', async () => {
-    const robin = makeUser({ id: 2, first_name: 'Robin', last_name: 'Doe' })
+    const robin = makeHouseholdMember({ id: 2, first_name: 'Robin', last_name: 'Doe' })
     const chore = makeChore({
       id: 8,
       title: 'Water plants',
@@ -186,7 +186,7 @@ describe('Chores', () => {
       weekdays: [1, 4],
       assignment_type: 'least_done',
       household: { id: 4, name: 'Beach House' },
-      assignees: [makeUser({ id: 2 }), makeUser({ id: 3 })],
+      assignees: [makeHouseholdMember({ id: 2 }), makeHouseholdMember({ id: 3 })],
       tags: [makeTag({ id: 9, name: 'deep-clean' })],
     })
     stubFetch({ chores: [chore] })

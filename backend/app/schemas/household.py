@@ -20,11 +20,11 @@ class HouseholdMemberRoleRead(HouseholdMemberRead):
     """A member as the household's own members table sees them: with their role.
 
     Deliberately a subclass used by the two members endpoints alone. `role` lives on the
-    `household_members` association row, and the five other payloads built from
-    `HouseholdMemberRead` (assignees on Home and Unscheduled, History's `completed_by`,
-    the filter options, an invitation's `invited_by`) have no membership in hand to read
-    one from - putting it on the base would either leak a role into all of them or fail
-    validation there."""
+    `household_members` association row, and the six other payloads built from
+    `HouseholdMemberRead` (assignees on Home, Unscheduled and a chore read, History's
+    `completed_by`, the filter options, an invitation's `invited_by`) have no membership in
+    hand to read one from - putting it on the base would either leak a role into all of them
+    or fail validation there."""
 
     role: HouseholdRole
 
@@ -49,8 +49,8 @@ class HouseholdListRead(BaseModel):
 
     id: int
     name: str
-    # The owner (household admin). Only this member may edit the household and
-    # manage its members on the user surface.
+    # The owner (household admin). Only this member may edit or delete the household,
+    # remove members and transfer it; setting roles and inviting are organiser-level.
     admin_id: int
     created_at: datetime
     deleted_at: datetime | None

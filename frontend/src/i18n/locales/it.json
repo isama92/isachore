@@ -336,8 +336,8 @@
     "leaveConfirmAction": "Abbandona",
     "left": "Hai abbandonato il nucleo domestico",
     "leaveError": "Impossibile abbandonare il nucleo domestico",
-    "adminBadge": "Admin",
     "adminLabel": "Amministratore nucleo domestico",
+    "adminRole": "Amministratore",
     "roles": {
       "organiser": "Responsabile",
       "deputy": "Vice",
@@ -347,7 +347,7 @@
     "roleUpdated": "Ruolo di {{name}} aggiornato",
     "roleError": "Impossibile aggiornare il ruolo",
     "transferConfirm": "Rendere {{name}} amministratore del nucleo domestico?",
-    "transferConfirmBody": "Diventerà l'unico membro che può modificare questo nucleo domestico e gestirne i membri.",
+    "transferConfirmBody": "Diventerà l'unico membro che può rinominare o eliminare questo nucleo domestico, rimuovere membri e trasferirlo a sua volta.",
     "transferConfirmAction": "Trasferisci",
     "transferred": "Amministratore nucleo domestico aggiornato",
     "transferError": "Impossibile aggiornare l'amministratore del nucleo domestico",

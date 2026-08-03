@@ -47,3 +47,40 @@ export function hasRoleIn(
 export function householdIdsWithRole(memberships: Membership[], min: HouseholdRole): Set<number> {
   return new Set(memberships.filter((m) => roleAtLeast(m.role, min)).map((m) => m.household_id))
 }
+
+/**
+ * The roles `viewer` may set on `target` in their shared household. Empty means "no control":
+ * render the role as a badge.
+ *
+ * The frontend mirror of `update_household_member`'s gate, kept as one pure function so the
+ * members table never spells the rule out itself:
+ *
+ * - the household owner's own row is never editable, by anybody. They are always an organiser,
+ *   and the way to move that is to transfer the household, which promotes the new owner.
+ * - the owner may set any of the three on anybody else.
+ * - an organiser may only move people between deputy and helper. So they cannot hand out
+ *   `organiser`, cannot touch a row that already holds it, and therefore cannot demote
+ *   themselves - that last one falls out of the same rule rather than needing its own branch.
+ * - a deputy or helper gets nothing.
+ *
+ * The API re-checks all of this; the point here is to never render a control that would be
+ * refused.
+ */
+export function assignableRoles(opts: {
+  viewerIsOwner: boolean
+  viewerRole: HouseholdRole | null
+  targetIsOwner: boolean
+  targetRole: HouseholdRole
+}): HouseholdRole[] {
+  const { viewerIsOwner, viewerRole, targetIsOwner, targetRole } = opts
+  if (targetIsOwner) return []
+  if (viewerIsOwner) return [...HOUSEHOLD_ROLES]
+  if (viewerRole === 'organiser' && targetRole !== 'organiser') {
+    // Derived, not a literal `['deputy', 'helper']`: the backend expresses this as a
+    // negation (anything except `organiser`), so a role added to HOUSEHOLD_ROLES has to
+    // appear here too or an organiser's Select would silently lack an option the API
+    // would have accepted.
+    return HOUSEHOLD_ROLES.filter((role) => role !== 'organiser')
+  }
+  return []
+}

@@ -3,9 +3,10 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router'
 import HouseholdEdit from './HouseholdEdit'
-import { renderWithProviders } from '../test/utils'
+import { membershipsFor, renderWithProviders } from '../test/utils'
 import { makeHousehold, makeHouseholdMemberWithRole, makeUser } from '../test/fixtures'
 import type { Household, HouseholdMemberWithRole } from '../lib/types'
+import type { AuthContextValue } from '../auth/context'
 
 const me = makeUser({ id: 1 })
 
@@ -50,14 +51,19 @@ function stubFetch(opts: {
   return fetchMock
 }
 
-function renderEdit(fetchMock: FetchMock) {
+function renderEdit(fetchMock: FetchMock, authValue: Partial<AuthContextValue> = {}) {
   vi.stubGlobal('fetch', fetchMock)
   return renderWithProviders(
     <Routes>
       <Route path="/households/:id/edit" element={<HouseholdEdit />} />
       <Route path="/households" element={<div>households-list</div>} />
     </Routes>,
-    { authValue: { user: me }, route: '/households/5/edit' },
+    // Household 5 throughout, so a test's `memberships` must name that id to grant a role in
+    // the household under test.
+    {
+      authValue: { user: me, memberships: membershipsFor('organiser', 5), ...authValue },
+      route: '/households/5/edit',
+    },
   )
 }
 
@@ -136,9 +142,10 @@ describe('HouseholdEdit', () => {
 
   // --- roles ------------------------------------------------------------
   //
-  // The Select gate is `canEditRoles && row is not the owner`. Each test below satisfies
-  // one clause and varies the other, so neither can be deleted without a failure: a test
-  // that changed both at once would pass on whichever clause survived.
+  // The role cell is `assignableRoles(viewer, target)`: three inputs, so the cases below vary
+  // one at a time - who is looking (owner / organiser / deputy / helper) against what they
+  // are looking at (the owner's row / an organiser / a deputy or helper). A case that moved
+  // two at once would pass on whichever branch survived.
 
   it('lets the owner set another member’s role', async () => {
     const fetchMock = stubFetch({
@@ -180,9 +187,12 @@ describe('HouseholdEdit', () => {
     })
   })
 
-  it('shows the owner’s own role as a badge, not a control', async () => {
-    // canEditRoles is true here (this is the owner's own view), so the only thing keeping
-    // the owner's row read-only is the adminId clause.
+  it('reads Admin on the owner’s row, once, and offers no control there', async () => {
+    // Three things at once, because they are one design decision: the owner's role is not
+    // editable by anybody (this is their OWN view, so the target rule is the only thing
+    // stopping it), the cell says "Admin" rather than "Organiser", and it says it once - the
+    // badge that used to sit beside the name is gone, since two labels for one fact read as
+    // two facts.
     const fetchMock = stubFetch({
       household: makeHousehold({ id: 5, admin_id: 1 }),
       members: [
@@ -196,21 +206,24 @@ describe('HouseholdEdit', () => {
     const table = screen.getByRole('table')
     const ownerRow = within(table).getByText('Alex Kim').closest('tr')!
     expect(within(ownerRow).queryByRole('combobox')).not.toBeInTheDocument()
-    expect(within(ownerRow).getByText('Organiser')).toBeInTheDocument()
+    expect(within(ownerRow).getAllByText('Admin')).toHaveLength(1)
+    expect(within(ownerRow).queryByText('Organiser')).not.toBeInTheDocument()
     // And the other row proves the view is otherwise editable.
     expect(screen.getByRole('combobox', { name: 'Role for Jo Ng' })).toBeInTheDocument()
   })
 
-  it('shows a non-owner every role as a badge', async () => {
-    // The mirror of the test above: the row is NOT the owner's, so canEditRoles is the only
-    // clause left to keep it read-only.
+  it('shows a helper every role as a badge', async () => {
+    // The row is NOT the owner's, so the viewer's own role is the only thing keeping it
+    // read-only - which is why this passes helper memberships explicitly rather than relying
+    // on being a non-owner, as it used to. An organiser is a non-owner too, and does get a
+    // control here (see the organiser cases below).
     const fetchMock = stubFetch({
       household: makeHousehold({ id: 5, admin_id: 99 }),
       members: [
         makeHouseholdMemberWithRole({ id: 2, first_name: 'Jo', last_name: 'Ng', role: 'helper' }),
       ],
     })
-    renderEdit(fetchMock)
+    renderEdit(fetchMock, { memberships: membershipsFor('helper', 5) })
 
     await screen.findByText('Jo Ng')
     expect(screen.queryByRole('combobox', { name: 'Role for Jo Ng' })).not.toBeInTheDocument()
@@ -372,5 +385,96 @@ describe('HouseholdEdit', () => {
 
     expect(await screen.findByText('Transfer ownership first')).toBeInTheDocument()
     expect(value.refresh).not.toHaveBeenCalled()
+  })
+
+  // --- the organiser view ------------------------------------------------
+  //
+  // An organiser is a non-owner, so they land on the read-only branch: the household itself
+  // stays text, but they share the *people* work.
+
+  const ORGANISER_ROSTER = [
+    makeHouseholdMemberWithRole({ id: 99, first_name: 'Olive', last_name: 'Owner' }),
+    makeHouseholdMemberWithRole({ id: 1, first_name: 'Alex', last_name: 'Kim' }),
+    makeHouseholdMemberWithRole({ id: 2, first_name: 'Dee', last_name: 'Puty', role: 'deputy' }),
+    makeHouseholdMemberWithRole({ id: 3, first_name: 'Hal', last_name: 'Per', role: 'helper' }),
+  ]
+
+  function organiserMocks(mutate?: (method: string, url: string) => Response) {
+    // admin_id 99 is somebody else, so `me` (id 1) is an organiser and not the owner.
+    return stubFetch({
+      household: makeHousehold({ id: 5, name: 'Flat 3B', admin_id: 99 }),
+      members: ORGANISER_ROSTER,
+      mutate,
+    })
+  }
+
+  it('offers an organiser deputy and helper only, and never on an organiser row', async () => {
+    renderEdit(organiserMocks())
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    await screen.findByText('Hal Per')
+    // The owner and the organiser peer (themselves) are badges...
+    const table = screen.getByRole('table')
+    expect(
+      within(within(table).getByText('Olive Owner').closest('tr')!).queryByRole('combobox'),
+    ).not.toBeInTheDocument()
+    expect(
+      within(within(table).getByText('Alex Kim').closest('tr')!).queryByRole('combobox'),
+    ).not.toBeInTheDocument()
+
+    // ...and the deputy and helper rows are editable, with `organiser` absent from the options.
+    await user.click(screen.getByRole('combobox', { name: 'Role for Hal Per' }))
+    const options = (await screen.findAllByRole('option')).map((o) => o.textContent)
+    expect(options).toEqual(['Deputy', 'Helper'])
+  })
+
+  it('lets an organiser set a role, and shows them the invitations', async () => {
+    const fetchMock = organiserMocks(() =>
+      jsonBody(
+        makeHouseholdMemberWithRole({ id: 3, first_name: 'Hal', last_name: 'Per', role: 'deputy' }),
+      ),
+    )
+    renderEdit(fetchMock)
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    await screen.findByText('Hal Per')
+    await user.click(screen.getByRole('combobox', { name: 'Role for Hal Per' }))
+    await user.click(await screen.findByRole('option', { name: 'Deputy' }))
+
+    await waitFor(() => {
+      const patch = fetchMock.mock.calls.find(
+        ([url, init]) => init?.method === 'PATCH' && String(url).endsWith('/members/3'),
+      )
+      expect(patch).toBeTruthy()
+      expect(JSON.parse(String(patch![1]?.body))).toEqual({ role: 'deputy' })
+    })
+    // Inviting moved to organiser-level alongside role-setting: both are managing people.
+    expect(screen.getByRole('button', { name: 'Add member' })).toBeInTheDocument()
+  })
+
+  it('keeps the household itself, and removing members, out of an organiser’s reach', async () => {
+    renderEdit(organiserMocks())
+
+    await screen.findByText('Hal Per')
+    expect(screen.queryByDisplayValue('Flat 3B')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'Household admin' })).not.toBeInTheDocument()
+  })
+
+  it('shows a deputy every role as a badge, and no invitations', async () => {
+    // Same page, same roster, one role lower: the only difference is `memberships`, which is
+    // what makes this about the role rather than about ownership.
+    renderEdit(organiserMocks(), { memberships: membershipsFor('deputy', 5) })
+
+    await screen.findByText('Hal Per')
+    // Named queries: an unnamed `combobox` also matches the table's own "Rows per page" select.
+    for (const name of ['Role for Hal Per', 'Role for Dee Puty']) {
+      expect(screen.queryByRole('combobox', { name })).not.toBeInTheDocument()
+    }
+    expect(within(screen.getByRole('table')).getByText('Helper')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Add member' })).not.toBeInTheDocument()
+    // ...but they can still leave.
+    expect(screen.getByRole('button', { name: 'Leave household' })).toBeInTheDocument()
   })
 })

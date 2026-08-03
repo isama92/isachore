@@ -34,22 +34,37 @@ under **Households**, or they accept an invitation to somebody else's.
 ### Household roles
 
 Every membership carries a role, so a shared household can hand out chores without
-handing over the household. The owner (the "household admin", one per household) sets
-them from **Households > edit**; a page somebody's role does not cover is not shown to
-them in the sidebar at all.
+handing over the household. Roles are set from **Households > edit**, which the owner and its
+organisers reach with the pencil icon while everybody else gets a read-only eye; a page
+somebody's role does not cover is not shown to them in the sidebar at all.
 
-|                                                   | organiser | deputy | helper |
-| ------------------------------------------------- | :-------: | :----: | :----: |
-| Mark chores done, scheduled or unscheduled        |     ✓     |   ✓    |   ✓    |
-| My Chores, Unscheduled Chores, the household list |     ✓     |   ✓    |   ✓    |
-| History and Statistics                            |     ✓     |   ✓    |        |
-| Create, edit and delete chores, manage tags       |     ✓     |        |        |
+|                                                     | admin | organiser | deputy | helper |
+| --------------------------------------------------- | :---: | :-------: | :----: | :----: |
+| Mark chores done, scheduled or unscheduled          |   ✓   |     ✓     |   ✓    |   ✓    |
+| My Chores, Unscheduled Chores, the household list   |   ✓   |     ✓     |   ✓    |   ✓    |
+| History and Statistics                              |   ✓   |     ✓     |   ✓    |        |
+| Create, edit and delete chores, manage tags         |   ✓   |     ✓     |        |        |
+| Invite people, set deputy and helper roles          |   ✓   |     ✓     |        |        |
+| Grant or change the organiser role                  |   ✓   |           |        |        |
+| Rename or delete the household, remove members      |   ✓   |           |        |        |
+| Transfer the household to somebody else             |   ✓   |           |        |        |
 
-Creating a household makes you its owner and an organiser. Accepting an invitation makes
-you a **helper**, and the owner promotes from there. The owner is always an organiser and
-their own role cannot be changed; transferring the household (which promotes the new
-owner) is how that moves. Renaming or deleting a household, inviting, removing members
-and setting roles are the owner's alone.
+"admin" there is the household's owner, one per household, shown as **Admin** in the members
+table rather than as a fourth role: they are an organiser, and the extra rights come from
+owning the household.
+
+Creating a household makes you its owner. Accepting an invitation makes you a **helper**, and
+an organiser promotes from there. The owner's own role cannot be changed by anybody, including
+themselves; transferring the household, which promotes the new owner, is how that moves.
+
+The one asymmetry between an owner and an organiser worth knowing: an organiser may move people
+between deputy and helper, but may not hand out `organiser` or change anybody who already holds
+it. So they can share the day-to-day load without being able to grow the set of people who
+could demote them.
+
+Invitations belong to the household rather than to whoever made them: every organiser sees the
+same list, can revoke or delete any of it, and the cap of five outstanding invites is shared
+between them.
 
 Roles are per household, and the views that span several of them narrow rather than
 refuse: an organiser of one household who is a helper in another sees the second one's
@@ -600,27 +615,15 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
   `loc`/`type` onto our own i18n keys (better, and the reason this is not a one-liner). Noticed
   while reviewing PR #33; predates it.
 
-- [ ] Show page for households so everybody can see the members and organisers can invite new people/change roles
-
-  Roles ship enforced end to end, but *setting* one is the household owner's alone, and so is
-  inviting. The API already refuses an organiser (403 "Only the household admin can do this"),
-  so what is left is the frontend and the widening of that one gate.
-
+- [x] Show page for households so everybody can see the members and organisers can invite new people/change roles
 - [ ] Let a site admin change household roles from Admin > Households
 
-  The members table there shows roles as badges: `HouseholdMembersTable` takes `canEditRoles`,
-  and the admin router has no member-PATCH endpoint to point it at. Until it does, an operator
-  who needs to fix a role impersonates the household owner.
+  The members table there shows roles as badges: `HouseholdMembersTable`'s `viewerIsOwner` /
+  `viewerRole` props both default to "nobody", and the admin router has no member-PATCH
+  endpoint to point a Select at anyway. Until it does, an operator who needs to fix a role
+  impersonates the household owner.
 
-- [ ] Narrow the chore read that every role can reach
-
-  `GET /chores/{id}` is open to every member on purpose (the description dialog on My Chores and
-  Unscheduled needs it), but `ChoreRead` serialises `assignees` as full `UserRead` objects,
-  email and `is_admin` included, plus every tag. So a helper can read housemates' email
-  addresses through it. Pre-existing for all members, and none of it is displayed: `ChoreForm`
-  uses ids and names only, and `DueChoreRead` already uses the data-minimised
-  `HouseholdMemberRead`. Give the read its own narrower schema, which also removes the one
-  hole in the tags router's read gate.
+- [x] Narrow the chore read that every role can reach
 
 - [ ] Stop `GET /chores` sending every chore's full description
 

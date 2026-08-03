@@ -6,7 +6,8 @@ import { Trash2Icon } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { householdResource } from '@/lib/endpoints'
 import { fullName } from '@/lib/user'
-import { HOUSEHOLD_ROLES, type HouseholdMemberWithRole, type HouseholdRole } from '@/lib/types'
+import { assignableRoles } from '@/lib/permissions'
+import type { HouseholdMemberWithRole, HouseholdRole } from '@/lib/types'
 import { DataTable } from '@/components/data-table/DataTable'
 import { useServerTable } from '@/components/data-table/useServerTable'
 import { Badge } from '@/components/ui/badge'
@@ -37,24 +38,27 @@ type Props = {
   basePath: string
   // The owner's user id: badged and never removable (transfer ownership first).
   adminId: number
-  // Whether the viewer may remove members (owner or site admin). When false the
-  // table is read-only (no actions column).
+  // Whether the viewer may remove members, which is the owner and site admins. Separate
+  // from the role props below rather than one flag: the admin surface passes this
+  // unconditionally, and it has no member-PATCH endpoint for a role Select to call, so
+  // roles show there as badges and a site admin who needs to change one impersonates.
   canManage: boolean
-  // Whether the viewer may change roles, which is the household owner and nobody else.
-  // A separate prop from canManage rather than the same one: the admin surface passes
-  // canManage unconditionally, and it has no member-PATCH endpoint to call. Roles show
-  // there as badges, and a site admin who needs to change one impersonates the owner.
-  canEditRoles?: boolean
+  // Who is looking, for the role controls. Both default to "nobody", which is what keeps
+  // the admin surface and the deputy/helper view read-only without either passing anything.
+  // `assignableRoles` turns these into the options for a given row.
+  viewerIsOwner?: boolean
+  viewerRole?: HouseholdRole | null
 }
 
-// A household's active members and their roles. The owner row is badged, has no remove
+// A household's active members and their roles. The owner's row reads "Admin", has no remove
 // control (transfer ownership first) and no role control (owners are always organisers);
-// adding members is a later feature.
+// adding members happens through an invitation, not here.
 export function HouseholdMembersTable({
   basePath,
   adminId,
   canManage,
-  canEditRoles = false,
+  viewerIsOwner = false,
+  viewerRole = null,
 }: Props) {
   const { t } = useTranslation()
   // No filter UI here (households have few members); the table just paginates.
@@ -95,10 +99,22 @@ export function HouseholdMembersTable({
   }
 
   function roleCell(member: HouseholdMemberWithRole): ReactNode {
-    // The owner's role is fixed: they are always an organiser, and the way to change who
-    // that is is the household admin select above this table (which promotes the new owner).
-    // So their row shows a badge even for a viewer who may edit everyone else's.
-    if (!canEditRoles || member.id === adminId) {
+    const targetIsOwner = member.id === adminId
+    // The owner's cell reads "Admin", not "Organiser". They are one, but saying so here
+    // duplicates the fact that matters and buries it: one household admin, and their role is
+    // the one thing on this table nobody can change.
+    if (targetIsOwner) {
+      return <Badge variant="secondary">{t('households.adminRole')}</Badge>
+    }
+    const options = assignableRoles({
+      viewerIsOwner,
+      viewerRole,
+      targetIsOwner,
+      targetRole: member.role,
+    })
+    // No options means no control: a deputy or helper looking, the admin surface, or an
+    // organiser looking at a peer organiser.
+    if (options.length === 0) {
       return <Badge variant="secondary">{t(`households.roles.${member.role}`)}</Badge>
     }
     return (
@@ -110,7 +126,7 @@ export function HouseholdMembersTable({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {HOUSEHOLD_ROLES.map((role) => (
+          {options.map((role) => (
             <SelectItem key={role} value={role}>
               {t(`households.roles.${role}`)}
             </SelectItem>
@@ -171,16 +187,9 @@ export function HouseholdMembersTable({
       id: 'name',
       accessorFn: (m) => fullName(m),
       header: t('households.membersHeaders.name'),
-      cell: ({ row }) => (
-        <span className="flex items-center gap-2 font-semibold">
-          {fullName(row.original)}
-          {row.original.id === adminId && (
-            <Badge variant="secondary" className="text-primary">
-              {t('households.adminBadge')}
-            </Badge>
-          )}
-        </span>
-      ),
+      // No badge beside the name: the role column says "Admin" for this row, and saying it
+      // twice made the table read as if those were two different facts.
+      cell: ({ row }) => <span className="font-semibold">{fullName(row.original)}</span>,
     },
     {
       id: 'role',

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { hasRoleIn, hasRoleSomewhere, householdIdsWithRole, roleAtLeast } from './permissions'
+import {
+  assignableRoles,
+  hasRoleIn,
+  hasRoleSomewhere,
+  householdIdsWithRole,
+  roleAtLeast,
+} from './permissions'
 import type { Membership } from './types'
 
 // Organiser of "The Flat" (1), helper in "Mum's place" (2): the cross-household case the
@@ -70,5 +76,72 @@ describe('householdIdsWithRole', () => {
 
   it('is empty for a member of nothing', () => {
     expect(householdIdsWithRole([], 'helper').size).toBe(0)
+  })
+})
+
+describe('assignableRoles', () => {
+  // The frontend mirror of update_household_member's gate. Empty means "render a badge".
+  const owner = { viewerIsOwner: true, viewerRole: 'organiser' } as const
+  const organiser = { viewerIsOwner: false, viewerRole: 'organiser' } as const
+
+  it('gives the owner all three roles on anybody else', () => {
+    expect(assignableRoles({ ...owner, targetIsOwner: false, targetRole: 'helper' })).toEqual([
+      'organiser',
+      'deputy',
+      'helper',
+    ])
+    expect(assignableRoles({ ...owner, targetIsOwner: false, targetRole: 'organiser' })).toEqual([
+      'organiser',
+      'deputy',
+      'helper',
+    ])
+  })
+
+  it('never offers a control on the owner’s own row', () => {
+    // Not even to the owner themselves: their role moves by transferring the household.
+    // The owner-viewer line is what pins the `targetIsOwner` guard; the organiser-viewer one
+    // below documents the shape rather than pinning anything (that branch returns [] for an
+    // organiser target regardless), so do not simplify this down to just the second line.
+    expect(assignableRoles({ ...owner, targetIsOwner: true, targetRole: 'organiser' })).toEqual([])
+    expect(assignableRoles({ ...organiser, targetIsOwner: true, targetRole: 'organiser' })).toEqual(
+      [],
+    )
+  })
+
+  it('lets an organiser move deputies and helpers, and nothing else', () => {
+    expect(assignableRoles({ ...organiser, targetIsOwner: false, targetRole: 'helper' })).toEqual([
+      'deputy',
+      'helper',
+    ])
+    expect(assignableRoles({ ...organiser, targetIsOwner: false, targetRole: 'deputy' })).toEqual([
+      'deputy',
+      'helper',
+    ])
+    // `organiser` is absent from those lists, which is what stops an organiser growing the set
+    // of people who could demote them.
+    expect(
+      assignableRoles({ ...organiser, targetIsOwner: false, targetRole: 'helper' }),
+    ).not.toContain('organiser')
+  })
+
+  it('gives an organiser nothing on a peer organiser, themselves included', () => {
+    // Same row either way: an organiser looking at any organiser, which is why demoting
+    // yourself needs no separate rule.
+    expect(
+      assignableRoles({ ...organiser, targetIsOwner: false, targetRole: 'organiser' }),
+    ).toEqual([])
+  })
+
+  it('gives a deputy, a helper and a non-member nothing', () => {
+    for (const viewerRole of ['deputy', 'helper', null] as const) {
+      expect(
+        assignableRoles({
+          viewerIsOwner: false,
+          viewerRole,
+          targetIsOwner: false,
+          targetRole: 'helper',
+        }),
+      ).toEqual([])
+    }
   })
 })

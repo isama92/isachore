@@ -6,8 +6,8 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validat
 from app.core.chores import MAX_INTERVAL
 from app.core.richtext import MAX_RICH_TEXT_LENGTH, sanitise_description
 from app.models import AssignmentType, RepeatPeriod
+from app.schemas.household import HouseholdMemberRead
 from app.schemas.tag import TagRead
-from app.schemas.user import UserRead
 
 # A Monday-first weekday ordinal, as Python's `date.weekday()` numbers them (0 = Monday ..
 # 6 = Sunday). NOT ISO-8601, which numbers weekdays 1..7, and not JavaScript's
@@ -96,12 +96,18 @@ class ChoreRead(BaseModel):
     weekdays: list[int] | None
     created_at: datetime
     household: ChoreHouseholdRead
-    # The full pool of people the chore can rotate between.
-    assignees: list[UserRead]
+    # The full pool of people the chore can rotate between, in the data-minimised member
+    # shape (no email). Load-bearing: GET /chores/{id} is open to every role, because the
+    # description dialog on My Chores and Unscheduled fetches it, so a full UserRead here
+    # handed a helper their housemates' email addresses - and this is the ONLY route that
+    # exposed UserRead to a household peer at all. Everything the UI does with these is read a
+    # name (`fullName` takes both parts), an `.id` or a `.length`, so this is the floor rather
+    # than a step towards a narrower one.
+    assignees: list[HouseholdMemberRead]
     # Who is on the hook right now (the open occurrence's assignee); None when the
     # chore is unassigned/shared. Every live chore has an open occurrence, whatever
     # its period, so this is not a "no occurrence" signal.
-    current_assignee: UserRead | None = None
+    current_assignee: HouseholdMemberRead | None = None
     tags: list[TagRead]
 
 

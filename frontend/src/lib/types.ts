@@ -119,12 +119,13 @@ export type Chore = {
   // The household the chore belongs to (fixed at creation). Drives the list's
   // household column/filter and the edit form's read-only household.
   household: { id: number; name: string }
-  // The full pool of people the chore rotates between.
-  assignees: User[]
+  // The full pool of people the chore rotates between, in the data-minimised member shape
+  // (no email): GET /chores/{id} is open to every role, so it must not ship one.
+  assignees: HouseholdMember[]
   // Who is on the hook right now (the open occurrence's assignee); null when the
   // chore is unassigned/shared. Every live chore has an open occurrence, whatever
   // its period, so this is not a "nothing left to do" signal.
-  current_assignee: User | null
+  current_assignee: HouseholdMember | null
   tags: Tag[]
 }
 
@@ -261,7 +262,7 @@ export type HouseholdMember = Pick<User, 'id' | 'first_name' | 'last_name'>
 // membership to read a role from (the backend splits HouseholdMemberRead the same way).
 export type HouseholdMemberWithRole = HouseholdMember & { role: HouseholdRole }
 
-// A household invite link as the owner sees it. `url` is the shareable link;
+// A household invite link as the owner or an organiser sees it. `url` is the shareable link;
 // `status` is the stored lifecycle (including `expired`, set by the hourly
 // backend sweep) and drives the row's display + action. `expires_at` is kept
 // only for the "expires/expired {when}" label.
@@ -279,8 +280,9 @@ export type InvitationInfo = {
   invited_by: HouseholdMember
 }
 
-// A household row from the management tables. `admin_id` is the owner (the only
-// member who may edit the household and manage members). `deleted_at` is null
+// A household row from the management tables. `admin_id` is the owner (the only member who
+// may rename or delete the household, remove members and transfer it; organisers set roles
+// and invite). `deleted_at` is null
 // for active households; `member_count` counts active members only, `chore_count`
 // all chores. The full member list is fetched separately from
 // /households/{id}/members.
