@@ -11,6 +11,7 @@ from pydantic import (
     model_validator,
 )
 
+from app.models.household import HouseholdRole
 from app.models.user import UserStatus
 
 # Emails are stored and compared lower-cased so a differently-cased address is
@@ -79,8 +80,23 @@ class UserRead(BaseModel):
         return f"/api/v1/media/avatars/{self.avatar_path}"
 
 
+class MembershipRead(BaseModel):
+    """One of the caller's household memberships: which household, and what they may
+    do in it."""
+
+    household_id: int
+    role: HouseholdRole
+
+
 class MeRead(UserRead):
     impersonating: bool = False
+    # Every active household the caller belongs to, with their role. Here rather than on
+    # the household payloads because the sidebar has to decide what to show before any
+    # household has been fetched, and this response is already loaded once on mount. It
+    # is a convenience for the UI only: the roles are re-checked on every request, so a
+    # stale copy (someone changed your role mid-session) hides or shows the wrong nav
+    # item until the next /auth/me, and grants nothing.
+    memberships: list[MembershipRead] = []
 
 
 class UserCreate(BaseModel):
@@ -150,7 +166,10 @@ class LoginResponse(BaseModel):
     /auth/verify-2fa (user is None until then)."""
 
     two_factor_required: bool = False
-    user: UserRead | None = None
+    # MeRead rather than UserRead so the client gets the caller's household memberships
+    # with the session it just opened; the sidebar reads them, and refetching /auth/me
+    # right after logging in would be a round trip to learn something login already knew.
+    user: MeRead | None = None
 
 
 # A submitted 2FA code: a 6-digit TOTP or a backup recovery code. Kept loose

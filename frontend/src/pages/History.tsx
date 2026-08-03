@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import type { ColumnDef } from '@tanstack/react-table'
 import { Undo2Icon } from 'lucide-react'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
+import { householdIdsWithRole } from '../lib/permissions'
 import { endpoints } from '../lib/endpoints'
 import { formatDateTime } from '../lib/chores'
 import { fullName } from '../lib/user'
@@ -42,7 +43,7 @@ const EMPTY_OPTIONS: HistoryFilterOptions = { households: [], members: [] }
 
 export default function History() {
   const { t } = useTranslation()
-  const { user } = useAuth()
+  const { user, memberships } = useAuth()
 
   const table = useServerTable<HistoryEntry, HistoryFilters>({
     endpoint: endpoints.completions.root,
@@ -55,6 +56,15 @@ export default function History() {
     },
   })
 
+  // The households this page has data for. /completions/filters is deliberately NOT
+  // role-narrowed (it also feeds the Home and Unscheduled filter bars, which every role
+  // uses), so the narrowing happens here instead - otherwise the picker would offer a
+  // household the caller is only a helper in and selecting it would come back empty.
+  //
+  // The "Completed by" picker keeps that dead end: it still lists members of helper-only
+  // households, and the payload carries no member -> household association to narrow it by.
+  // Nothing leaks (those names are already on Home), but do not read this as complete.
+  const visible = useMemo(() => householdIdsWithRole(memberships, 'deputy'), [memberships])
   const [options, setOptions] = useState<HistoryFilterOptions>(EMPTY_OPTIONS)
   const [error, setError] = useState<string | null>(null)
 
@@ -74,14 +84,15 @@ export default function History() {
       .get<HistoryFilterOptions>(endpoints.completions.filters)
       .then((data) => {
         if (cancelled) return
-        setOptions(data)
-        // A remembered id outlives whatever made it valid (household left, member
-        // removed). Left in place it filters the list down to nothing behind a blank
-        // Select, so drop what can no longer be picked. Both go in ONE setFilters
-        // call: two setFilter calls in a tick would lose the first, see the hook.
+        const scoped = { ...data, households: data.households.filter((h) => visible.has(h.id)) }
+        setOptions(scoped)
+        // A remembered id outlives whatever made it valid (household left, member removed,
+        // role dropped below deputy). Left in place it filters the list down to nothing
+        // behind a blank Select, so drop what can no longer be picked. Both go in ONE
+        // setFilters call: two setFilter calls in a tick would lose the first, see the hook.
         const { household_id, user_id } = filtersRef.current
         const dead: Partial<HistoryFilters> = {}
-        if (household_id !== '' && !data.households.some((h) => String(h.id) === household_id)) {
+        if (household_id !== '' && !scoped.households.some((h) => String(h.id) === household_id)) {
           dead.household_id = ''
         }
         if (user_id !== '' && !data.members.some((m) => String(m.id) === user_id)) {
@@ -95,7 +106,7 @@ export default function History() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [visible])
 
   // Undo = delete the completion. The server re-anchors the chore's schedule, so
   // undoing the latest completion makes the chore due again.

@@ -31,9 +31,11 @@ function isLivePending(invitation: HouseholdInvitation): boolean {
   return invitation.status === 'pending'
 }
 
-// The household owner's invitation manager: mint a single-use link ("Add
-// member"), copy/revoke live invites, delete the rest (accepted/revoked/
-// expired). `basePath` is the household base URL. Only mounted for the owner.
+// A household's invitation manager: mint a single-use link ("Add member"), copy/revoke
+// live invites, delete the rest (accepted/revoked/expired). `basePath` is the household
+// base URL. Mounted for the owner AND for organisers, who share the people work, so an
+// invite listed here is as likely to be somebody else's - revoking and deleting reach
+// every invitation in the household, not just your own.
 export function HouseholdInvitations({ basePath }: { basePath: string }) {
   const { t } = useTranslation()
   const [invitations, setInvitations] = useState<HouseholdInvitation[]>([])

@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router'
 import ChoreCreate from './ChoreCreate'
 import { todayISO } from '../lib/chores'
-import { mockFetch, renderWithProviders } from '../test/utils'
+import { mockFetch, renderWithProviders, membershipsFor } from '../test/utils'
 import { makeChore, makeHousehold, makeHouseholdMember, makeTag, makeUser } from '../test/fixtures'
 import type { Page } from '../lib/types'
 
@@ -58,7 +58,11 @@ function withRoutes(state?: unknown) {
       <Route path="/chores/new" element={<ChoreCreate />} />
       <Route path="/chores" element={<div>chores-list</div>} />
     </Routes>,
-    { authValue: { user: me }, route: '/chores/new', state },
+    {
+      authValue: { user: me, memberships: membershipsFor('organiser', 1, 2) },
+      route: '/chores/new',
+      state,
+    },
   )
 }
 
@@ -613,5 +617,49 @@ describe('ChoreCreate', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Add chore' }))
 
     expect(await screen.findByText('Tags must belong to your household')).toBeInTheDocument()
+  })
+
+  it('offers only the households the user organises', async () => {
+    // Same reason as TagCreate: the form would submit a household_id the API refuses. The
+    // default lands on the lowest-id *organised* household, not the lowest-id household.
+    const fetchMock = mockFetch([
+      {
+        path: /\/api\/v1\/households(\?|$)/,
+        method: 'GET',
+        body: page([
+          makeHousehold({ id: 1, name: 'Flat 3B' }),
+          makeHousehold({ id: 2, name: 'Beach House' }),
+        ]),
+      },
+      { path: MEMBERS, method: 'GET', body: page([]) },
+      { path: TAGS, method: 'GET', body: page([]) },
+      { path: '/api/v1/chores', method: 'POST', status: 201, body: makeChore() },
+    ])
+    renderWithProviders(
+      <Routes>
+        <Route path="/chores/new" element={<ChoreCreate />} />
+        <Route path="/chores" element={<div>chores-list</div>} />
+      </Routes>,
+      {
+        authValue: {
+          user: me,
+          memberships: [
+            { household_id: 1, role: 'deputy' },
+            { household_id: 2, role: 'organiser' },
+          ],
+        },
+        route: '/chores/new',
+      },
+    )
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    // Household 1 is the lowest id, so an unfiltered list would default to it; only 2
+    // qualifies, and with a single option the picker does not render at all.
+    await user.type(await screen.findByLabelText('Title'), 'Scrub the tub')
+    expect(screen.queryByRole('combobox', { name: 'Household' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Add chore' }))
+
+    await screen.findByText('chores-list')
+    expect(postBody(fetchMock)).toMatchObject({ household_id: 2 })
   })
 })

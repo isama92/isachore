@@ -70,8 +70,8 @@ describe('Unscheduled', () => {
     ])
     renderWithProviders(<Unscheduled />, { authValue: { user: makeUser({ id: 1 }) } })
 
-    // Unlike Your Chores this page keeps a heading, so the two are distinguishable even
-    // when both filter bars are hidden.
+    // Both chore feeds show their heading, so the two are distinguishable even when both
+    // filter bars are hidden.
     expect(screen.getByRole('heading', { name: 'Unscheduled Chores' })).toBeInTheDocument()
 
     const today = (await screen.findByText('Deep clean the oven')).closest('li')!

@@ -54,9 +54,13 @@ app.include_router(api_router, prefix="/api/v1")
 # it narrow is that the URL is a capability, not a guessable path. The filename is
 # 128 bits from secrets.token_hex(16) (core/avatars.py) and carries no user id,
 # StaticFiles serves no directory listing, and the name is only ever returned by
-# UserRead.avatar_url, which every route exposing it puts behind auth. So the
-# holders are the user, admins, and household peers (ChoreRead embeds its
-# assignees), all of whom see the picture in the UI regardless. Uploads are
+# UserRead.avatar_url, which every route exposing it puts behind auth. So the holders
+# are the user themselves (profile, auth, two-factor and the signup confirmation) and
+# site admins (the users router), both of whom see the picture in the UI regardless.
+# Household peers do NOT hold one: ChoreRead used to embed its assignees as full
+# UserReads, which made it the only route handing a UserRead to a household peer, and
+# it now uses HouseholdMemberRead (id and names, no avatar) - so keep any new payload
+# reaching household peers off UserRead, or this reasoning stops holding. Uploads are
 # re-encoded to WebP and Pillow carries no metadata across, since _process passes
 # only format and quality, so a leaked file discloses the picture and nothing
 # about where or when it was taken.

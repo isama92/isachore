@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.assignment import initial_assignee, next_assignee, should_reassign
 from app.core.chores import RecurrenceRule, first_occurrence, next_occurrence_after
-from app.core.households import personal_household_name
+from app.core.households import add_member, personal_household_name
 from app.core.security import hash_password
 from app.models import (
     AssignmentType,
@@ -35,6 +35,7 @@ from app.models import (
     ConfirmationToken,
     Household,
     HouseholdInvitation,
+    HouseholdRole,
     OccurrenceStatus,
     RepeatPeriod,
     Tag,
@@ -58,6 +59,15 @@ _USERS = [
 ]
 
 _SHARED = "flat"  # dataset key for the shared household
+
+# Roles in the shared household, so every role can be signed into and compared side by
+# side. Alex owns it and is therefore an organiser whatever this says; anyone left out is a
+# helper, the role a real invite lands on. Bram is a second organiser (so "several
+# organisers, one owner" is exercised), Cara a deputy, Dan and Eve helpers.
+_SHARED_ROLES = {
+    "bram@example.com": HouseholdRole.organiser,
+    "cara@example.com": HouseholdRole.deputy,
+}
 
 _TAG_COLORS = ["#0d9488", "#7c6bf0", "#e0a458"]
 
@@ -479,12 +489,30 @@ async def seed(session: AsyncSession, *, fresh: bool = False) -> SeedSummary:
     # chore specs; tags are created per household so tag filtering is testable.
     households: dict[str, Household] = {}
     tags: dict[tuple[str, str], Tag] = {}
+    memberships: list[tuple[str, User, HouseholdRole]] = []
 
-    def add_household(key: str, name: str, owner: User, members: list[User], tag_names: list[str]):
+    def add_household(
+        key: str,
+        name: str,
+        owner: User,
+        members: list[User],
+        tag_names: list[str],
+        roles: dict[str, HouseholdRole] | None = None,
+    ) -> None:
         hh = Household(name=name, admin_id=owner.id)
-        hh.members.extend(members)
         session.add(hh)
         households[key] = hh
+        # Memberships are recorded now and inserted after the flush below, via add_member:
+        # `hh.members.extend(...)` would go through the relationship, which writes the two
+        # foreign keys only and would leave every seeded member on the column's helper
+        # default. Owners are organisers; anyone `roles` does not name is a helper.
+        for member in members:
+            role = (
+                HouseholdRole.organiser
+                if member is owner
+                else (roles or {}).get(member.email, HouseholdRole.helper)
+            )
+            memberships.append((key, member, role))
         for i, tag_name in enumerate(tag_names):
             tags[(key, tag_name)] = Tag(
                 household=hh, name=tag_name, color=_TAG_COLORS[i % len(_TAG_COLORS)]
@@ -504,9 +532,12 @@ async def seed(session: AsyncSession, *, fresh: bool = False) -> SeedSummary:
         by_email["admin@example.com"],
         users,
         ["cleaning", "kitchen", "outdoor"],
+        _SHARED_ROLES,
     )
     session.add_all(tags.values())
-    await session.flush()
+    await session.flush()  # assigns household ids, which add_member needs
+    for key, member, role in memberships:
+        await add_member(session, households[key].id, member.id, role)
     summary.households = len(households)
 
     def build(hh_key: str, spec: ChoreSpec) -> None:

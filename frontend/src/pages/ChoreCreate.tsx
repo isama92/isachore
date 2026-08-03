@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router'
 import { toast } from 'sonner'
+import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
+import { householdIdsWithRole } from '../lib/permissions'
 import { endpoints } from '../lib/endpoints'
 import { routes } from '../lib/routes'
 import { todayISO } from '../lib/chores'
@@ -24,8 +26,16 @@ export default function ChoreCreate() {
   // Present when arriving via a chore's "Clone" action: prefills the form and
   // defaults the household to the source chore's.
   const clone = (location.state as { clone?: ChoreCloneState } | null)?.clone
+  const { memberships } = useAuth()
+  // Memoised so it is a stable dependency of the load effect below.
+  const organised = useMemo(() => householdIdsWithRole(memberships, 'organiser'), [memberships])
   const [households, setHouseholds] = useState<Household[]>([])
-  const [householdId, setHouseholdId] = useState<number | null>(clone?.household_id ?? null)
+  // Seeded from the clone source only if the caller actually organises it. Unreachable
+  // today - Clone lives on the chores list, which is organiser-scoped - but an id the
+  // filtered picker cannot show is an id the form would submit and the API would refuse.
+  const [householdId, setHouseholdId] = useState<number | null>(
+    clone && organised.has(clone.household_id) ? clone.household_id : null,
+  )
   const [members, setMembers] = useState<HouseholdMember[]>([])
   const [tags, setTags] = useState<Tag[]>([])
   // Which household the currently loaded members/tags belong to; gates the clone
@@ -34,16 +44,20 @@ export default function ChoreCreate() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Load the user's households once; default the chore to the lowest-id one
-  // (unless cloning already seeded the source chore's household).
+  // Load the user's households once, narrowed to the ones they organise: a chore can only
+  // be created where the caller may manage chores, so offering the others would let them
+  // fill the whole form in and then be 403'd on submit. The route guard only proves they
+  // organise *somewhere*. Default the chore to the lowest-id remaining one (unless cloning
+  // already seeded the source chore's household).
   useEffect(() => {
     let cancelled = false
     api
       .get<Page<Household>>(`${endpoints.households.root}?sort_by=id&sort_dir=asc&page_size=100`)
       .then((page) => {
         if (cancelled) return
-        setHouseholds(page.items)
-        setHouseholdId((cur) => cur ?? page.items[0]?.id ?? null)
+        const mine = page.items.filter((h) => organised.has(h.id))
+        setHouseholds(mine)
+        setHouseholdId((cur) => cur ?? mine[0]?.id ?? null)
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof ApiError ? err.message : t('choreCreate.loadError'))
@@ -54,7 +68,7 @@ export default function ChoreCreate() {
     return () => {
       cancelled = true
     }
-  }, [t])
+  }, [t, organised])
 
   // Load the selected household's members and tags for the assignee/tag pickers.
   useEffect(() => {

@@ -15,6 +15,8 @@ from app.schemas.household import (
     HouseholdInvitationRead,
     HouseholdListRead,
     HouseholdMemberRead,
+    HouseholdMemberRoleRead,
+    HouseholdMemberUpdate,
     HouseholdUpdate,
 )
 from app.schemas.pagination import Page
@@ -54,6 +56,8 @@ __all__ = [
     "HouseholdInvitationRead",
     "HouseholdListRead",
     "HouseholdMemberRead",
+    "HouseholdMemberRoleRead",
+    "HouseholdMemberUpdate",
     "HouseholdUpdate",
     "LoginRequest",
     "LoginResponse",

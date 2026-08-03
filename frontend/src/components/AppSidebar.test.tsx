@@ -3,7 +3,7 @@ import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactElement } from 'react'
 import AppSidebar from './AppSidebar'
-import { renderWithProviders } from '../test/utils'
+import { membershipsFor, renderWithProviders } from '../test/utils'
 import { makeUser } from '../test/fixtures'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -56,7 +56,7 @@ describe('AppSidebar', () => {
   it('renders the core nav items with the right destinations', () => {
     renderSidebar({ user: makeUser() })
     expect(screen.getByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Your Chores' })).toHaveAttribute('href', '/')
+    expect(screen.getByRole('link', { name: 'My Chores' })).toHaveAttribute('href', '/')
     expect(screen.getByRole('link', { name: 'Unscheduled Chores' })).toHaveAttribute(
       'href',
       '/unscheduled',
@@ -70,11 +70,12 @@ describe('AppSidebar', () => {
   })
 
   it('renders the core nav items in order', () => {
+    // The default auth value is an organiser, i.e. every item.
     renderSidebar({ user: makeUser() })
     const nav = screen.getByRole('navigation', { name: 'Main navigation' })
     const labels = screen.getAllByRole('link').filter((el) => nav.contains(el))
     expect(labels.map((el) => el.textContent)).toEqual([
-      'Your Chores',
+      'My Chores',
       'Unscheduled Chores',
       'History',
       'Statistics',
@@ -83,6 +84,65 @@ describe('AppSidebar', () => {
       'Households',
       'Profile',
     ])
+  })
+
+  // Household roles decide which items exist at all. The nav is global while roles are
+  // per household, so the rule is "reaches the role somewhere" - see the mixed case below.
+  function navLabels(): (string | null)[] {
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' })
+    return screen
+      .getAllByRole('link')
+      .filter((el) => nav.contains(el))
+      .map((el) => el.textContent)
+  }
+
+  it('shows a helper only the pages they can use', () => {
+    renderSidebar({ user: makeUser(), memberships: membershipsFor('helper', 1) })
+    expect(navLabels()).toEqual(['My Chores', 'Unscheduled Chores', 'Households', 'Profile'])
+  })
+
+  it('adds History and Statistics for a deputy, but not the management pages', () => {
+    renderSidebar({ user: makeUser(), memberships: membershipsFor('deputy', 1) })
+    expect(navLabels()).toEqual([
+      'My Chores',
+      'Unscheduled Chores',
+      'History',
+      'Statistics',
+      'Households',
+      'Profile',
+    ])
+  })
+
+  it('shows a member of no household the minimal nav', () => {
+    // Every fresh account starts here (nothing provisions a household). They create one,
+    // become its organiser, and the rest appears.
+    renderSidebar({ user: makeUser(), memberships: [] })
+    expect(navLabels()).toEqual(['My Chores', 'Unscheduled Chores', 'Households', 'Profile'])
+  })
+
+  it('shows a mixed-role user everything one household grants', () => {
+    // Helper in household 1, organiser in 2: the union wins, and the endpoints behind each
+    // page then return only household 2's data.
+    renderSidebar({
+      user: makeUser(),
+      memberships: [
+        { household_id: 1, role: 'helper' },
+        { household_id: 2, role: 'organiser' },
+      ],
+    })
+    expect(navLabels()).toContain('Chores Management')
+    expect(navLabels()).toContain('Tags')
+  })
+
+  it('keeps the Admin group for a site admin who is only a household helper', () => {
+    // is_admin is a server-wide flag, orthogonal to household roles: an operator does not
+    // lose the admin pages because of what they may do in their own kitchen.
+    renderSidebar({
+      user: makeUser({ is_admin: true }),
+      memberships: membershipsFor('helper', 1),
+    })
+    expect(screen.getByRole('button', { name: 'Admin' })).toBeInTheDocument()
+    expect(navLabels()).not.toContain('Chores Management')
   })
 
   it('shows the Admin group trigger only for an admin', () => {
@@ -119,10 +179,7 @@ describe('AppSidebar', () => {
       'data-active',
       'true',
     )
-    expect(screen.getByRole('link', { name: 'Your Chores' })).toHaveAttribute(
-      'data-active',
-      'false',
-    )
+    expect(screen.getByRole('link', { name: 'My Chores' })).toHaveAttribute('data-active', 'false')
   })
 
   it('keeps the Chores section active on its nested routes', () => {

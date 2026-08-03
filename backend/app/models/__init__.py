@@ -6,7 +6,7 @@ from app.models.auth_token import AuthToken
 from app.models.chore import AssignmentType, Chore, RepeatPeriod
 from app.models.chore_occurrence import ChoreOccurrence, OccurrenceStatus
 from app.models.confirmation_token import ConfirmationToken
-from app.models.household import Household, household_members
+from app.models.household import Household, HouseholdRole, household_members
 from app.models.household_invitation import HouseholdInvitation, HouseholdInvitationStatus
 from app.models.tag import Tag
 from app.models.two_factor_challenge import TwoFactorChallenge
@@ -25,6 +25,7 @@ __all__ = [
     "Household",
     "HouseholdInvitation",
     "HouseholdInvitationStatus",
+    "HouseholdRole",
     "OccurrenceStatus",
     "RepeatPeriod",
     "Tag",

@@ -172,4 +172,35 @@ describe('Statistics', () => {
 
     expect(await screen.findByText('Failed to load statistics')).toBeInTheDocument()
   })
+
+  it('offers only the households the user is at least a deputy in', async () => {
+    // Same narrowing as History, and for the same reason: /completions/filters is shared with
+    // Home and Unscheduled so it cannot be role-scoped server-side, and /stats already excludes
+    // helper households, so offering one here would be a filter that returns nothing.
+    const fetchMock = stubFetch({
+      options: {
+        households: [
+          { id: 1, name: 'Flat 3B' },
+          { id: 2, name: 'Beach House' },
+        ],
+        members: [makeHouseholdMember()],
+      },
+    })
+    renderWithProviders(<Statistics />, {
+      authValue: {
+        memberships: [
+          { household_id: 1, role: 'deputy' },
+          { household_id: 2, role: 'helper' },
+        ],
+      },
+    })
+
+    await screen.findByRole('heading', { name: 'Statistics' })
+    expect(screen.queryByRole('combobox', { name: 'Household' })).not.toBeInTheDocument()
+    // The positive half: the options really loaded, so the missing Select is the narrowing
+    // rather than a fixture that never answered.
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/completions/filters'))).toBe(
+      true,
+    )
+  })
 })

@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
+import { useAuth } from '../auth/useAuth'
 import { api } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
 import { routes } from '../lib/routes'
@@ -10,9 +11,16 @@ import { HouseholdForm } from '@/components/households/HouseholdForm'
 export default function HouseholdCreate() {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const { refresh } = useAuth()
 
   async function create(name: string) {
     await api.post<Household>(endpoints.households.root, { name })
+    // Creating a household makes you its organiser, so the caller's roles just changed and
+    // the sidebar reads them from the auth context. Without this refresh a brand-new account
+    // - the state every install and every new user starts in, and the reason this page is the
+    // documented first step - would create their household and still see the no-household nav,
+    // with the management pages bouncing off RequireRole until they reloaded by hand.
+    await refresh()
     toast.success(t('households.toastCreated'))
     await navigate(routes.households.list)
   }

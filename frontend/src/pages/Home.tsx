@@ -155,16 +155,13 @@ export default function Home() {
   // Only label the household when the user actually spans more than one.
   const multiHousehold = options.households.length > 1
 
-  // The heading is sr-only: the design leads with the filters rather than a title, but a page
-  // with no heading at all leaves screen-reader users nothing to navigate to and no way to
-  // tell this view from its Unscheduled twin (which shows its title). Spacing is a flex `gap`
-  // rather than per-block top margins, because which block renders first depends on state:
-  // a `:first-child` scheme silently re-flows the moment anything is added above it, and an
-  // sr-only heading is `position: absolute`, so it contributes neither height nor a gap and
-  // the first visible block still sits flush against main's own py-8.
+  // The heading is visible, styled and placed exactly as its Unscheduled twin's, so the two
+  // chore feeds read as a pair. Spacing is a flex `gap` rather than per-block top margins,
+  // because which block renders first depends on state: a `:first-child` scheme silently
+  // re-flows the moment anything is added above it.
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-5 py-8">
-      <h1 className="sr-only">{t('home.title')}</h1>
+      <h1 className="font-display text-2xl font-bold tracking-tight">{t('home.title')}</h1>
 
       {error && <p className="text-[13px] font-bold text-danger">{error}</p>}
 
