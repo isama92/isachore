@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router'
 import Login from './Login'
@@ -84,6 +84,97 @@ describe('Login', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Sign in' }))
 
     expect(value.login).toHaveBeenCalledWith('a@example.com', 'password12345', true)
+  })
+
+  it('submits on Enter from the remember-me checkbox without ticking it', async () => {
+    const { value } = renderWithProviders(<Login />, {
+      route: '/login',
+      authValue: { login: vi.fn(() => Promise.resolve({ twoFactorRequired: false })) },
+    })
+
+    await userEvent.type(screen.getByLabelText('Email'), 'a@example.com')
+    await userEvent.type(screen.getByLabelText('Password'), 'password12345')
+    const box = screen.getByRole('checkbox', { name: 'Remember me' })
+    box.focus()
+    await userEvent.keyboard('{Enter}')
+
+    // Radix would swallow this key outright; the handler hands it back to the form.
+    expect(value.login).toHaveBeenCalledWith('a@example.com', 'password12345', false)
+    // ...and Enter still must not toggle the box. That part of the Radix behaviour is
+    // correct (Space is what toggles a checkbox) and is deliberately kept.
+    expect(box).toHaveAttribute('aria-checked', 'false')
+  })
+
+  it('still toggles the checkbox on Space, without submitting', async () => {
+    const { value } = renderWithProviders(<Login />, {
+      route: '/login',
+      authValue: { login: vi.fn(() => Promise.resolve({ twoFactorRequired: false })) },
+    })
+
+    await userEvent.type(screen.getByLabelText('Email'), 'a@example.com')
+    await userEvent.type(screen.getByLabelText('Password'), 'password12345')
+    const box = screen.getByRole('checkbox', { name: 'Remember me' })
+    box.focus()
+    await userEvent.keyboard(' ')
+
+    // Pins the `e.key !== 'Enter'` guard. Broaden or drop it and Space starts submitting
+    // the form instead of ticking the box, breaking the standard checkbox interaction for
+    // every keyboard user.
+    expect(box).toHaveAttribute('aria-checked', 'true')
+    expect(value.login).not.toHaveBeenCalled()
+  })
+
+  // requestSubmit() consults no button, so unlike implicit submission it is NOT stopped by
+  // the disabled Sign in button. Two clauses stand in for that, and they cover different
+  // moments, so they get a test each.
+  it('ignores the auto-repeat of a held Enter', async () => {
+    const { value } = renderWithProviders(<Login />, {
+      route: '/login',
+      authValue: { login: vi.fn(() => new Promise<never>(() => {})) },
+    })
+
+    await userEvent.type(screen.getByLabelText('Email'), 'a@example.com')
+    await userEvent.type(screen.getByLabelText('Password'), 'password12345')
+    const box = screen.getByRole('checkbox', { name: 'Remember me' })
+    box.focus()
+    // userEvent does not set the repeat flag even for a held key, so this is fireEvent:
+    // `repeat: true` is precisely what a real browser sends from the second keydown on,
+    // and it is the only signal available before React has re-rendered with `submitting`.
+    fireEvent.keyDown(box, { key: 'Enter', repeat: true })
+
+    expect(value.login).not.toHaveBeenCalled()
+  })
+
+  it('ignores a second Enter while the first login is still in flight', async () => {
+    const { value } = renderWithProviders(<Login />, {
+      route: '/login',
+      authValue: { login: vi.fn(() => new Promise<never>(() => {})) },
+    })
+
+    await userEvent.type(screen.getByLabelText('Email'), 'a@example.com')
+    await userEvent.type(screen.getByLabelText('Password'), 'password12345')
+    screen.getByRole('checkbox', { name: 'Remember me' }).focus()
+    await userEvent.keyboard('{Enter}{Enter}')
+
+    // `login` never resolves, so `submitting` stays true: the second press must be a
+    // no-op rather than a second POST into the Redis login throttle.
+    expect(value.login).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not submit on Enter from the checkbox while a field is empty', async () => {
+    const { value } = renderWithProviders(<Login />, {
+      route: '/login',
+      authValue: { login: vi.fn(() => Promise.resolve({ twoFactorRequired: false })) },
+    })
+
+    await userEvent.type(screen.getByLabelText('Email'), 'a@example.com')
+    screen.getByRole('checkbox', { name: 'Remember me' }).focus()
+    await userEvent.keyboard('{Enter}')
+
+    // The password field is `required`, so the browser blocks this exactly as it blocks
+    // Enter in the email field. Pins requestSubmit() over calling the submit handler
+    // directly: the latter would skip constraint validation and post an empty password.
+    expect(value.login).not.toHaveBeenCalled()
   })
 
   it('shows the code step and verifies when 2FA is required', async () => {
