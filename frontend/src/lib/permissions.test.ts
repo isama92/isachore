@@ -81,8 +81,8 @@ describe('householdIdsWithRole', () => {
 
 describe('assignableRoles', () => {
   // The frontend mirror of update_household_member's gate. Empty means "render a badge".
-  const owner = { viewerIsOwner: true, viewerRole: 'organiser' } as const
-  const organiser = { viewerIsOwner: false, viewerRole: 'organiser' } as const
+  const owner = { viewerUnrestricted: true, viewerRole: 'organiser' } as const
+  const organiser = { viewerUnrestricted: false, viewerRole: 'organiser' } as const
 
   it('gives the owner all three roles on anybody else', () => {
     expect(assignableRoles({ ...owner, targetIsOwner: false, targetRole: 'helper' })).toEqual([
@@ -136,7 +136,7 @@ describe('assignableRoles', () => {
     for (const viewerRole of ['deputy', 'helper', null] as const) {
       expect(
         assignableRoles({
-          viewerIsOwner: false,
+          viewerUnrestricted: false,
           viewerRole,
           targetIsOwner: false,
           targetRole: 'helper',

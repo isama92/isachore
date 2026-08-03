@@ -57,7 +57,10 @@ export function householdIdsWithRole(memberships: Membership[], min: HouseholdRo
  *
  * - the household owner's own row is never editable, by anybody. They are always an organiser,
  *   and the way to move that is to transfer the household, which promotes the new owner.
- * - the owner may set any of the three on anybody else.
+ * - an unrestricted viewer may set any of the three on anybody else. That is the household
+ *   owner, and also a site admin on the Admin > Households surface: the organiser asymmetry
+ *   below exists so an organiser cannot grow the set of people who could demote *them*, which
+ *   is a statement about a household member and says nothing about an operator.
  * - an organiser may only move people between deputy and helper. So they cannot hand out
  *   `organiser`, cannot touch a row that already holds it, and therefore cannot demote
  *   themselves - that last one falls out of the same rule rather than needing its own branch.
@@ -67,14 +70,16 @@ export function householdIdsWithRole(memberships: Membership[], min: HouseholdRo
  * refused.
  */
 export function assignableRoles(opts: {
-  viewerIsOwner: boolean
+  // The household owner, or a site admin on the admin surface. Named for the capability
+  // rather than for ownership, because those are two different people with one reach.
+  viewerUnrestricted: boolean
   viewerRole: HouseholdRole | null
   targetIsOwner: boolean
   targetRole: HouseholdRole
 }): HouseholdRole[] {
-  const { viewerIsOwner, viewerRole, targetIsOwner, targetRole } = opts
+  const { viewerUnrestricted, viewerRole, targetIsOwner, targetRole } = opts
   if (targetIsOwner) return []
-  if (viewerIsOwner) return [...HOUSEHOLD_ROLES]
+  if (viewerUnrestricted) return [...HOUSEHOLD_ROLES]
   if (viewerRole === 'organiser' && targetRole !== 'organiser') {
     // Derived, not a literal `['deputy', 'helper']`: the backend expresses this as a
     // negation (anything except `organiser`), so a role added to HOUSEHOLD_ROLES has to

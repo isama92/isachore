@@ -120,7 +120,7 @@ export default function HouseholdEdit() {
               basePath={basePath}
               adminId={household.admin_id}
               canManage
-              viewerIsOwner
+              viewerUnrestricted
             />
           </section>
           <section className="mt-10">

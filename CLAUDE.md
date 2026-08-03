@@ -234,10 +234,15 @@ pre-commit run --all-files                           # what the git hook runs
     listing them, because the backend states the same rule as a negation and a new role
     would otherwise be accepted by the API but missing from an organiser's Select. Note
     invitations are per household, not per inviter: every organiser sees and can revoke
-    the whole list, and `MAX_PENDING_INVITATIONS` is a shared, unlocked count, so two of
-    them posting at once can exceed it by one, and a caller firing N in parallel can
-    defeat the cap outright: it is hygiene, not a boundary, since revoke-and-recreate is
-    unlimited anyway. `Households`' row action follows the same widening - the pencil is
+    the whole list, and `MAX_PENDING_INVITATIONS` is a shared budget. That count is a
+    read-decide-write with no constraint behind it, and widening the endpoint from one
+    inviter to several made the race reachable - 12 parallel POSTs landed 11 invitations
+    against a cap of 5 - so `create_invitation` takes
+    `pg_advisory_xact_lock(household_id)` first. Transaction-scoped, keyed per household,
+    and only ever after `_get_organised_household`. **The suite cannot cover it**: the
+    fixtures give each test one connection inside a rolled-back savepoint, so two
+    concurrent sessions never exist. Verify by hand with parallel `curl`, like the boot
+    migration. `Households`' row action follows the same widening - the pencil is
     `owned || hasRoleIn(..., 'organiser')`, because an eye labelled "View" hid a page
     organisers now have real work on. Setting a role goes through a confirmation, and
     that dialog is **controlled and rendered once for the table**, unlike every other
@@ -311,14 +316,20 @@ pre-commit run --all-files                           # what the git hook runs
     specific household needs its own check where the API would let it get that far:
     `ChoreEdit` does one and leaves for the list otherwise, since `GET /chores/{id}` is
     open to every role, while `TagEdit` needs none because `GET /tags/{id}` 403s by
-    itself. `HouseholdMembersTable` keeps its role props (`viewerIsOwner`, `viewerRole`)
-    separate from `canManage` rather than folding them together, because the admin
-    surface passes `canManage` unconditionally and has no member-PATCH endpoint to point
-    a Select at; both role props default to "nobody", which is what keeps that surface
-    and the deputy/helper view read-only without either passing anything.
-    `HouseholdEdit` is a three-way page now, not two: owner edits the household,
-    organiser shares the people work (roles plus invitations) on a read-only household,
-    deputy and helper read everything.
+    itself. `HouseholdMembersTable` keeps its role props (`viewerUnrestricted`,
+    `viewerRole`) separate from `canManage` rather than folding them together, because
+    they govern different endpoints; both default to "nobody", which is what keeps a
+    deputy or helper's view read-only without passing anything. `viewerUnrestricted` is
+    named for the capability rather than for ownership because two different people hold
+    it: the household owner, and a site admin on Admin > Households, who reaches the same
+    reach through `PATCH /admin/households/{id}/members/{user_id}`. Both member-role
+    routes go through the shared `set_member_role`, so the owner-row 409 and the
+    disabled-member 404 are written once; `refuse_owner_row` is called separately by the
+    user-surface handler as well, because *where* it fires decides whether an organiser
+    targeting the owner hears about the target or about themselves. `HouseholdEdit` is a
+    three-way page now, not two: owner edits the household, organiser shares the people
+    work (roles plus invitations) on a read-only household, deputy and helper read
+    everything.
 - **Email confirmation**: server-wide `app_settings.require_confirmation`
   (single-row table, `get_app_settings`) toggles it. When on, creating a user
   emails a `confirmation_tokens` link (same hashed-opaque-token pattern as auth

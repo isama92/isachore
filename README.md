@@ -52,7 +52,9 @@ shown to them in the sidebar at all.
 
 "admin" there is the household's owner, one per household, shown as **Admin** in the members
 table rather than as a fourth role: they are an organiser, and the extra rights come from
-owning the household.
+owning the household. A site admin can set any role from **Admin > Households** as well, with
+the same reach as the owner; the one row nobody can change is the owner's own, which moves by
+transferring the household.
 
 Creating a household makes you its owner. Accepting an invitation makes you a **helper**, and
 an organiser promotes from there. The owner's own role cannot be changed by anybody, including
@@ -617,12 +619,7 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
   while reviewing PR #33; predates it.
 
 - [x] Show page for households so everybody can see the members and organisers can invite new people/change roles
-- [ ] Let a site admin change household roles from Admin > Households
-
-  The members table there shows roles as badges: `HouseholdMembersTable`'s `viewerIsOwner` /
-  `viewerRole` props both default to "nobody", and the admin router has no member-PATCH
-  endpoint to point a Select at anyway. Until it does, an operator who needs to fix a role
-  impersonates the household owner.
+- [x] Let a site admin change household roles from Admin > Households
 
 - [x] Narrow the chore read that every role can reach
 

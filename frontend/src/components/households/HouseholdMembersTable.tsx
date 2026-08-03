@@ -43,10 +43,13 @@ type Props = {
   // unconditionally, and it has no member-PATCH endpoint for a role Select to call, so
   // roles show there as badges and a site admin who needs to change one impersonates.
   canManage: boolean
-  // Who is looking, for the role controls. Both default to "nobody", which is what keeps
-  // the admin surface and the deputy/helper view read-only without either passing anything.
-  // `assignableRoles` turns these into the options for a given row.
-  viewerIsOwner?: boolean
+  // Who is looking, for the role controls. Both default to "nobody", which is what keeps a
+  // deputy or helper's view read-only without passing anything. `assignableRoles` turns these
+  // into the options for a given row.
+  //
+  // `viewerUnrestricted` covers the household owner AND a site admin on Admin > Households:
+  // both may set any of the three, and both have a member-PATCH endpoint to call.
+  viewerUnrestricted?: boolean
   viewerRole?: HouseholdRole | null
 }
 
@@ -57,7 +60,7 @@ export function HouseholdMembersTable({
   basePath,
   adminId,
   canManage,
-  viewerIsOwner = false,
+  viewerUnrestricted = false,
   viewerRole = null,
 }: Props) {
   const { t } = useTranslation()
@@ -116,7 +119,7 @@ export function HouseholdMembersTable({
       return <Badge variant="secondary">{t('households.adminRole')}</Badge>
     }
     const options = assignableRoles({
-      viewerIsOwner,
+      viewerUnrestricted,
       viewerRole,
       targetIsOwner,
       targetRole: member.role,
