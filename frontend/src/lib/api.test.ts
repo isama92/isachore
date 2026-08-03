@@ -124,6 +124,40 @@ describe('api wrapper', () => {
     })
   })
 
+  it('reads a pydantic 422, whose detail is a list rather than a string', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse(422, {
+          detail: [
+            {
+              type: 'string_too_long',
+              loc: ['body', 'title'],
+              msg: 'String should have at most 255 characters',
+              ctx: { max_length: 255 },
+            },
+          ],
+        }),
+      ),
+    )
+
+    // Before this the list failed the string check and the user was shown statusText -
+    // the browser's raw "Unprocessable Content" (here jsonResponse's synthetic stand-in).
+    await expect(api.post('/api/v1/chores', {})).rejects.toMatchObject({
+      status: 422,
+      message: 'Title: Must be at most 255 characters',
+    })
+  })
+
+  it('keeps the status text when the detail is neither a string nor an issue list', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(400, { detail: { why: 'odd' } })))
+
+    await expect(api.get('/api/v1/thing')).rejects.toMatchObject({
+      status: 400,
+      message: 'HTTP 400',
+    })
+  })
+
   it('ApiError is an Error carrying the status', () => {
     const err = new ApiError(403, 'Admin only')
     expect(err).toBeInstanceOf(Error)
