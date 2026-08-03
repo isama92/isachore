@@ -48,8 +48,9 @@ export default function AppSidebar() {
   const closeMobile = () => setOpenMobile(false)
 
   // History and Statistics need a deputy somewhere; the two management pages need an
-  // organiser. Both read the same fact, so they are two names for one call rather than one
-  // name for two meanings - Statistics could move to its own role without touching History.
+  // organiser. The first two ARE the same expression today - not a copy-paste slip: they are
+  // two independent policy questions that currently share an answer, so moving Statistics to
+  // its own rung is a one-line change here rather than an untangling.
   const canSeeHistory = hasRoleSomewhere(memberships, 'deputy')
   const canSeeStatistics = hasRoleSomewhere(memberships, 'deputy')
   const canManage = hasRoleSomewhere(memberships, 'organiser')

@@ -109,9 +109,20 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       setMemberships(me.memberships ?? [])
       syncAppearance(me)
     } catch {
-      setUser(null)
-      setImpersonating(false)
-      setMemberships([])
+      // Deliberately clears nothing. A 401 here is already handled centrally: `lib/api.ts`
+      // calls the handler registered above, which clears the session, forgets the table
+      // settings and explains itself with a toast - strictly more than this could do.
+      //
+      // Anything else means only that re-reading the roles failed: a dropped connection, or a
+      // 502 from the proxy mid-deploy. The cookie is still good, and every caller of refresh()
+      // is on a path whose actual work already succeeded (a household created, an invitation
+      // accepted, one left or deleted), so signing the user out would be a self-inflicted
+      // logout as the reward for a success. Safe to keep the previous copy because memberships
+      // are advisory - the API re-checks every request, so a stale one can only show or hide a
+      // nav item until the next /auth/me.
+      //
+      // Note the mount effect above DOES clear on failure, and must: there, not knowing who
+      // the user is IS the answer, and the logged-out probe is the common case.
     }
   }, [syncAppearance])
 

@@ -22,6 +22,7 @@ from app.models import (
     HouseholdInvitationStatus,
     HouseholdRole,
     OccurrenceStatus,
+    RepeatPeriod,
     Tag,
     User,
     UserStatus,
@@ -596,8 +597,6 @@ async def test_unscheduled_chores_are_completable_by_a_helper(
     household = await make_household(
         members=[owner, helper], roles={helper.id: HouseholdRole.helper}
     )
-    from app.models import RepeatPeriod
-
     chore = await make_chore(household=household, repeats=RepeatPeriod.manual)
     client = await auth_client(helper)
 
@@ -831,6 +830,28 @@ async def test_home_still_shows_a_helpers_chores(
     resp = await client.get("/api/v1/home")
     assert resp.status_code == 200
     assert [c["title"] for c in resp.json()["items"]] == ["Wash up"]
+
+
+async def test_unscheduled_still_shows_a_helpers_chores(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # The twin of test_home_still_shows_a_helpers_chores, and the reason chore_scope carries a
+    # "do not add a min_role" comment: the ad-hoc chores are the ones a helper is most likely to
+    # be handed. Without this, narrowing unscheduled.py alone would break nothing in the suite.
+    owner = await make_user(email="owner@example.com")
+    helper = await make_user(email="helper@example.com")
+    household = await make_household(
+        members=[owner, helper], roles={helper.id: HouseholdRole.helper}
+    )
+    await make_chore(household=household, title="Fix the leaky tap", repeats=RepeatPeriod.manual)
+    client = await auth_client(helper)
+
+    resp = await client.get("/api/v1/unscheduled")
+    assert resp.status_code == 200
+    assert [c["title"] for c in resp.json()["items"]] == ["Fix the leaky tap"]
 
 
 async def test_tags_are_organiser_only(

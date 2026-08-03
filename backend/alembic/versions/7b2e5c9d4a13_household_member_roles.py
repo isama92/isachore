@@ -43,9 +43,20 @@ def upgrade() -> None:
         WHERE h.id = hm.household_id AND h.admin_id = hm.user_id
         """
     )
+    # Index the user_id side. The primary key is (household_id, user_id), so a `WHERE user_id
+    # = ?` lookup cannot use it, and Postgres indexes no FK automatically. Every membership
+    # query filters user_id first (`member_household_ids`, `memberships_for`,
+    # `role_in_household`, `is_active_member`, `member_of`), and roles put two of those on hot
+    # paths: `memberships_for` runs on every /auth/me - so every mount, login and refresh - and
+    # `role_in_household` on every gated write. Household tables are small, so this is cheap
+    # insurance rather than a fix for a measured problem.
+    op.create_index(
+        op.f("ix_household_members_user_id"), "household_members", ["user_id"], unique=False
+    )
 
 
 def downgrade() -> None:
     """Downgrade schema."""
+    op.drop_index(op.f("ix_household_members_user_id"), table_name="household_members")
     # A plain String column, so there is no named type to drop alongside it.
     op.drop_column("household_members", "role")

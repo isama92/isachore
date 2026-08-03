@@ -39,7 +39,7 @@ organisers reach with the pencil icon while everybody else gets a read-only eye;
 role asks for confirmation before it takes effect. A page somebody's role does not cover is not
 shown to them in the sidebar at all.
 
-|                                                     | admin | organiser | deputy | helper |
+|                                                     | owner | organiser | deputy | helper |
 | --------------------------------------------------- | :---: | :-------: | :----: | :----: |
 | Mark chores done, scheduled or unscheduled          |   ✓   |     ✓     |   ✓    |   ✓    |
 | My Chores, Unscheduled Chores, the household list   |   ✓   |     ✓     |   ✓    |   ✓    |
@@ -50,11 +50,11 @@ shown to them in the sidebar at all.
 | Rename or delete the household, remove members      |   ✓   |           |        |        |
 | Transfer the household to somebody else             |   ✓   |           |        |        |
 
-"admin" there is the household's owner, one per household, shown as **Admin** in the members
-table rather than as a fourth role: they are an organiser, and the extra rights come from
-owning the household. A site admin can set any role from **Admin > Households** as well, with
-the same reach as the owner; the one row nobody can change is the owner's own, which moves by
-transferring the household.
+The owner is one per household and is not a fourth role: they are an organiser, and the extra
+rights come from owning the household. Their row shows as **Admin** in the members table, which
+is the only place that word means the owner rather than the site-wide admin flag. A site admin
+can set any role from **Admin > Households** too, with the same reach as the owner; the one row
+nobody can change is the owner's own, which moves by transferring the household.
 
 Creating a household makes you its owner. Accepting an invitation makes you a **helper**, and
 an organiser promotes from there. The owner's own role cannot be changed by anybody, including

@@ -248,17 +248,31 @@ async def set_member_role(
     session: SessionDep, household: Household, user_id: int, role: HouseholdRole
 ) -> HouseholdMemberRoleRead:
     """Write one member's role, or 409 / 404. The single chokepoint both surfaces call, so the
-        two target rules are enforced once - the same arrangement as `remove_member`.
+    two target rules are enforced once - the same arrangement as `remove_member`.
 
-    Refuses the owner's row (see `refuse_owner_row`) and a disabled member, who keeps their
-        row but is hidden everywhere, so re-roling one would change a permission nothing displays.
+    Refuses the owner's row (see `refuse_owner_row`) and a disabled member, who keeps their row
+    but is hidden everywhere, so re-roling one would change a permission nothing displays.
 
-        What is NOT here is who may call it: the user surface adds the organiser rules on top, the
-        admin surface relies on `AdminUser`. Commits, like `remove_member`, because both callers
-        only read the household first.
+    What is NOT here is who may call it: the user surface adds the organiser rules on top, the
+    admin surface relies on `AdminUser`. Commits, like `remove_member`, because both callers only
+    read the household first.
     """
     refuse_owner_row(household, user_id)
-    if not await is_active_member(session, household.id, user_id):
+    # One query for the 404 guard and for the response, rather than `is_active_member` followed
+    # by a second fetch: the membership join is the existence check, and `expire_on_commit=False`
+    # (db/session.py) is what lets the row outlive the commit below.
+    member = (
+        await session.execute(
+            select(User)
+            .join(household_members, household_members.c.user_id == User.id)
+            .where(
+                household_members.c.household_id == household.id,
+                household_members.c.user_id == user_id,
+                User.status == UserStatus.active,
+            )
+        )
+    ).scalar_one_or_none()
+    if member is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Household member not found"
         )
@@ -271,7 +285,6 @@ async def set_member_role(
         .values(role=role)
     )
     await session.commit()
-    member = (await session.execute(select(User).where(User.id == user_id))).scalar_one()
     return HouseholdMemberRoleRead(
         id=member.id,
         first_name=member.first_name,

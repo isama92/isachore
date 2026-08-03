@@ -38,7 +38,10 @@ household_members = Table(
     "household_members",
     Base.metadata,
     Column("household_id", ForeignKey("households.id", ondelete="CASCADE"), primary_key=True),
-    Column("user_id", ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    # Indexed because the composite PK leads with household_id, so it cannot serve the
+    # user_id-first lookups every membership query does - `memberships_for` on every /auth/me
+    # among them. Mirrors the migration; without it autogenerate would offer to drop the index.
+    Column("user_id", ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True),
     # What this member may do here. Stored as a plain String (closed set enforced
     # at the schema layer, same approach as users.status) so a future role needs
     # no migration. The server_default is deliberately the *least* privileged

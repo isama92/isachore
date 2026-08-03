@@ -33,22 +33,23 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 
 type Props = {
-  // The household base URL: endpoints are `${basePath}/members` (list) and
-  // `${basePath}/members/{id}` (remove).
+  // The household base URL, user surface or admin: endpoints are `${basePath}/members`
+  // (list) and `${basePath}/members/{id}` (PATCH a role, DELETE the membership).
   basePath: string
-  // The owner's user id: badged and never removable (transfer ownership first).
+  // The owner's user id. Their row reads "Admin" in the role column, and is the one row that
+  // is never removable (transfer ownership first) and never re-rolable, by anybody.
   adminId: number
-  // Whether the viewer may remove members, which is the owner and site admins. Separate
-  // from the role props below rather than one flag: the admin surface passes this
-  // unconditionally, and it has no member-PATCH endpoint for a role Select to call, so
-  // roles show there as badges and a site admin who needs to change one impersonates.
+  // Whether the viewer may remove members: the household owner, and a site admin. Kept
+  // separate from the role props below because the two govern different endpoints, not
+  // because one surface lacks one - both have a member DELETE and a member PATCH.
   canManage: boolean
   // Who is looking, for the role controls. Both default to "nobody", which is what keeps a
   // deputy or helper's view read-only without passing anything. `assignableRoles` turns these
   // into the options for a given row.
   //
   // `viewerUnrestricted` covers the household owner AND a site admin on Admin > Households:
-  // both may set any of the three, and both have a member-PATCH endpoint to call.
+  // both may set any of the three. Named for the capability rather than for ownership,
+  // because those are two different people with one reach.
   viewerUnrestricted?: boolean
   viewerRole?: HouseholdRole | null
 }

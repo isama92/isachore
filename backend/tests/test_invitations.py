@@ -87,6 +87,30 @@ async def test_owner_creates_invitation(
     assert (expires_at.minute, expires_at.second, expires_at.microsecond) == (0, 0, 0)
 
 
+async def test_cap_message_names_the_household_not_the_caller(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    """The 409 detail is rendered verbatim by `HouseholdInvitations`, and inviting is no longer
+    one person's job: the 5 pending invites are as likely to be somebody else's, so "you already
+    have" would point an organiser at invitations they never made."""
+    owner = await make_user(email="owner@example.com")
+    organiser = await make_user(email="organiser@example.com")
+    household = await make_household(name="Flat 3B", members=[owner, organiser])
+    # All five minted by the OWNER, so the caller below genuinely has none of their own.
+    for _ in range(5):
+        await _make_invitation(db_session, household, owner)
+    client = await auth_client(organiser)
+
+    resp = await client.post(f"/api/v1/households/{household.id}/invitations")
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == (
+        "This household already has 5 pending invitations; revoke one first."
+    )
+
+
 async def test_below_organiser_cannot_create_invitation(
     make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
 ) -> None:

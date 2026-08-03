@@ -30,7 +30,12 @@ export default function ChoreCreate() {
   // Memoised so it is a stable dependency of the load effect below.
   const organised = useMemo(() => householdIdsWithRole(memberships, 'organiser'), [memberships])
   const [households, setHouseholds] = useState<Household[]>([])
-  const [householdId, setHouseholdId] = useState<number | null>(clone?.household_id ?? null)
+  // Seeded from the clone source only if the caller actually organises it. Unreachable
+  // today - Clone lives on the chores list, which is organiser-scoped - but an id the
+  // filtered picker cannot show is an id the form would submit and the API would refuse.
+  const [householdId, setHouseholdId] = useState<number | null>(
+    clone && organised.has(clone.household_id) ? clone.household_id : null,
+  )
   const [members, setMembers] = useState<HouseholdMember[]>([])
   const [tags, setTags] = useState<Tag[]>([])
   // Which household the currently loaded members/tags belong to; gates the clone
