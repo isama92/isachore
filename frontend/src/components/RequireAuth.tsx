@@ -28,7 +28,17 @@ export default function RequireAuth() {
         <AppSidebar />
         <SidebarInset>
           <TopBar />
-          <Outlet />
+          {/* Keyed so that switching identity (impersonation starting or stopping)
+              tears the page down and mounts it again. Nothing else would: `refresh()`
+              updates the auth context and clears the remembered table settings, but no
+              page's load effect depends on the context - `useServerTable`'s fetch
+              deliberately does not, and Home and Unscheduled lazy-initialise their
+              assignee filter from `user.id` exactly once. Without this the admin
+              returning from an impersonated session keeps that person's rows on screen
+              until they navigate away by hand. The key is `user.id`, NOT the user
+              object: a profile save calls `refresh()` too, and must not throw the page
+              away. */}
+          <Outlet key={user.id} />
         </SidebarInset>
       </SidebarProvider>
     </TooltipProvider>
