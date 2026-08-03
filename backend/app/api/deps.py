@@ -7,10 +7,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
+from app.core.households import member_household_ids
 from app.core.security import ADMIN_COOKIE_NAME, COOKIE_NAME, hash_token
 from app.db.redis import get_redis
 from app.db.session import get_session
-from app.models import AuthToken, Household, User, UserStatus, household_members
+from app.models import AuthToken, Household, HouseholdRole, User, UserStatus
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 RedisDep = Annotated[Redis, Depends(get_redis)]
@@ -81,7 +82,9 @@ async def get_impersonator(request: Request, session: SessionDep) -> User | None
 Impersonator = Annotated[User | None, Depends(get_impersonator)]
 
 
-async def get_current_household(user: CurrentUser, session: SessionDep) -> Household:
+async def get_current_household(
+    user: CurrentUser, session: SessionDep, min_role: HouseholdRole | None = None
+) -> Household:
     """The current user's active household, lowest id first, as a fallback for
     callers that take no explicit household_id.
 
@@ -89,11 +92,17 @@ async def get_current_household(user: CurrentUser, session: SessionDep) -> House
     the 404 below is a routine answer rather than an anomaly, and callers with a UI
     are expected to check first. Excludes soft-deleted households so the fallback
     stays consistent with get_member_household and the /households list (which both
-    hide deleted ones)."""
+    hide deleted ones). `min_role` narrows it to the households where the caller's role
+    grants that much, so the fallback cannot hand back one they may not act in.
+
+    Call this directly, never through `Depends`: `min_role` is a plain scalar with a default,
+    so FastAPI would resolve it as a query parameter and publish a permission helper's floor
+    as client input. It only ever narrows, so that would fail closed rather than escalate, but
+    there is no reason to offer it. There used to be a `CurrentHousehold` annotated alias here
+    for exactly that; it had no callers and was removed."""
     result = await session.execute(
         select(Household)
-        .join(household_members, household_members.c.household_id == Household.id)
-        .where(household_members.c.user_id == user.id, Household.deleted_at.is_(None))
+        .where(Household.id.in_(member_household_ids(user.id, min_role)))
         .order_by(Household.id)
         .limit(1)
     )
@@ -101,9 +110,10 @@ async def get_current_household(user: CurrentUser, session: SessionDep) -> House
     if household is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="You are not a member of any household",
+            detail=(
+                "You are not a member of any household"
+                if min_role is None
+                else f"You are not a household {min_role} anywhere"
+            ),
         )
     return household
-
-
-CurrentHousehold = Annotated[Household, Depends(get_current_household)]

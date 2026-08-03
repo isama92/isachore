@@ -4,9 +4,9 @@ Chore management for households. Track who does what, see what is overdue, due
 today, or coming up, shared between the people in a household, with a JSON API so
 mobile clients can join later.
 
-Features: multi-user households with invitations and ownership transfer, chores
-with four assignment strategies (manual, alphabetical, least-done, random) and
-turn-taking rotation, a Your Chores due view with one-tap completion and daily
+Features: multi-user households with invitations, ownership transfer and per-member
+roles, chores with four assignment strategies (manual, alphabetical, least-done,
+random) and turn-taking rotation, a My Chores due view with one-tap completion and daily
 progress, a separate Unscheduled Chores view for the ones you do whenever you feel
 like it (never due, repeatable on demand, showing how long since each was last
 done), completion history, per-household tags, a Statistics page, admin user and
@@ -30,6 +30,31 @@ command (see below); every other user is created by an admin in the UI under
 
 A new account starts with no household. Creating one is the user's own first step,
 under **Households**, or they accept an invitation to somebody else's.
+
+### Household roles
+
+Every membership carries a role, so a shared household can hand out chores without
+handing over the household. The owner (the "household admin", one per household) sets
+them from **Households > edit**; a page somebody's role does not cover is not shown to
+them in the sidebar at all.
+
+|                                                   | organiser | deputy | helper |
+| ------------------------------------------------- | :-------: | :----: | :----: |
+| Mark chores done, scheduled or unscheduled        |     ✓     |   ✓    |   ✓    |
+| My Chores, Unscheduled Chores, the household list |     ✓     |   ✓    |   ✓    |
+| History and Statistics                            |     ✓     |   ✓    |        |
+| Create, edit and delete chores, manage tags       |     ✓     |        |        |
+
+Creating a household makes you its owner and an organiser. Accepting an invitation makes
+you a **helper**, and the owner promotes from there. The owner is always an organiser and
+their own role cannot be changed; transferring the household (which promotes the new
+owner) is how that moves. Renaming or deleting a household, inviting, removing members
+and setting roles are the owner's alone.
+
+Roles are per household, and the views that span several of them narrow rather than
+refuse: an organiser of one household who is a helper in another sees the second one's
+chores on My Chores and can tick them off, while its history, statistics and chores
+management stay out of reach.
 
 ## Development
 
@@ -92,7 +117,11 @@ docker compose exec backend python -m app.cli seed --fresh
 ```
 
 Every seeded user's password is `password`; the admin is `admin@example.com`
-(the others are `bram@`, `cara@`, `dan@`, `eve@example.com`). If the DB is empty,
+(the others are `bram@`, `cara@`, `dan@`, `eve@example.com`). In the shared household
+they cover every role, so you can log in as each and compare: Alex owns it (organiser),
+Bram is a second organiser, Cara a deputy, Dan and Eve helpers. Each also owns a solo
+household, which makes all five organisers *somewhere* and so gives them the full
+sidebar; to see a pared-down one, invite a fresh user (invitees join as helpers). If the DB is empty,
 this is the quickest way to get a working login; if you only need a bare admin,
 use `init` instead.
 
@@ -552,7 +581,9 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
 - [ ] Add a skip button (next to complete), and change the charts to also show the skipped chores
 - [ ] Live updates when a housemate completes a chore (websocket)
 - [ ] Chore change log (who changed what)
-- [ ] The due below the chore in the "your chores" page doesn't consider timezone but only utc, so at 1am it still doesn't show today's task but yesterday's
+- [x] Permissions system per household, each member has a role, each role can do different things, eg. a kid should not be able to change chores or see statistics
+- [ ] Log when somebody undo a chore (add new table)
+- [ ] The due below the chore in the "my chores" page doesn't consider timezone but only utc, so at 1am it still doesn't show today's task but yesterday's
 - [ ] Make validation errors (422) readable instead of showing "Unprocessable Entity"
 
   FastAPI returns `detail` as a **list** of error objects for a 422, but `handle()` in
@@ -568,6 +599,28 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
   English `msg` (quick, but untranslated and phrased for developers) or to map the error's
   `loc`/`type` onto our own i18n keys (better, and the reason this is not a one-liner). Noticed
   while reviewing PR #33; predates it.
+
+- [ ] Show page for households so everybody can see the members and organisers can invite new people/change roles
+
+  Roles ship enforced end to end, but *setting* one is the household owner's alone, and so is
+  inviting. The API already refuses an organiser (403 "Only the household admin can do this"),
+  so what is left is the frontend and the widening of that one gate.
+
+- [ ] Let a site admin change household roles from Admin > Households
+
+  The members table there shows roles as badges: `HouseholdMembersTable` takes `canEditRoles`,
+  and the admin router has no member-PATCH endpoint to point it at. Until it does, an operator
+  who needs to fix a role impersonates the household owner.
+
+- [ ] Narrow the chore read that every role can reach
+
+  `GET /chores/{id}` is open to every member on purpose (the description dialog on My Chores and
+  Unscheduled needs it), but `ChoreRead` serialises `assignees` as full `UserRead` objects,
+  email and `is_admin` included, plus every tag. So a helper can read housemates' email
+  addresses through it. Pre-existing for all members, and none of it is displayed: `ChoreForm`
+  uses ids and names only, and `DueChoreRead` already uses the data-minimised
+  `HouseholdMemberRead`. Give the read its own narrower schema, which also removes the one
+  hole in the tags router's read gate.
 
 - [ ] Stop `GET /chores` sending every chore's full description
 

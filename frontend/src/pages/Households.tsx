@@ -31,7 +31,7 @@ type HouseholdFilters = { name: string }
 
 export default function Households() {
   const { t } = useTranslation()
-  const { user: me } = useAuth()
+  const { user: me, refresh } = useAuth()
 
   const table = useServerTable<Household, HouseholdFilters>({
     endpoint: endpoints.households.root,
@@ -57,6 +57,10 @@ export default function Households() {
     setError(null)
     try {
       await api.del(endpoints.households.byId(household.id))
+      // A soft-deleted household drops out of `memberships_for`, so deleting one shrinks the
+      // caller's roles exactly as leaving does - and deleting your last one can take the
+      // management pages with it. Same reason as `leave()` in HouseholdEdit.
+      await refresh()
       toast.success(t('households.deleted'))
       table.reload()
     } catch (err) {

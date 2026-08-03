@@ -109,7 +109,7 @@ describe('Households', () => {
       },
     })
     const toastSpy = vi.spyOn(toast, 'success')
-    renderWithProviders(<Households />, { authValue: { user: me } })
+    const { value } = renderWithProviders(<Households />, { authValue: { user: me } })
     const user = userEvent.setup({ pointerEventsCheck: 0 })
 
     const row = (await screen.findByText('Flat 3B')).closest('tr')!
@@ -120,6 +120,10 @@ describe('Households', () => {
     await waitFor(() => expect(deleted).toContain('/api/v1/households/3'))
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(true)
     expect(toastSpy).toHaveBeenCalled()
+    // A soft-deleted household drops out of the caller's memberships, so deleting one
+    // shrinks their roles and the sidebar has to be told. Deleting your last household
+    // would otherwise leave it offering management pages that no longer resolve.
+    expect(value.refresh).toHaveBeenCalled()
   })
 
   it('surfaces a load error', async () => {

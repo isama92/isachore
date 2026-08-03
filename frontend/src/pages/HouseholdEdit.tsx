@@ -29,7 +29,7 @@ import { Label } from '@/components/ui/label'
 export default function HouseholdEdit() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { user: me } = useAuth()
+  const { user: me, refresh } = useAuth()
   const { id = '' } = useParams()
 
   const [household, setHousehold] = useState<Household | null>(null)
@@ -64,6 +64,11 @@ export default function HouseholdEdit() {
     setError(null)
     try {
       await api.post(endpoints.households.leave(id))
+      // Leaving drops a membership, so the caller's roles just shrank. Without this the
+      // sidebar keeps offering whatever that household granted: History and Chores render
+      // empty, and Tags 404s ("You are not a household organiser anywhere") with nothing on
+      // screen able to clear it, since no stored filter is at fault.
+      await refresh()
       toast.success(t('households.left'))
       await navigate(routes.households.list)
     } catch (err) {
@@ -104,7 +109,14 @@ export default function HouseholdEdit() {
             <h2 className="mb-4 font-display text-lg font-bold tracking-tight">
               {t('households.membersTitle')}
             </h2>
-            <HouseholdMembersTable basePath={basePath} adminId={household.admin_id} canManage />
+            {/* This branch IS the owner (canManage above is `me.id === household.admin_id`),
+                and the owner is the only person who may set roles. */}
+            <HouseholdMembersTable
+              basePath={basePath}
+              adminId={household.admin_id}
+              canManage
+              canEditRoles
+            />
           </section>
           <section className="mt-10">
             <HouseholdInvitations basePath={basePath} />

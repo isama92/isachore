@@ -8,15 +8,19 @@ import { api } from '../lib/api'
 import ThemeProvider from '../theme/ThemeProvider'
 import i18n from '../i18n/i18n'
 import { jsonResponse, mockFetch } from '../test/utils'
-import { makeMe, makeUser } from '../test/fixtures'
+import { makeMe } from '../test/fixtures'
 
 function Harness() {
-  const { user, impersonating, loading, login, verifyTwoFactor, logout, refresh } = useAuth()
+  const { user, impersonating, memberships, loading, login, verifyTwoFactor, logout, refresh } =
+    useAuth()
   return (
     <div>
       <span data-testid="loading">{String(loading)}</span>
       <span data-testid="user">{user ? user.email : 'none'}</span>
       <span data-testid="impersonating">{String(impersonating)}</span>
+      <span data-testid="memberships">
+        {memberships.map((m) => `${m.household_id}:${m.role}`).join(',') || 'none'}
+      </span>
       <button onClick={() => void login('a@example.com', 'password12345', true)}>login</button>
       <button onClick={() => void verifyTwoFactor('123456')}>verify</button>
       <button onClick={() => void logout()}>logout</button>
@@ -80,7 +84,7 @@ describe('AuthProvider', () => {
       {
         path: '/api/v1/auth/login',
         method: 'POST',
-        body: { two_factor_required: false, user: makeUser({ email: 'a@example.com' }) },
+        body: { two_factor_required: false, user: makeMe({ email: 'a@example.com' }) },
       },
     ])
     renderProvider()
@@ -114,7 +118,7 @@ describe('AuthProvider', () => {
       {
         path: '/api/v1/auth/verify-2fa',
         method: 'POST',
-        body: makeUser({ email: 'a@example.com' }),
+        body: makeMe({ email: 'a@example.com' }),
       },
     ])
     renderProvider()
@@ -317,7 +321,7 @@ describe('AuthProvider', () => {
       {
         path: '/api/v1/auth/login',
         method: 'POST',
-        body: { two_factor_required: false, user: makeUser({ id: 99, email: 'b@example.com' }) },
+        body: { two_factor_required: false, user: makeMe({ id: 99, email: 'b@example.com' }) },
       },
     ])
     localStorage.setItem('isachore-table-admin-users', '{"filters":{"email":"someone@x.com"}}')
@@ -395,5 +399,63 @@ describe('AuthProvider', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(401, { detail: 'x' })))
     await expect(api.get('/api/v1/thing')).rejects.toMatchObject({ status: 401 })
     expect(toastSpy).not.toHaveBeenCalled()
+  })
+
+  it('adopts the household roles from /auth/me, and drops them on logout', async () => {
+    // The sidebar reads these, so a session that carries a user but no roles renders the
+    // minimal nav - and a logout that leaves them behind would light it up for nobody.
+    mockFetch([
+      {
+        path: '/api/v1/auth/me',
+        body: makeMe({
+          email: 'a@example.com',
+          memberships: [
+            { household_id: 1, role: 'organiser' },
+            { household_id: 2, role: 'helper' },
+          ],
+        }),
+      },
+      { path: '/api/v1/auth/logout', method: 'POST', status: 204 },
+    ])
+    renderProvider()
+
+    await waitFor(() =>
+      expect(screen.getByTestId('memberships')).toHaveTextContent('1:organiser,2:helper'),
+    )
+
+    await userEvent.click(screen.getByText('logout'))
+    await waitFor(() => expect(screen.getByTestId('memberships')).toHaveTextContent('none'))
+  })
+
+  it('takes the roles from the login response, without a second /auth/me', async () => {
+    // Login sets the auth state directly, so if the roles did not ride along the first
+    // screen after signing in would show the minimal nav until the next reload.
+    const fetchMock = mockFetch([
+      { path: '/api/v1/auth/me', status: 401, body: { detail: 'Not authenticated' } },
+      {
+        path: '/api/v1/auth/login',
+        method: 'POST',
+        body: {
+          two_factor_required: false,
+          user: makeMe({
+            email: 'a@example.com',
+            memberships: [{ household_id: 3, role: 'deputy' }],
+          }),
+        },
+      },
+    ])
+    renderProvider()
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'))
+    const meCallsBefore = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes('/auth/me'),
+    ).length
+
+    await userEvent.click(screen.getByText('login'))
+
+    await waitFor(() => expect(screen.getByTestId('memberships')).toHaveTextContent('3:deputy'))
+    const meCallsAfter = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes('/auth/me'),
+    ).length
+    expect(meCallsAfter).toBe(meCallsBefore)
   })
 })

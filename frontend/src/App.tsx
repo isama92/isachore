@@ -5,6 +5,7 @@ import { routes } from './lib/routes'
 import { Spinner } from '@/components/ui/spinner'
 import RequireAdmin from './components/RequireAdmin'
 import RequireAuth from './components/RequireAuth'
+import RequireRole from './components/RequireRole'
 import AdminHouseholdCreate from './pages/admin/HouseholdCreate'
 import AdminHouseholdEdit from './pages/admin/HouseholdEdit'
 import AdminHouseholds from './pages/admin/Households'
@@ -61,38 +62,47 @@ export default function App() {
         <Route path={routes.home} element={<Home />} />
         <Route path={routes.unscheduled} element={<Unscheduled />} />
         <Route path={routes.profile} element={<Profile />} />
-        <Route path={routes.chores.list} element={<Chores />} />
-        <Route
-          path={routes.chores.new}
-          element={
-            <Suspense fallback={<RouteFallback />}>
-              <ChoreCreate />
-            </Suspense>
-          }
-        />
-        <Route
-          path={routes.chores.edit.pattern}
-          element={
-            <Suspense fallback={<RouteFallback />}>
-              <ChoreEdit />
-            </Suspense>
-          }
-        />
-        <Route path={routes.history} element={<History />} />
-        <Route
-          path={routes.statistics}
-          element={
-            <Suspense fallback={<RouteFallback />}>
-              <Statistics />
-            </Suspense>
-          }
-        />
+        {/* Home, Unscheduled, Profile and the household pages above/below are open to every
+            role: completing a chore is what a helper is for, and the household pages are
+            read-only for anyone who is not the owner. The two guards below mirror the
+            sidebar, which hides the same items - they catch a typed URL or a stale link,
+            and the API enforces the roles regardless. */}
+        <Route element={<RequireRole min="deputy" />}>
+          <Route path={routes.history} element={<History />} />
+          <Route
+            path={routes.statistics}
+            element={
+              <Suspense fallback={<RouteFallback />}>
+                <Statistics />
+              </Suspense>
+            }
+          />
+        </Route>
+        <Route element={<RequireRole min="organiser" />}>
+          <Route path={routes.chores.list} element={<Chores />} />
+          <Route
+            path={routes.chores.new}
+            element={
+              <Suspense fallback={<RouteFallback />}>
+                <ChoreCreate />
+              </Suspense>
+            }
+          />
+          <Route
+            path={routes.chores.edit.pattern}
+            element={
+              <Suspense fallback={<RouteFallback />}>
+                <ChoreEdit />
+              </Suspense>
+            }
+          />
+          <Route path={routes.tags.list} element={<Tags />} />
+          <Route path={routes.tags.new} element={<TagCreate />} />
+          <Route path={routes.tags.edit.pattern} element={<TagEdit />} />
+        </Route>
         <Route path={routes.households.list} element={<Households />} />
         <Route path={routes.households.new} element={<HouseholdCreate />} />
         <Route path={routes.households.edit.pattern} element={<HouseholdEdit />} />
-        <Route path={routes.tags.list} element={<Tags />} />
-        <Route path={routes.tags.new} element={<TagCreate />} />
-        <Route path={routes.tags.edit.pattern} element={<TagEdit />} />
         <Route element={<RequireAdmin />}>
           <Route path={routes.admin.users.list} element={<Users />} />
           <Route path={routes.admin.users.new} element={<UserCreate />} />

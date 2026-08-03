@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
 import type { ColumnDef } from '@tanstack/react-table'
 import { CopyPlusIcon, SquarePenIcon, Trash2Icon } from 'lucide-react'
+import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
+import { householdIdsWithRole } from '../lib/permissions'
 import { endpoints } from '../lib/endpoints'
 import { routes } from '../lib/routes'
 import { formatDate, formatDateTime, repeatLabel } from '../lib/chores'
@@ -54,6 +56,9 @@ export default function Chores() {
     },
   })
 
+  const { memberships } = useAuth()
+  // Memoised so it is a stable dependency of the load effect below.
+  const organised = useMemo(() => householdIdsWithRole(memberships, 'organiser'), [memberships])
   const [households, setHouseholds] = useState<Household[]>([])
   const [error, setError] = useState<string | null>(null)
 
@@ -77,19 +82,22 @@ export default function Chores() {
     return () => clearTimeout(id)
   }, [titleInput])
 
-  // The household filter options (and whether to show the filter at all).
+  // The household filter options (and whether to show the filter at all), narrowed to the
+  // ones the caller organises - the only ones this list returns chores for.
   useEffect(() => {
     let cancelled = false
     api
       .get<Page<Household>>(`${endpoints.households.root}?sort_by=id&sort_dir=asc&page_size=100`)
       .then((page) => {
         if (cancelled) return
-        setHouseholds(page.items)
+        const mine = page.items.filter((h) => organised.has(h.id))
+        setHouseholds(mine)
         // A remembered household_id outlives whatever made it valid (household left,
-        // deleted, or membership revoked). Left in place it filters the list down to
-        // nothing behind a blank Select, so drop what can no longer be picked.
+        // deleted, membership revoked, or the role dropped below organiser). Left in place
+        // it filters the list down to nothing behind a blank Select, so drop what can no
+        // longer be picked.
         const active = filtersRef.current.household_id
-        if (active !== '' && !page.items.some((h) => String(h.id) === active)) {
+        if (active !== '' && !mine.some((h) => String(h.id) === active)) {
           setFilterRef.current('household_id', '')
         }
       })
@@ -99,7 +107,7 @@ export default function Chores() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [organised])
 
   async function remove(chore: Chore) {
     setError(null)

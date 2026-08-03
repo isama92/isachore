@@ -3,7 +3,7 @@ import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router'
 import ChoreEdit from './ChoreEdit'
-import { mockFetch, renderWithProviders } from '../test/utils'
+import { membershipsFor, mockFetch, renderWithProviders } from '../test/utils'
 import { makeChore, makeHouseholdMember, makeTag, makeUser } from '../test/fixtures'
 import type { Page } from '../lib/types'
 
@@ -60,7 +60,12 @@ function renderEdit() {
       <Route path="/chores/:id/edit" element={<ChoreEdit />} />
       <Route path="/chores" element={<div>chores-list</div>} />
     </Routes>,
-    { authValue: { user: me }, route: '/chores/7/edit' },
+    // The saved chore belongs to household 4, and ChoreEdit leaves for the list unless the
+    // caller organises *that* household - the route guard only proves they organise somewhere.
+    {
+      authValue: { user: me, memberships: membershipsFor('organiser', 4) },
+      route: '/chores/7/edit',
+    },
   )
 }
 
@@ -480,5 +485,35 @@ describe('clearing the current assignee', () => {
     await user.click(screen.getByRole('button', { name: 'Save changes' }))
     await screen.findByText('chores-list')
     expect(patchBody(fetchMock)).toMatchObject({ clear_current_assignee: true })
+  })
+})
+
+describe('per-household role', () => {
+  it('leaves for the chores list when the chore is not in a household you organise', async () => {
+    // RequireRole only proves the caller organises *somewhere*, and reading a chore is open
+    // to every role, so this is the one check that can catch "organiser here, helper there".
+    // The chore lives in household 4; the caller organises 1 and is a helper in 4.
+    const fetchMock = mockFetch([{ path: '/api/v1/chores/7', method: 'GET', body: savedChore }])
+    renderWithProviders(
+      <Routes>
+        <Route path="/chores/:id/edit" element={<ChoreEdit />} />
+        <Route path="/chores" element={<div>chores-list</div>} />
+      </Routes>,
+      {
+        authValue: {
+          user: me,
+          memberships: [
+            { household_id: 1, role: 'organiser' },
+            { household_id: 4, role: 'helper' },
+          ],
+        },
+        route: '/chores/7/edit',
+      },
+    )
+
+    expect(await screen.findByText('chores-list')).toBeInTheDocument()
+    // It leaves before asking for that household's tags, which is organiser-only and would
+    // have failed the load with a message about nothing in particular.
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/v1/tags'))).toBe(false)
   })
 })

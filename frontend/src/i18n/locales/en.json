@@ -32,7 +32,7 @@
   },
   "sidebar": {
     "nav": "Main navigation",
-    "home": "Your Chores",
+    "home": "My Chores",
     "unscheduled": "Unscheduled Chores",
     "households": "Households",
     "chores": "Chores Management",
@@ -71,7 +71,7 @@
     "twoFactorError": "Could not verify the code"
   },
   "home": {
-    "title": "Your Chores",
+    "title": "My Chores",
     "unassigned": "Unassigned",
     "progress": {
       "doneToday": "{{done}} of {{total}} done today",
@@ -338,6 +338,14 @@
     "leaveError": "Could not leave the household",
     "adminBadge": "Admin",
     "adminLabel": "Household admin",
+    "roles": {
+      "organiser": "Organiser",
+      "deputy": "Deputy",
+      "helper": "Helper"
+    },
+    "roleLabel": "Role for {{name}}",
+    "roleUpdated": "{{name}}'s role updated",
+    "roleError": "Could not update the role",
     "transferConfirm": "Make {{name}} the household admin?",
     "transferConfirmBody": "They become the only member who can edit this household and manage its members.",
     "transferConfirmAction": "Transfer",
@@ -406,6 +414,7 @@
     "membersHeaders": {
       "id": "ID",
       "name": "Name",
+      "role": "Role",
       "actions": "Actions"
     },
     "filters": {

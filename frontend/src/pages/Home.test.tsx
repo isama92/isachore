@@ -86,11 +86,10 @@ describe('Home', () => {
 
     expect(await screen.findByText('5 of 8 done today')).toBeInTheDocument()
     expect(screen.getByText('3 left')).toBeInTheDocument()
-    // The heading exists for screen readers but is not shown: the design leads with the
-    // filters. Queried by role, which reads the accessibility tree, so this passes only while
-    // the heading is really exposed there - and `sr-only` is what keeps it off the screen.
-    const heading = screen.getByRole('heading', { name: 'Your Chores' })
-    expect(heading).toHaveClass('sr-only')
+    // A visible heading, matching its Unscheduled twin, so the two chore feeds read as a
+    // pair. It used to be sr-only; `not.toHaveClass` is what keeps it from going back.
+    const heading = screen.getByRole('heading', { name: 'My Chores' })
+    expect(heading).not.toHaveClass('sr-only')
     expect(heading.tagName).toBe('H1')
 
     const overdue = screen.getByText('Clean the bathroom').closest('li')!

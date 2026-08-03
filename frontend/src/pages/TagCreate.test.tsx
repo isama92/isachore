@@ -3,7 +3,7 @@ import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router'
 import TagCreate from './TagCreate'
-import { mockFetch, renderWithProviders } from '../test/utils'
+import { mockFetch, renderWithProviders, membershipsFor } from '../test/utils'
 import { makeHousehold, makeTag, makeUser } from '../test/fixtures'
 import type { Page } from '../lib/types'
 
@@ -43,7 +43,10 @@ function withRoutes() {
       <Route path="/tags/new" element={<TagCreate />} />
       <Route path="/tags" element={<div>tags-list</div>} />
     </Routes>,
-    { authValue: { user: me }, route: '/tags/new' },
+    {
+      authValue: { user: me, memberships: membershipsFor('organiser', 1, 2) },
+      route: '/tags/new',
+    },
   )
 }
 
@@ -119,5 +122,48 @@ describe('TagCreate', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Add tag' }))
 
     expect(await screen.findByText('A tag with this name already exists')).toBeInTheDocument()
+  })
+
+  it('offers only the households the user organises', async () => {
+    // Submitting into a household the caller only deputises in would 403, so it must not be
+    // offered. With one organised household left the picker hides entirely (it renders above
+    // one), which is what makes this observable.
+    const fetchMock = mockFetch([
+      {
+        path: HOUSEHOLDS,
+        method: 'GET',
+        body: page([
+          makeHousehold({ id: 1, name: 'Flat 3B' }),
+          makeHousehold({ id: 2, name: 'Beach House' }),
+        ]),
+      },
+      { path: '/api/v1/tags', method: 'POST', status: 201, body: makeTag() },
+    ])
+    renderWithProviders(
+      <Routes>
+        <Route path="/tags/new" element={<TagCreate />} />
+        <Route path="/tags" element={<div>tags-list</div>} />
+      </Routes>,
+      {
+        authValue: {
+          user: me,
+          memberships: [
+            { household_id: 1, role: 'organiser' },
+            { household_id: 2, role: 'deputy' },
+          ],
+        },
+        route: '/tags/new',
+      },
+    )
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    await user.type(await screen.findByLabelText('Name'), 'deep-clean')
+    expect(screen.queryByRole('combobox', { name: 'Household' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Add tag' }))
+
+    // The positive half: an absent picker is also what a dead fixture looks like, so assert
+    // the surviving household is what actually reaches the wire.
+    await screen.findByText('tags-list')
+    expect(postBody(fetchMock)).toMatchObject({ household_id: 1 })
   })
 })

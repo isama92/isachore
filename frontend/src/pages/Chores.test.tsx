@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { Route, Routes, useLocation } from 'react-router'
 import { toast } from 'sonner'
 import Chores from './Chores'
-import { renderWithProviders } from '../test/utils'
+import { renderWithProviders, membershipsFor } from '../test/utils'
 import { formatDate, formatDateTime } from '../lib/chores'
 import { makeChore, makeHousehold, makeTag, makeUser } from '../test/fixtures'
 import type { Chore, Household } from '../lib/types'
@@ -324,7 +324,9 @@ describe('Chores', () => {
         makeHousehold({ id: 2, name: 'Beach House' }),
       ],
     })
-    renderWithProviders(<Chores />, { authValue: { user: me } })
+    renderWithProviders(<Chores />, {
+      authValue: { user: me, memberships: membershipsFor('organiser', 1, 2) },
+    })
 
     // The select renders only once the households have loaded, so this is the prune
     // having had its chance to run.
@@ -370,7 +372,9 @@ describe('Chores', () => {
         makeHousehold({ id: 2, name: 'Beach House' }),
       ],
     })
-    renderWithProviders(<Chores />, { authValue: { user: me } })
+    renderWithProviders(<Chores />, {
+      authValue: { user: me, memberships: membershipsFor('organiser', 1, 2) },
+    })
     const user = userEvent.setup({ pointerEventsCheck: 0 })
 
     await screen.findByText('Scrub the tub')
@@ -480,5 +484,35 @@ describe('Chores', () => {
     renderWithProviders(<Chores />, { authValue: { user: me } })
 
     expect(await screen.findByText('Failed to load chores')).toBeInTheDocument()
+  })
+
+  it('offers only the households the user organises', async () => {
+    // The list itself is server-scoped to organised households, so a deputy household in this
+    // picker is a dead option: choosing it filters an already-filtered list down to nothing
+    // behind a blank Select. With one left the Select hides (it renders above one).
+    const fetchMock = stubFetch({
+      chores: [makeChore({ id: 7, title: 'Scrub the tub' })],
+      households: [
+        makeHousehold({ id: 1, name: 'Flat 3B' }),
+        makeHousehold({ id: 2, name: 'Beach House' }),
+      ],
+    })
+    renderWithProviders(<Chores />, {
+      authValue: {
+        user: me,
+        memberships: [
+          { household_id: 1, role: 'organiser' },
+          { household_id: 2, role: 'deputy' },
+        ],
+      },
+    })
+
+    await screen.findByText('Scrub the tub')
+    expect(screen.queryByRole('combobox', { name: 'Household' })).not.toBeInTheDocument()
+    // The positive half: the household list really loaded, so the missing Select is the
+    // filter's doing rather than a fixture that never answered.
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/v1/households'))).toBe(
+      true,
+    )
   })
 })

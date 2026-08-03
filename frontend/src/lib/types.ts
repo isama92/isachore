@@ -26,14 +26,29 @@ export type User = {
   two_factor_enabled: boolean
 }
 
-export type Me = User & { impersonating: boolean }
+// What a member may do inside one household, kept in sync with the backend
+// HouseholdRole enum. A ladder, not a set of flags: organiser > deputy > helper, and
+// `lib/permissions.ts` is the only place that ordering is written down. Household
+// *ownership* is a separate fact (`Household.admin_id`) that outranks all three.
+export const HOUSEHOLD_ROLES = ['organiser', 'deputy', 'helper'] as const
+export type HouseholdRole = (typeof HOUSEHOLD_ROLES)[number]
+
+// One of the signed-in user's household memberships. Carried on `Me` so the sidebar can
+// decide what to show before any household has been fetched.
+export type Membership = { household_id: number; role: HouseholdRole }
+
+export type Me = User & { impersonating: boolean; memberships: Membership[] }
 
 // Outcome of the password step of login (backend LoginResponse). When
 // two_factor_required is true the user must submit a code to /auth/verify-2fa;
 // otherwise the login is complete and `user` is populated.
 export type LoginResponse = {
   two_factor_required: boolean
-  user: User | null
+  // `Me`, not `User`: the backend returns the memberships with the session it just opened,
+  // so the sidebar knows the caller's roles without a follow-up /auth/me. Login sets the
+  // auth state directly, which is why this matters - without it the first screen after
+  // signing in would render the minimal nav.
+  user: Me | null
 }
 
 // What POST /profile/2fa/setup returns to drive enrolment: the secret (for
@@ -239,6 +254,12 @@ export type ChoreCloneState = {
 
 // The member list / assignee picker only needs a name (data minimisation).
 export type HouseholdMember = Pick<User, 'id' | 'first_name' | 'last_name'>
+
+// A member as the household members table sees them. Deliberately a separate type rather
+// than a `role` field on HouseholdMember: that one is also the type of chore assignees,
+// History's `completed_by` and an invitation's `invited_by`, none of which have a
+// membership to read a role from (the backend splits HouseholdMemberRead the same way).
+export type HouseholdMemberWithRole = HouseholdMember & { role: HouseholdRole }
 
 // A household invite link as the owner sees it. `url` is the shareable link;
 // `status` is the stored lifecycle (including `expired`, set by the hourly

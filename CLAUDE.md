@@ -196,10 +196,97 @@ pre-commit run --all-files                           # what the git hook runs
     none and is the only endpoint that hard-fails; `ChoreCreate` and `TagCreate`
     because their forms have no `household_id` to submit at all. Everything else
     (Home, Chores, History, Statistics) scopes through `member_household_ids` and
-    simply returns nothing.
+    simply returns nothing. Note the `noHouseholds` states are now unreachable through
+    the *sidebar*, since a member of none reaches no role and `RequireRole` sends them
+    to Home; they are kept because the guard is client-side and the URLs still work.
   - Do NOT seed a household in a migration: `households.admin_id` is NOT NULL, so
     a household cannot exist before its owner, and an owner-less row is what used
     to make `alembic upgrade head` unrunnable on an empty database.
+- **Household roles**: `household_members.role` is a `varchar(30)`, `HouseholdRole`
+  StrEnum on the backend only (`models/household.py`, same String-column pattern as
+  `users.status`, so a new role needs no migration). organiser > deputy > helper, and
+  `_ROLE_LADDER` / `roles_at_least` in `app/core/households.py` is the ONLY place that
+  ordering is written down on the backend; on the frontend it is the order of the
+  `HOUSEHOLD_ROLES` tuple in `lib/types.ts` (strongest first), which
+  `lib/permissions.ts` derives its ranks from. A role added to the enum but missing from
+  `_ROLE_LADDER` satisfies no predicate at all, which `test_every_role_is_on_the_ladder`
+  pins. Capabilities: every role completes chores (scheduled and unscheduled) and reads
+  the household list; deputy adds History and Statistics; organiser adds chore and tag
+  management. Nine things to keep straight:
+  - **`admin_id` and `role` overlap on purpose, and the owner always wins.** Ownership
+    stays `households.admin_id`; the owner is by definition an organiser, their role is
+    not editable (409 from the member PATCH), and `set_household_admin` *promotes the
+    new owner* as part of the transfer. Drop that promotion and handing the household to
+    a helper leaves them owning something they cannot manage the chores of, with no way
+    to fix it, because the role endpoint refuses to touch the owner's row.
+    Renaming/deleting, inviting, removing members and setting roles remain owner-only;
+    letting organisers invite and set roles is `README.md`'s todo, and the API
+    deliberately 403s them today.
+  - **Reads narrow, writes 403** ("union for nav, scope the data"). Home, History,
+    Statistics and the chores list each span every household, so they take
+    `member_household_ids(user_id, min_role)` and return *less data* rather than
+    refusing: a deputy in one household and a helper in another gets the first one's
+    history and never learns the second has any. Mutations go through `require_role`,
+    which 403s, because the caller can see the resource elsewhere and a 404 would be a
+    lie. `GET /chores/{id}` is ungated on purpose (the description dialog on Home and
+    Unscheduled needs it for helpers), which is why the chores router has both
+    `_get_user_chore_or_404` and `_managed_chore_or_error`. The whole tags router IS
+    gated on reads too, because no view a non-organiser reaches offers a tag to pick or
+    filter by. That is about the *surface*, not secrecy: `ChoreRead.tags` still hands a
+    chore's tags to any member through that open chore read, so do not restate the gate
+    as "tag names are hidden" - they are not, and narrowing that payload (which also
+    ships assignees as full `UserRead`, email included) is its own README todo.
+  - **`GET /completions/filters` is deliberately NOT role-narrowed.** It also feeds the
+    Home and Unscheduled filter bars (`useFilterOptions.ts`), which every role uses, so
+    narrowing it would empty the pickers on the one page a helper does have. History and
+    Statistics filter its `households` client-side instead.
+  - **`add_member` takes a required role, and the column's `server_default` is
+    `helper`.** `household_members` is a Core `Table`, so the `members` relationship
+    inserts the two foreign keys only and would leave any bypassing path on the default.
+    That default is the weakest role rather than the strongest for exactly that reason.
+    `db/seed.py` and `tests/conftest.py` both used the relationship and were converted;
+    do not put it back.
+  - **`conftest.make_household` defaults every member to `organiser`.** Load-bearing:
+    before roles, membership granted everything, so that default is what keeps the
+    chores / tags / stats / history suites testing their own subjects instead of several
+    hundred assertions about 403s. Role tests pass `roles={user.id: ...}`.
+  - **`HouseholdMemberRoleRead` is a subclass, used by the two members endpoints
+    alone.** `HouseholdMemberRead` is shared by five other payloads (assignees on Home
+    and Unscheduled, History's `completed_by`, the filter options, an invitation's
+    `invited_by`), none of which join a membership row, so `role` on the base would
+    either leak into all of them or fail validation. `build_members_page` selects
+    `household_members.c.role` alongside `User`. Same split on the frontend:
+    `HouseholdMemberWithRole`, not a field on `HouseholdMember`.
+  - **Every response carrying the signed-in user carries their memberships**, via
+    `_me_read` in `api/v1/auth.py`: `/auth/me`, the login response (`LoginResponse.user`
+    is `MeRead`) and `/verify-2fa`. Login sets the client's auth state directly rather
+    than refetching, so without that the first screen after signing in would render the
+    minimal nav. The frontend holds them as `memberships` on the auth context (a sibling
+    of `impersonating`, same reasoning: not a property of the user account) and reads
+    them only through `lib/permissions.ts`. They are **advisory**: the API re-checks on
+    every request, so a stale copy shows or hides the wrong nav item until the next
+    `/auth/me` and grants nothing.
+  - **Anything that changes the caller's OWN memberships must `refresh()`.** The context
+    is populated at login and never refetched on its own, so all four handlers that move
+    the caller in or out of a household re-read `/auth/me`: `HouseholdCreate` (creating one
+    makes you its organiser), `AcceptInvite` (joining makes you a helper), `HouseholdEdit`'s
+    `leave()` and `Households`' delete (a soft-deleted household drops out of
+    `memberships_for`). Gaining one is the loud direction: a brand-new account creates its
+    first household - the documented first step for every new user - and without the re-read
+    still sees the no-household sidebar, with every management page bouncing off
+    `RequireRole` until they reload by hand. Losing one is quieter but not harmless: the
+    sidebar keeps offering what that household granted, and Tags then 404s with nothing on
+    screen able to clear it, since no stored filter is at fault. Each of the four is pinned
+    by a test that fails when the `refresh()` is removed.
+  - **`RequireRole` cannot decide anything per household**, only "reaches the role
+    somewhere", because the pages behind it span all of them. A page acting on one
+    specific household needs its own check where the API would let it get that far:
+    `ChoreEdit` does one and leaves for the list otherwise, since `GET /chores/{id}` is
+    open to every role, while `TagEdit` needs none because `GET /tags/{id}` 403s by
+    itself. `canEditRoles`
+    on `HouseholdMembersTable` is also a separate prop from `canManage` rather than the
+    same one, because the admin surface passes `canManage` unconditionally and has no
+    member-PATCH endpoint to point a Select at.
 - **Email confirmation**: server-wide `app_settings.require_confirmation`
   (single-row table, `get_app_settings`) toggles it. When on, creating a user
   emails a `confirmation_tokens` link (same hashed-opaque-token pattern as auth

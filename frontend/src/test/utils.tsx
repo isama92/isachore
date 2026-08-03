@@ -5,11 +5,26 @@ import { AuthContext } from '../auth/context'
 import ThemeProvider from '../theme/ThemeProvider'
 import type { ReactElement } from 'react'
 import type { AuthContextValue } from '../auth/context'
+import type { HouseholdRole, Membership } from '../lib/types'
+
+/**
+ * Memberships granting `role` in each of the given households, for a test whose page spans
+ * more than one. The default auth value below covers household 1 only, so a test that stubs
+ * households 1 and 2 has to say so or the second is filtered out of every picker.
+ */
+export function membershipsFor(role: HouseholdRole, ...householdIds: number[]): Membership[] {
+  return householdIds.map((household_id) => ({ household_id, role }))
+}
 
 export function makeAuthValue(overrides: Partial<AuthContextValue> = {}): AuthContextValue {
   return {
     user: null,
     impersonating: false,
+    // Organiser of household 1, which is the household `makeHousehold` builds and the one
+    // `makeUser` (id 1) owns. That pairing is what keeps the existing page tests testing
+    // their own subject instead of turning into assertions about hidden nav and redirects;
+    // tests about a role pass their own `memberships`.
+    memberships: [{ household_id: 1, role: 'organiser' }],
     loading: false,
     login: vi.fn(async () => ({ twoFactorRequired: false })),
     verifyTwoFactor: vi.fn(async () => {}),

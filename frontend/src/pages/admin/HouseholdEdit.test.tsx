@@ -4,8 +4,8 @@ import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router'
 import AdminHouseholdEdit from './HouseholdEdit'
 import { renderWithProviders } from '../../test/utils'
-import { makeHousehold, makeHouseholdMember, makeUser } from '../../test/fixtures'
-import type { Household, HouseholdMember } from '../../lib/types'
+import { makeHousehold, makeHouseholdMemberWithRole, makeUser } from '../../test/fixtures'
+import type { Household, HouseholdMemberWithRole } from '../../lib/types'
 
 const admin = makeUser({ id: 1, is_admin: true })
 
@@ -20,7 +20,7 @@ function jsonBody(data: unknown, status = 200): Response {
 
 function stubFetch(opts: {
   household: Household
-  members: HouseholdMember[]
+  members: HouseholdMemberWithRole[]
   mutate?: (method: string, url: string) => Response
 }): FetchMock {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -57,7 +57,7 @@ describe('AdminHouseholdEdit', () => {
   it('loads the household and its members from the admin endpoints', async () => {
     const fetchMock = stubFetch({
       household: makeHousehold({ id: 5, name: 'HQ' }),
-      members: [makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })],
+      members: [makeHouseholdMemberWithRole({ id: 2, first_name: 'Jo', last_name: 'Ng' })],
     })
     renderEdit(fetchMock)
 
@@ -69,12 +69,33 @@ describe('AdminHouseholdEdit', () => {
     expect(membersGet).toBeTruthy()
   })
 
+  it('shows roles read-only on the admin surface', async () => {
+    // This page passes canManage unconditionally (a site admin may remove members here), so
+    // roles would be editable too if canEditRoles were folded into that one prop. It is not:
+    // the admin router has no member-PATCH endpoint, so the Select would call nothing. A site
+    // admin who needs to change a role impersonates the household owner.
+    const fetchMock = stubFetch({
+      household: makeHousehold({ id: 5, name: 'HQ', admin_id: 1 }),
+      members: [
+        makeHouseholdMemberWithRole({ id: 2, first_name: 'Jo', last_name: 'Ng', role: 'deputy' }),
+      ],
+    })
+    renderEdit(fetchMock)
+
+    await screen.findByText('Jo Ng')
+    const table = screen.getByRole('table')
+    expect(within(table).getByText('Deputy')).toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'Role for Jo Ng' })).not.toBeInTheDocument()
+    // ...while the remove control, which canManage does govern, is still there.
+    expect(within(table).getByRole('button', { name: 'Remove' })).toBeInTheDocument()
+  })
+
   it('lets an admin set the household owner', async () => {
     const fetchMock = stubFetch({
       household: makeHousehold({ id: 5, name: 'HQ', admin_id: 1 }),
       members: [
-        makeHouseholdMember({ id: 1, first_name: 'Site', last_name: 'Admin' }),
-        makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' }),
+        makeHouseholdMemberWithRole({ id: 1, first_name: 'Site', last_name: 'Admin' }),
+        makeHouseholdMemberWithRole({ id: 2, first_name: 'Jo', last_name: 'Ng' }),
       ],
       mutate: () => jsonBody(makeHousehold({ id: 5, name: 'HQ', admin_id: 2 })),
     })
@@ -156,7 +177,7 @@ describe('AdminHouseholdEdit', () => {
     let removed: string | null = null
     const fetchMock = stubFetch({
       household: makeHousehold({ id: 5, name: 'HQ' }),
-      members: [makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })],
+      members: [makeHouseholdMemberWithRole({ id: 2, first_name: 'Jo', last_name: 'Ng' })],
       mutate: (method, url) => {
         if (method === 'DELETE') removed = url
         return jsonBody(undefined, 204)

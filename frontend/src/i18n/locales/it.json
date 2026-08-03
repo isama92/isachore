@@ -32,7 +32,7 @@
   },
   "sidebar": {
     "nav": "Navigazione principale",
-    "home": "Le tue faccende",
+    "home": "Le mie faccende",
     "unscheduled": "Faccende non pianificate",
     "households": "Nuclei domestici",
     "chores": "Gestione faccende",
@@ -71,7 +71,7 @@
     "twoFactorError": "Impossibile verificare il codice"
   },
   "home": {
-    "title": "Le tue faccende",
+    "title": "Le mie faccende",
     "unassigned": "Non assegnata",
     "progress": {
       "doneToday": "{{done}} di {{total}} fatte oggi",
@@ -338,6 +338,14 @@
     "leaveError": "Impossibile abbandonare il nucleo domestico",
     "adminBadge": "Admin",
     "adminLabel": "Amministratore nucleo domestico",
+    "roles": {
+      "organiser": "Responsabile",
+      "deputy": "Vice",
+      "helper": "Aiutante"
+    },
+    "roleLabel": "Ruolo di {{name}}",
+    "roleUpdated": "Ruolo di {{name}} aggiornato",
+    "roleError": "Impossibile aggiornare il ruolo",
     "transferConfirm": "Rendere {{name}} amministratore del nucleo domestico?",
     "transferConfirmBody": "Diventerà l'unico membro che può modificare questo nucleo domestico e gestirne i membri.",
     "transferConfirmAction": "Trasferisci",
@@ -406,6 +414,7 @@
     "membersHeaders": {
       "id": "ID",
       "name": "Nome",
+      "role": "Ruolo",
       "actions": "Azioni"
     },
     "filters": {

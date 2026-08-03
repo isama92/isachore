@@ -3,7 +3,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import Tags from './Tags'
-import { renderWithProviders } from '../test/utils'
+import { renderWithProviders, membershipsFor } from '../test/utils'
 import { makeHousehold, makeTag, makeUser } from '../test/fixtures'
 import type { Household, Tag } from '../lib/types'
 
@@ -81,6 +81,33 @@ describe('Tags', () => {
     expect(screen.queryByRole('combobox', { name: 'Household' })).not.toBeInTheDocument()
   })
 
+  it('offers only the households the user organises', async () => {
+    // Tags are organiser-only, so a household the caller is a deputy in would 404 the moment
+    // it was picked. With one organised household left, the selector hides entirely (it only
+    // shows above two), which is the observable consequence.
+    const fetchMock = stubFetch({
+      households: [
+        makeHousehold({ id: 1, name: 'Flat 3B' }),
+        makeHousehold({ id: 2, name: 'Beach House' }),
+      ],
+      tags: () => [makeTag({ id: 3, name: 'deep-clean' })],
+    })
+    renderWithProviders(<Tags />, {
+      authValue: {
+        user: me,
+        memberships: [
+          { household_id: 1, role: 'organiser' },
+          { household_id: 2, role: 'deputy' },
+        ],
+      },
+    })
+
+    expect(await screen.findByText('deep-clean')).toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'Household' })).not.toBeInTheDocument()
+    // ...and nothing ever asked for the deputy household's tags.
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('household_id=2'))).toBe(false)
+  })
+
   it('lets a multi-household user pick the household and pushes it into the query', async () => {
     const fetchMock = stubFetch({
       households: [
@@ -92,7 +119,9 @@ describe('Tags', () => {
           ? [makeTag({ id: 9, name: 'beach-only' })]
           : [makeTag({ id: 3, name: 'deep-clean' })],
     })
-    renderWithProviders(<Tags />, { authValue: { user: me } })
+    renderWithProviders(<Tags />, {
+      authValue: { user: me, memberships: membershipsFor('organiser', 1, 2) },
+    })
     const user = userEvent.setup({ pointerEventsCheck: 0 })
 
     expect(await screen.findByText('deep-clean')).toBeInTheDocument()

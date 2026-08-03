@@ -5,6 +5,7 @@ import type {
   Household,
   HouseholdInvitation,
   HouseholdMember,
+  HouseholdMemberWithRole,
   InvitationInfo,
   Me,
   ServerSettings,
@@ -46,8 +47,14 @@ export function makeServerSettings(overrides: Partial<ServerSettings> = {}): Ser
 }
 
 export function makeMe(overrides: Partial<Me> = {}): Me {
-  const { impersonating = false, ...rest } = overrides
-  return { ...makeUser(rest), impersonating }
+  // Organiser of household 1, matching makeAuthValue's default and makeHousehold's admin_id,
+  // so a /auth/me stub and a directly-supplied auth context describe the same person.
+  const {
+    impersonating = false,
+    memberships = [{ household_id: 1, role: 'organiser' as const }],
+    ...rest
+  } = overrides
+  return { ...makeUser(rest), impersonating, memberships }
 }
 
 export function makeTag(overrides: Partial<Tag> = {}): Tag {
@@ -97,6 +104,19 @@ export function makeHouseholdMember(overrides: Partial<HouseholdMember> = {}): H
     id: 1,
     first_name: 'Test',
     last_name: 'Member',
+    ...overrides,
+  }
+}
+
+// A member as the household members table receives them. Separate from
+// makeHouseholdMember because only the two members endpoints carry a role; assignees,
+// History's completed_by and invited_by all use the plain shape.
+export function makeHouseholdMemberWithRole(
+  overrides: Partial<HouseholdMemberWithRole> = {},
+): HouseholdMemberWithRole {
+  return {
+    ...makeHouseholdMember(overrides),
+    role: 'organiser',
     ...overrides,
   }
 }

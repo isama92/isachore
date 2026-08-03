@@ -11,6 +11,7 @@ from app.models import (
     Chore,
     ChoreOccurrence,
     Household,
+    HouseholdRole,
     OccurrenceStatus,
     RepeatPeriod,
     User,
@@ -38,7 +39,14 @@ COMPLETION_SORT_COLUMNS = {
 @router.get("/filters", response_model=HistoryFilterOptions)
 async def completion_filters(user: CurrentUser, session: SessionDep) -> HistoryFilterOptions:
     """The option lists for the History filters: the households the user belongs
-    to, and the distinct active members across them (candidate completers)."""
+    to, and the distinct active members across them (candidate completers).
+
+    Deliberately NOT narrowed by role, unlike the history list right below it. This
+    endpoint also feeds the filter bars on Home and Unscheduled (see
+    `frontend/src/components/chores/useFilterOptions.ts`), which every role uses, so
+    restricting it to deputies would empty the household and member pickers for a helper
+    on the one page they do have. It exposes household names and member names, both of
+    which every member already sees on Home."""
     households = (
         (
             await session.execute(
@@ -85,17 +93,19 @@ async def list_completions(
     user_id: Annotated[int | None, Query(ge=1)] = None,
     household_id: Annotated[int | None, Query(ge=1)] = None,
 ) -> Page[HistoryEntryRead]:
-    """Completed-chore history across the user's active households (so housemates'
-    completions show too). Reads the `done` occurrences of the merged occurrences
-    table. Optional user_id / household_id narrow the list; a non-member household or a
-    stranger's id yields an empty page. History of soft-deleted chores is kept (the
-    title is snapshotted for exactly this and the chore row still resolves the join)."""
+    """Completed-chore history across the active households where the caller is at least a
+    deputy (so housemates' completions show too). Reads the `done` occurrences of the merged
+    occurrences table. Optional user_id / household_id narrow the list; a household the
+    caller is only a helper in, one they do not belong to, or a stranger's id all yield an
+    empty page rather than a 403, since the list spans every household at once. History of
+    soft-deleted chores is kept (the title is snapshotted for exactly this and the chore row
+    still resolves the join)."""
     # An occurrence has no household_id of its own, so scope by joining to the chore
     # and filtering on its household. No Chore.deleted_at filter: history outlives a
     # soft-deleted chore.
     filters = [
         ChoreOccurrence.status == OccurrenceStatus.done,
-        Chore.household_id.in_(member_household_ids(user.id)),
+        Chore.household_id.in_(member_household_ids(user.id, HouseholdRole.deputy)),
     ]
     if household_id is not None:
         filters.append(Chore.household_id == household_id)
@@ -158,8 +168,10 @@ async def undo_completion(completion_id: int, user: CurrentUser, session: Sessio
     reopens that occurrence (deleting the successor open occurrence first) so the chore is
     available again with its original assignee; undoing an older one just removes that
     history row."""
-    # Scope to the user's active households (same scope as the list): a done occurrence
-    # outside it, or a missing id, is a 404.
+    # Scope to the households where the caller is at least a deputy (same scope as the
+    # list): a done occurrence outside it, or a missing id, is a 404. That is also what
+    # stops a helper undoing anything, their own completions included - History does not
+    # exist for them, so "not found" is the honest answer rather than a role complaint.
     occ = (
         await session.execute(
             select(ChoreOccurrence)
@@ -167,7 +179,7 @@ async def undo_completion(completion_id: int, user: CurrentUser, session: Sessio
             .where(
                 ChoreOccurrence.id == completion_id,
                 ChoreOccurrence.status == OccurrenceStatus.done,
-                Chore.household_id.in_(member_household_ids(user.id)),
+                Chore.household_id.in_(member_household_ids(user.id, HouseholdRole.deputy)),
             )
         )
     ).scalar_one_or_none()

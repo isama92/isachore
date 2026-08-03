@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import ColumnElement, delete, func, or_, select
+from sqlalchemy import ColumnElement, delete, func, or_, select, update
 
 from app.api.deps import CurrentUser, SessionDep
 from app.core.config import settings
@@ -23,6 +23,7 @@ from app.models import (
     Household,
     HouseholdInvitation,
     HouseholdInvitationStatus,
+    HouseholdRole,
     User,
     UserStatus,
     household_members,
@@ -31,7 +32,8 @@ from app.schemas import (
     HouseholdCreate,
     HouseholdInvitationRead,
     HouseholdListRead,
-    HouseholdMemberRead,
+    HouseholdMemberRoleRead,
+    HouseholdMemberUpdate,
     HouseholdUpdate,
     Page,
 )
@@ -113,8 +115,14 @@ async def build_members_page(
     sort_by: str,
     sort_dir: str,
     name: str | None,
-) -> Page[HouseholdMemberRead]:
-    """Active members of a household as a paginated envelope."""
+) -> Page[HouseholdMemberRoleRead]:
+    """Active members of a household, with each one's role, as a paginated envelope.
+
+    The role comes off the association row, so this is the one members payload that
+    carries it: `HouseholdMemberRead` is shared with the assignee pickers, History's
+    `completed_by` and the invitation page, none of which join a membership at all.
+    Roles are not a sort key on purpose - sorting them alphabetically (deputy, helper,
+    organiser) would suggest a ranking that isn't one."""
     filters: list[ColumnElement[bool]] = [
         household_members.c.household_id == household_id,
         User.status == UserStatus.active,
@@ -124,7 +132,9 @@ async def build_members_page(
         filters.append(or_(User.first_name.ilike(pattern), User.last_name.ilike(pattern)))
 
     list_query = (
-        select(User).join(household_members, household_members.c.user_id == User.id).where(*filters)
+        select(User, household_members.c.role)
+        .join(household_members, household_members.c.user_id == User.id)
+        .where(*filters)
     )
     count_query = (
         select(func.count())
@@ -141,8 +151,16 @@ async def build_members_page(
     result = await session.execute(
         list_query.order_by(*order_by).limit(page_size).offset((page - 1) * page_size)
     )
-    return Page[HouseholdMemberRead](
-        items=[HouseholdMemberRead.model_validate(user) for user in result.scalars()],
+    return Page[HouseholdMemberRoleRead](
+        items=[
+            HouseholdMemberRoleRead(
+                id=user.id,
+                first_name=user.first_name,
+                last_name=user.last_name,
+                role=HouseholdRole(role),
+            )
+            for user, role in result.all()
+        ],
         total=total,
         page=page,
         page_size=page_size,
@@ -183,13 +201,28 @@ async def load_household_read(
 
 
 async def set_household_admin(session: SessionDep, household: Household, new_admin_id: int) -> None:
-    """Transfer ownership: the new owner must be an active member of the household."""
+    """Transfer ownership: the new owner must be an active member of the household.
+
+    Promoting them to organiser is part of the transfer rather than a separate step,
+    because the owner is by definition one and their row is the one the role endpoint
+    refuses to touch. Hand a helper the household without this and they would own a
+    household they cannot manage the chores of, with no way to fix it. The previous
+    owner keeps `organiser` and becomes an ordinary one, so the new owner can demote
+    them like anybody else."""
     if not await is_active_member(session, household.id, new_admin_id):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="The new household admin must be a member of the household",
         )
     household.admin_id = new_admin_id
+    await session.execute(
+        update(household_members)
+        .where(
+            household_members.c.household_id == household.id,
+            household_members.c.user_id == new_admin_id,
+        )
+        .values(role=HouseholdRole.organiser)
+    )
 
 
 async def remove_member(session: SessionDep, household_id: int, user_id: int) -> None:
@@ -278,11 +311,12 @@ async def list_households(
 async def create_household(
     payload: HouseholdCreate, user: CurrentUser, session: SessionDep
 ) -> HouseholdListRead:
-    # The creator becomes the household owner and its first member.
+    # The creator becomes the household owner and its first member, and owners are
+    # organisers: there is nobody else who could promote them.
     household = Household(name=payload.name, admin_id=user.id)
     session.add(household)
     await session.flush()
-    await add_member(session, household.id, user.id)
+    await add_member(session, household.id, user.id, HouseholdRole.organiser)
     await session.commit()
     return await load_household_read(session, household.id)
 
@@ -319,7 +353,7 @@ async def delete_household(household_id: int, user: CurrentUser, session: Sessio
     await session.commit()
 
 
-@router.get("/{household_id}/members", response_model=Page[HouseholdMemberRead])
+@router.get("/{household_id}/members", response_model=Page[HouseholdMemberRoleRead])
 async def list_household_members(
     household_id: int,
     user: CurrentUser,
@@ -329,7 +363,9 @@ async def list_household_members(
     sort_by: MemberSortBy = "name",
     sort_dir: SortDir = "asc",
     name: Annotated[str | None, Query(max_length=255)] = None,
-) -> Page[HouseholdMemberRead]:
+) -> Page[HouseholdMemberRoleRead]:
+    # Membership is enough to read the roster, roles included: everyone in a household
+    # may see who else is in it and what they are allowed to do.
     await _get_my_household_or_404(session, user.id, household_id)
     return await build_members_page(
         session,
@@ -339,6 +375,52 @@ async def list_household_members(
         sort_by=sort_by,
         sort_dir=sort_dir,
         name=name,
+    )
+
+
+@router.patch("/{household_id}/members/{user_id}", response_model=HouseholdMemberRoleRead)
+async def update_household_member(
+    household_id: int,
+    user_id: int,
+    payload: HouseholdMemberUpdate,
+    user: CurrentUser,
+    session: SessionDep,
+) -> HouseholdMemberRoleRead:
+    """Set one member's role. Owner-only.
+
+    The owner's own row is refused (409) rather than silently ignored: they are always an
+    organiser, and the way to change who holds that is to transfer ownership
+    (`PATCH /households/{id}` with `admin_id`), which promotes the new owner. That also
+    means nobody can demote themselves out of managing their own household. Organisers
+    cannot reach this endpoint yet; letting them invite and set roles is a separate step.
+    """
+    household = await _get_owned_household(session, user.id, household_id)
+    if household.admin_id == user_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The household admin is always an organiser; transfer ownership instead",
+        )
+    # Disabled users keep their membership row but are hidden everywhere, so treat one as
+    # absent here too rather than quietly re-roling an account nothing displays.
+    if not await is_active_member(session, household_id, user_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Household member not found"
+        )
+    await session.execute(
+        update(household_members)
+        .where(
+            household_members.c.household_id == household_id,
+            household_members.c.user_id == user_id,
+        )
+        .values(role=payload.role)
+    )
+    await session.commit()
+    member = (await session.execute(select(User).where(User.id == user_id))).scalar_one()
+    return HouseholdMemberRoleRead(
+        id=member.id,
+        first_name=member.first_name,
+        last_name=member.last_name,
+        role=payload.role,
     )
 
 

@@ -6,11 +6,18 @@ import { Trash2Icon } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { householdResource } from '@/lib/endpoints'
 import { fullName } from '@/lib/user'
-import type { HouseholdMember } from '@/lib/types'
+import { HOUSEHOLD_ROLES, type HouseholdMemberWithRole, type HouseholdRole } from '@/lib/types'
 import { DataTable } from '@/components/data-table/DataTable'
 import { useServerTable } from '@/components/data-table/useServerTable'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -33,14 +40,25 @@ type Props = {
   // Whether the viewer may remove members (owner or site admin). When false the
   // table is read-only (no actions column).
   canManage: boolean
+  // Whether the viewer may change roles, which is the household owner and nobody else.
+  // A separate prop from canManage rather than the same one: the admin surface passes
+  // canManage unconditionally, and it has no member-PATCH endpoint to call. Roles show
+  // there as badges, and a site admin who needs to change one impersonates the owner.
+  canEditRoles?: boolean
 }
 
-// A household's active members. The owner row is badged and has no remove
-// control; adding members is a later feature.
-export function HouseholdMembersTable({ basePath, adminId, canManage }: Props) {
+// A household's active members and their roles. The owner row is badged, has no remove
+// control (transfer ownership first) and no role control (owners are always organisers);
+// adding members is a later feature.
+export function HouseholdMembersTable({
+  basePath,
+  adminId,
+  canManage,
+  canEditRoles = false,
+}: Props) {
   const { t } = useTranslation()
   // No filter UI here (households have few members); the table just paginates.
-  const table = useServerTable<HouseholdMember>({
+  const table = useServerTable<HouseholdMemberWithRole>({
     endpoint: householdResource(basePath).members,
     // One key for every household, member and admin view alike: what is being
     // remembered is a sort preference, not anything household-specific.
@@ -49,7 +67,7 @@ export function HouseholdMembersTable({ basePath, adminId, canManage }: Props) {
   })
   const [error, setError] = useState<string | null>(null)
 
-  async function remove(member: HouseholdMember) {
+  async function remove(member: HouseholdMemberWithRole) {
     setError(null)
     try {
       await api.del(householdResource(basePath).member(member.id))
@@ -60,7 +78,49 @@ export function HouseholdMembersTable({ basePath, adminId, canManage }: Props) {
     }
   }
 
-  function removeAction(member: HouseholdMember): ReactNode {
+  async function setRole(member: HouseholdMemberWithRole, role: HouseholdRole) {
+    setError(null)
+    try {
+      await api.patch(householdResource(basePath).member(member.id), { role })
+      toast.success(t('households.roleUpdated', { name: fullName(member) }))
+      table.reload()
+    } catch (err) {
+      // Reload on failure too. Not to undo the Select, which is controlled by `member.role`
+      // and so never moved: to re-read the roster, since the likeliest reason a role change is
+      // refused is that this viewer is no longer the owner, and then everything on screen is
+      // stale rather than just the one row.
+      table.reload()
+      setError(err instanceof ApiError ? err.message : t('households.roleError'))
+    }
+  }
+
+  function roleCell(member: HouseholdMemberWithRole): ReactNode {
+    // The owner's role is fixed: they are always an organiser, and the way to change who
+    // that is is the household admin select above this table (which promotes the new owner).
+    // So their row shows a badge even for a viewer who may edit everyone else's.
+    if (!canEditRoles || member.id === adminId) {
+      return <Badge variant="secondary">{t(`households.roles.${member.role}`)}</Badge>
+    }
+    return (
+      <Select value={member.role} onValueChange={(v) => void setRole(member, v as HouseholdRole)}>
+        <SelectTrigger
+          className="w-40"
+          aria-label={t('households.roleLabel', { name: fullName(member) })}
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {HOUSEHOLD_ROLES.map((role) => (
+            <SelectItem key={role} value={role}>
+              {t(`households.roles.${role}`)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    )
+  }
+
+  function removeAction(member: HouseholdMemberWithRole): ReactNode {
     const label = t('households.removeMember')
     return (
       <AlertDialog>
@@ -98,7 +158,7 @@ export function HouseholdMembersTable({ basePath, adminId, canManage }: Props) {
     )
   }
 
-  const columns: ColumnDef<HouseholdMember>[] = [
+  const columns: ColumnDef<HouseholdMemberWithRole>[] = [
     {
       accessorKey: 'id',
       header: t('households.membersHeaders.id'),
@@ -121,6 +181,14 @@ export function HouseholdMembersTable({ basePath, adminId, canManage }: Props) {
           )}
         </span>
       ),
+    },
+    {
+      id: 'role',
+      header: t('households.membersHeaders.role'),
+      // Not sortable: the server's whitelist has no role key, and sorting these
+      // alphabetically (deputy, helper, organiser) would imply a ranking that isn't one.
+      enableSorting: false,
+      cell: ({ row }) => roleCell(row.original),
     },
   ]
   if (canManage) {
@@ -145,7 +213,7 @@ export function HouseholdMembersTable({ basePath, adminId, canManage }: Props) {
         columns={columns}
         table={table}
         pageSizeOptions={[10, 20, 50]}
-        minWidthClassName="min-w-[380px]"
+        minWidthClassName="min-w-[520px]"
         emptyMessage={t('households.membersEmpty')}
       />
     </TooltipProvider>

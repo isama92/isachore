@@ -1,0 +1,824 @@
+"""Per-household roles: the ladder, who may set one, and what each role may reach.
+
+Kept in one file on purpose, unlike the rest of the suite's router-per-file layout: the
+question these answer is "what can a helper do?", and that spans chores, tags, history,
+statistics and completion. Splitting it would leave the permission matrix reconstructable
+only by reading five files.
+"""
+
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime, timedelta
+
+from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.households import _ROLE_LADDER, roles_at_least
+from app.core.security import generate_token
+from app.models import (
+    Chore,
+    Household,
+    HouseholdInvitation,
+    HouseholdInvitationStatus,
+    HouseholdRole,
+    OccurrenceStatus,
+    Tag,
+    User,
+    UserStatus,
+    household_members,
+)
+
+MakeUser = Callable[..., Awaitable[User]]
+MakeHousehold = Callable[..., Awaitable[Household]]
+MakeChore = Callable[..., Awaitable[Chore]]
+MakeTag = Callable[..., Awaitable[Tag]]
+MakeOccurrence = Callable[..., Awaitable[object]]
+AuthClient = Callable[[User], Awaitable[AsyncClient]]
+
+
+async def _stored_role(session: AsyncSession, household_id: int, user_id: int) -> str | None:
+    return await session.scalar(
+        select(household_members.c.role).where(
+            household_members.c.household_id == household_id,
+            household_members.c.user_id == user_id,
+        )
+    )
+
+
+# --- the ladder ---------------------------------------------------------
+
+
+def test_roles_at_least_is_a_ladder() -> None:
+    # The single source of the ordering. Everything else expands a minimum through this,
+    # so if it is wrong every scoped query is wrong in the same direction.
+    assert roles_at_least(HouseholdRole.organiser) == (HouseholdRole.organiser,)
+    assert roles_at_least(HouseholdRole.deputy) == (HouseholdRole.deputy, HouseholdRole.organiser)
+    assert roles_at_least(HouseholdRole.helper) == (
+        HouseholdRole.helper,
+        HouseholdRole.deputy,
+        HouseholdRole.organiser,
+    )
+
+
+def test_every_role_is_on_the_ladder() -> None:
+    # A role added to the enum and forgotten in _ROLE_LADDER makes roles_at_least raise
+    # ValueError from .index() (a 500 if it ever reached a min_role) and satisfies no scoped
+    # predicate at all, so a member holding it would silently see nothing. CLAUDE.md promises
+    # a new role needs no query change; this is what makes that true.
+    assert set(_ROLE_LADDER) == set(HouseholdRole)
+
+
+def test_role_column_holds_every_role() -> None:
+    # varchar(30), so a role longer than that would be a runtime error rather than a
+    # validation one. Cheap to pin, and it is the reason a new role needs no migration.
+    limit = household_members.c.role.type.length
+    assert limit is not None
+    assert all(len(role) <= limit for role in HouseholdRole)
+
+
+# --- the role a new membership gets -------------------------------------
+
+
+async def test_creator_of_a_household_is_an_organiser(
+    make_user: MakeUser, auth_client: AuthClient, db_session: AsyncSession
+) -> None:
+    user = await make_user()
+    client = await auth_client(user)
+
+    resp = await client.post("/api/v1/households", json={"name": "The Flat"})
+    assert resp.status_code == 201
+    # Nobody else could promote them, so the owner has to start out able to manage it.
+    assert await _stored_role(db_session, resp.json()["id"], user.id) == HouseholdRole.organiser
+
+
+async def test_accepting_an_invitation_joins_as_a_helper(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    owner = await make_user(email="owner@example.com")
+    joiner = await make_user(email="joiner@example.com")
+    household = await make_household(members=[owner])
+    token = generate_token()
+    db_session.add(
+        HouseholdInvitation(
+            token=token,
+            household_id=household.id,
+            invited_by=owner.id,
+            status=HouseholdInvitationStatus.pending,
+            expires_at=datetime.now(UTC) + timedelta(days=1),
+        )
+    )
+    await db_session.commit()
+    client = await auth_client(joiner)
+
+    resp = await client.post(f"/api/v1/invitations/{token}/accept")
+    assert resp.status_code == 204
+    # Least privilege: an invite link says nothing about who is on the other end.
+    assert await _stored_role(db_session, household.id, joiner.id) == HouseholdRole.helper
+
+
+async def test_transferring_ownership_promotes_the_new_owner(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    owner = await make_user(email="owner@example.com")
+    kid = await make_user(email="kid@example.com")
+    household = await make_household(members=[owner, kid], roles={kid.id: HouseholdRole.helper})
+    client = await auth_client(owner)
+
+    resp = await client.patch(f"/api/v1/households/{household.id}", json={"admin_id": kid.id})
+    assert resp.status_code == 200
+    assert resp.json()["admin_id"] == kid.id
+    # Without the promotion they would own a household they cannot manage the chores of,
+    # and the role endpoint refuses to touch the owner's row, so nothing could fix it.
+    assert await _stored_role(db_session, household.id, kid.id) == HouseholdRole.organiser
+    # The previous owner stays an organiser, just no longer the owner.
+    assert await _stored_role(db_session, household.id, owner.id) == HouseholdRole.organiser
+
+
+async def test_admin_surface_transfer_also_promotes(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    # The two surfaces share set_household_admin, so the promotion has to hold on both.
+    site_admin = await make_user(email="site@example.com", is_admin=True)
+    owner = await make_user(email="owner@example.com")
+    kid = await make_user(email="kid@example.com")
+    household = await make_household(members=[owner, kid], roles={kid.id: HouseholdRole.helper})
+    client = await auth_client(site_admin)
+
+    resp = await client.patch(f"/api/v1/admin/households/{household.id}", json={"admin_id": kid.id})
+    assert resp.status_code == 200
+    assert await _stored_role(db_session, household.id, kid.id) == HouseholdRole.organiser
+
+
+# --- reading roles ------------------------------------------------------
+
+
+async def test_members_list_carries_each_role(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    owner = await make_user(email="owner@example.com")
+    deputy = await make_user(email="deputy@example.com", first_name="Dee")
+    helper = await make_user(email="helper@example.com", first_name="Hal")
+    household = await make_household(
+        members=[owner, deputy, helper],
+        roles={deputy.id: HouseholdRole.deputy, helper.id: HouseholdRole.helper},
+    )
+    client = await auth_client(helper)
+
+    # Any member may read the roster, roles included: knowing who may do what is not
+    # privileged information inside a household.
+    resp = await client.get(f"/api/v1/households/{household.id}/members")
+    assert resp.status_code == 200
+    by_id = {m["id"]: m["role"] for m in resp.json()["items"]}
+    assert by_id == {
+        owner.id: HouseholdRole.organiser,
+        deputy.id: HouseholdRole.deputy,
+        helper.id: HouseholdRole.helper,
+    }
+
+
+async def test_me_reports_every_membership_with_its_role(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    user = await make_user()
+    other = await make_user(email="other@example.com")
+    organised = await make_household(name="Mine", members=[user])
+    helped = await make_household(
+        name="Theirs", members=[other, user], roles={user.id: HouseholdRole.helper}
+    )
+    # A soft-deleted household is not a live membership, so it must not appear: the
+    # sidebar would otherwise light up for a household the user cannot reach.
+    await make_household(name="Gone", members=[other, user], deleted_at=datetime.now(UTC))
+    client = await auth_client(user)
+
+    resp = await client.get("/api/v1/auth/me")
+    assert resp.status_code == 200
+    assert resp.json()["memberships"] == [
+        {"household_id": organised.id, "role": HouseholdRole.organiser},
+        {"household_id": helped.id, "role": HouseholdRole.helper},
+    ]
+
+
+async def test_login_response_carries_memberships(
+    make_user: MakeUser, make_household: MakeHousehold, client: AsyncClient
+) -> None:
+    # Login sets the client's user directly rather than refetching /auth/me, so without
+    # this the sidebar would render the minimal nav until the next page load - the state
+    # most users would see first.
+    user = await make_user(email="alice@example.com", password="password12345")
+    household = await make_household(members=[user])
+
+    resp = await client.post(
+        "/api/v1/auth/login", json={"email": "alice@example.com", "password": "password12345"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["user"]["memberships"] == [
+        {"household_id": household.id, "role": HouseholdRole.organiser}
+    ]
+
+
+async def test_me_reports_no_memberships_for_a_member_of_none(
+    make_user: MakeUser, auth_client: AuthClient
+) -> None:
+    # A normal, reachable state (nothing provisions a household), and the one the
+    # frontend reads as "show the minimal sidebar".
+    client = await auth_client(await make_user())
+
+    resp = await client.get("/api/v1/auth/me")
+    assert resp.json()["memberships"] == []
+
+
+# --- setting a role -----------------------------------------------------
+
+
+async def test_owner_sets_a_members_role(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    owner = await make_user(email="owner@example.com")
+    member = await make_user(email="member@example.com")
+    household = await make_household(
+        members=[owner, member], roles={member.id: HouseholdRole.helper}
+    )
+    client = await auth_client(owner)
+
+    for role in (HouseholdRole.deputy, HouseholdRole.organiser, HouseholdRole.helper):
+        resp = await client.patch(
+            f"/api/v1/households/{household.id}/members/{member.id}", json={"role": role}
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "id": member.id,
+            "first_name": member.first_name,
+            "last_name": member.last_name,
+            "role": role,
+        }
+        assert await _stored_role(db_session, household.id, member.id) == role
+
+
+async def test_owners_own_role_cannot_be_set(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    owner = await make_user(email="owner@example.com")
+    member = await make_user(email="member@example.com")
+    household = await make_household(members=[owner, member])
+    client = await auth_client(owner)
+
+    resp = await client.patch(
+        f"/api/v1/households/{household.id}/members/{owner.id}",
+        json={"role": HouseholdRole.helper},
+    )
+    assert resp.status_code == 409
+    assert "transfer ownership" in resp.json()["detail"].lower()
+    # Refused, not silently ignored: nobody can demote themselves out of managing
+    # their own household.
+    assert await _stored_role(db_session, household.id, owner.id) == HouseholdRole.organiser
+
+
+async def test_only_the_owner_may_set_roles(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    owner = await make_user(email="owner@example.com")
+    organiser = await make_user(email="organiser@example.com")
+    deputy = await make_user(email="deputy@example.com")
+    helper = await make_user(email="helper@example.com")
+    household = await make_household(
+        members=[owner, organiser, deputy, helper],
+        roles={deputy.id: HouseholdRole.deputy, helper.id: HouseholdRole.helper},
+    )
+
+    # Every non-owner role, including a full organiser: setting roles (like inviting) is
+    # the owner's alone for now, which is what keeps this PR from needing an
+    # escalation rule about who may hand out the organiser role.
+    for caller in (organiser, deputy, helper):
+        client = await auth_client(caller)
+        resp = await client.patch(
+            f"/api/v1/households/{household.id}/members/{helper.id}",
+            json={"role": HouseholdRole.organiser},
+        )
+        assert resp.status_code == 403, caller.email
+        assert resp.json()["detail"] == "Only the household admin can do this"
+    assert await _stored_role(db_session, household.id, helper.id) == HouseholdRole.helper
+
+
+async def test_setting_a_role_in_someone_elses_household_is_404(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    outsider = await make_user(email="outsider@example.com")
+    owner = await make_user(email="owner@example.com")
+    member = await make_user(email="member@example.com")
+    household = await make_household(members=[owner, member])
+    client = await auth_client(outsider)
+
+    resp = await client.patch(
+        f"/api/v1/households/{household.id}/members/{member.id}",
+        json={"role": HouseholdRole.deputy},
+    )
+    # A household you are not in stays invisible, so 404 before the 403.
+    assert resp.status_code == 404
+
+
+async def test_setting_the_role_of_a_non_member_is_404(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    owner = await make_user(email="owner@example.com")
+    stranger = await make_user(email="stranger@example.com")
+    household = await make_household(members=[owner])
+    client = await auth_client(owner)
+
+    resp = await client.patch(
+        f"/api/v1/households/{household.id}/members/{stranger.id}",
+        json={"role": HouseholdRole.deputy},
+    )
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Household member not found"
+
+
+async def test_setting_the_role_of_a_disabled_member_is_404(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    # A disabled user keeps their membership row but is hidden everywhere, the members
+    # list included, so re-roling one would change a permission nothing displays.
+    owner = await make_user(email="owner@example.com")
+    gone = await make_user(email="gone@example.com", status=UserStatus.disabled)
+    household = await make_household(members=[owner, gone])
+    client = await auth_client(owner)
+
+    resp = await client.patch(
+        f"/api/v1/households/{household.id}/members/{gone.id}",
+        json={"role": HouseholdRole.deputy},
+    )
+    assert resp.status_code == 404
+
+
+async def test_unknown_role_is_rejected(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    owner = await make_user(email="owner@example.com")
+    member = await make_user(email="member@example.com")
+    household = await make_household(
+        members=[owner, member], roles={member.id: HouseholdRole.helper}
+    )
+    client = await auth_client(owner)
+
+    resp = await client.patch(
+        f"/api/v1/households/{household.id}/members/{member.id}", json={"role": "supervisor"}
+    )
+    # The closed set is enforced at the schema layer (the column is a plain varchar), so
+    # this is the only thing standing between a typo and a stored role every permission
+    # check reads as "nothing granted".
+    assert resp.status_code == 422
+    assert await _stored_role(db_session, household.id, member.id) == HouseholdRole.helper
+
+
+# --- what each role may reach -------------------------------------------
+
+
+async def test_every_role_can_complete_a_chore(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    owner = await make_user(email="owner@example.com")
+    deputy = await make_user(email="deputy@example.com")
+    helper = await make_user(email="helper@example.com")
+    household = await make_household(
+        members=[owner, deputy, helper],
+        roles={deputy.id: HouseholdRole.deputy, helper.id: HouseholdRole.helper},
+    )
+    # One chore each, since completing closes the occurrence.
+    for caller in (owner, deputy, helper):
+        chore = await make_chore(household=household, title=f"Chore for {caller.email}")
+        client = await auth_client(caller)
+        resp = await client.post(f"/api/v1/chores/{chore.id}/complete")
+        assert resp.status_code == 201, caller.email
+
+
+async def test_unscheduled_chores_are_completable_by_a_helper(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # The ad-hoc chores are the ones a helper is most likely to be handed, and they go
+    # through the same endpoint, so this pins the intent rather than a second code path.
+    owner = await make_user(email="owner@example.com")
+    helper = await make_user(email="helper@example.com")
+    household = await make_household(
+        members=[owner, helper], roles={helper.id: HouseholdRole.helper}
+    )
+    from app.models import RepeatPeriod
+
+    chore = await make_chore(household=household, repeats=RepeatPeriod.manual)
+    client = await auth_client(helper)
+
+    resp = await client.post(f"/api/v1/chores/{chore.id}/complete")
+    assert resp.status_code == 201
+
+
+async def test_non_organisers_cannot_change_chores(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    owner = await make_user(email="owner@example.com")
+    deputy = await make_user(email="deputy@example.com")
+    helper = await make_user(email="helper@example.com")
+    household = await make_household(
+        members=[owner, deputy, helper],
+        roles={deputy.id: HouseholdRole.deputy, helper.id: HouseholdRole.helper},
+    )
+    chore = await make_chore(household=household)
+    payload = {
+        "household_id": household.id,
+        "title": "Something new",
+        "start_date": "2026-08-01",
+        "repeats": "weekly",
+        "assignment_type": "manual",
+        "turn_length": 1,
+        "repeat_interval": 1,
+        "weekdays": None,
+        "assignee_ids": [],
+        "tag_ids": [],
+    }
+    for caller in (deputy, helper):
+        client = await auth_client(caller)
+        for method, url, body in (
+            ("post", "/api/v1/chores", payload),
+            ("patch", f"/api/v1/chores/{chore.id}", payload),
+            ("delete", f"/api/v1/chores/{chore.id}", None),
+        ):
+            resp = await getattr(client, method)(url, **({"json": body} if body else {}))
+            assert resp.status_code == 403, f"{caller.email} {method} {url}"
+            assert resp.json()["detail"] == "Only household organisers can do this"
+
+
+async def test_write_gates_are_per_household_not_anywhere(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_tag: MakeTag,
+    auth_client: AuthClient,
+) -> None:
+    """An organiser of one household writing into another where they are not one.
+
+    The tests either side of this one give the caller a single, non-organiser membership, so
+    they would all still pass if `require_role` were a global "organises somewhere" check -
+    the per-household clause of the gate is never exercised by them. This is the case where
+    getting that wrong is a privilege escalation rather than merely extra data on a page, and
+    it is reachable: `RequireRole` lets this caller into the management pages on the strength
+    of their own household.
+    """
+    user = await make_user()
+    other = await make_user(email="other@example.com")
+    mine = await make_household(name="Mine", members=[user])
+    theirs = await make_household(
+        name="Theirs", members=[other, user], roles={user.id: HouseholdRole.helper}
+    )
+    their_chore = await make_chore(household=theirs, title="Not mine")
+    their_tag = await make_tag(household=theirs, name="not-mine")
+    client = await auth_client(user)
+
+    # Sanity: they really are an organiser somewhere, so a global check would let all of the
+    # below through. Without this the test could pass by having no privileges at all.
+    assert (
+        await client.post(
+            "/api/v1/tags",
+            json={"household_id": mine.id, "name": "ok-here", "color": "#0d9488"},
+        )
+    ).status_code == 201
+
+    chore_payload = {
+        "household_id": theirs.id,
+        "title": "Something new",
+        "start_date": "2026-08-01",
+        "repeats": "weekly",
+        "assignment_type": "manual",
+        "turn_length": 1,
+        "repeat_interval": 1,
+        "weekdays": None,
+        "assignee_ids": [],
+        "tag_ids": [],
+    }
+    for method, url, body in (
+        ("post", "/api/v1/chores", chore_payload),
+        ("patch", f"/api/v1/chores/{their_chore.id}", chore_payload),
+        ("delete", f"/api/v1/chores/{their_chore.id}", None),
+        (
+            "post",
+            "/api/v1/tags",
+            {"household_id": theirs.id, "name": "nope", "color": "#0d9488"},
+        ),
+        ("patch", f"/api/v1/tags/{their_tag.id}", {"name": "nope", "color": "#0d9488"}),
+        ("delete", f"/api/v1/tags/{their_tag.id}", None),
+    ):
+        resp = await getattr(client, method)(url, **({"json": body} if body else {}))
+        assert resp.status_code == 403, f"{method} {url}"
+        assert resp.json()["detail"] == "Only household organisers can do this"
+
+
+async def test_reading_one_chore_stays_open_to_every_role(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # Load-bearing: the description dialog on Home and Unscheduled fetches the full chore,
+    # and helpers are exactly the people who need to read the instructions.
+    owner = await make_user(email="owner@example.com")
+    helper = await make_user(email="helper@example.com")
+    household = await make_household(
+        members=[owner, helper], roles={helper.id: HouseholdRole.helper}
+    )
+    chore = await make_chore(household=household, description="<p>Under the sink</p>")
+    client = await auth_client(helper)
+
+    resp = await client.get(f"/api/v1/chores/{chore.id}")
+    assert resp.status_code == 200
+    assert resp.json()["description"] == "<p>Under the sink</p>"
+
+
+async def test_chores_list_only_shows_organised_households(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    user = await make_user()
+    other = await make_user(email="other@example.com")
+    mine = await make_household(name="Mine", members=[user])
+    theirs = await make_household(
+        name="Theirs", members=[other, user], roles={user.id: HouseholdRole.helper}
+    )
+    await make_chore(household=mine, title="Mine to manage")
+    await make_chore(household=theirs, title="Not mine to manage")
+    client = await auth_client(user)
+
+    resp = await client.get("/api/v1/chores")
+    assert resp.status_code == 200
+    # Less data rather than a 403: the management list spans every household at once, and
+    # the helper household's chores are still fully visible on Home.
+    assert [c["title"] for c in resp.json()["items"]] == ["Mine to manage"]
+
+    # Asking for the helper household by name yields an empty page, not an error.
+    resp = await client.get(f"/api/v1/chores?household_id={theirs.id}")
+    assert resp.json()["items"] == []
+    assert resp.json()["total"] == 0
+
+
+async def test_home_still_shows_a_helpers_chores(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # The counterpart to the test above: gating management must not hide the work itself.
+    owner = await make_user(email="owner@example.com")
+    helper = await make_user(email="helper@example.com")
+    household = await make_household(
+        members=[owner, helper], roles={helper.id: HouseholdRole.helper}
+    )
+    await make_chore(household=household, title="Wash up")
+    client = await auth_client(helper)
+
+    resp = await client.get("/api/v1/home")
+    assert resp.status_code == 200
+    assert [c["title"] for c in resp.json()["items"]] == ["Wash up"]
+
+
+async def test_tags_are_organiser_only(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_tag: MakeTag,
+    auth_client: AuthClient,
+) -> None:
+    owner = await make_user(email="owner@example.com")
+    deputy = await make_user(email="deputy@example.com")
+    household = await make_household(
+        members=[owner, deputy], roles={deputy.id: HouseholdRole.deputy}
+    )
+    tag = await make_tag(household=household)
+    client = await auth_client(deputy)
+
+    # Reads are gated too, unlike chores: nothing outside the management pages shows a
+    # tag, so a deputy has no legitimate read of one either. The expected status is spelled
+    # out per route rather than "403 or 404": the two come from different guards (the
+    # household resolution narrows, the tag helper checks the role), so accepting either
+    # would let a route pass on the wrong one.
+    for method, url, body, expected in (
+        ("get", f"/api/v1/tags?household_id={household.id}", None, 404),
+        ("get", f"/api/v1/tags/{tag.id}", None, 403),
+        (
+            "post",
+            "/api/v1/tags",
+            {"household_id": household.id, "name": "x", "color": "#0d9488"},
+            403,
+        ),
+        ("patch", f"/api/v1/tags/{tag.id}", {"name": "x", "color": "#0d9488"}, 403),
+        ("delete", f"/api/v1/tags/{tag.id}", None, 403),
+    ):
+        resp = await getattr(client, method)(url, **({"json": body} if body else {}))
+        assert resp.status_code == expected, f"{method} {url}"
+        if expected == 403:
+            assert resp.json()["detail"] == "Only household organisers can do this"
+
+    # And the no-household_id fallback must not quietly resolve to a household the
+    # caller cannot manage.
+    resp = await client.get("/api/v1/tags")
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "You are not a household organiser anywhere"
+
+
+async def test_history_and_stats_need_a_deputy(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    owner = await make_user(email="owner@example.com")
+    deputy = await make_user(email="deputy@example.com")
+    helper = await make_user(email="helper@example.com")
+    household = await make_household(
+        members=[owner, deputy, helper],
+        roles={deputy.id: HouseholdRole.deputy, helper.id: HouseholdRole.helper},
+    )
+    chore = await make_chore(household=household, with_occurrence=False)
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=datetime(2026, 7, 20, tzinfo=UTC),
+        status=OccurrenceStatus.done,
+        completed_by=helper,
+        completed_at=datetime(2026, 7, 20, 9, tzinfo=UTC),
+    )
+    client = await auth_client(helper)
+
+    # Their own completion, and they still cannot see it: the whole surface is closed.
+    resp = await client.get("/api/v1/completions")
+    assert resp.status_code == 200
+    assert resp.json()["items"] == []
+
+    resp = await client.get("/api/v1/stats")
+    assert resp.status_code == 200
+    assert resp.json()["kpis"]["completed_in_range"] == 0
+
+    # A deputy in the same household sees both, which is what makes the two assertions
+    # above about the *role* rather than about an empty database. `auth_client` hands back
+    # the same client with the cookie swapped, hence the reassignment.
+    client = await auth_client(deputy)
+    assert len((await client.get("/api/v1/completions")).json()["items"]) == 1
+    assert (await client.get("/api/v1/stats")).json()["kpis"]["completed_in_range"] == 1
+
+
+async def test_filter_options_stay_open_to_a_helper(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    # /completions/filters also feeds the Home and Unscheduled filter bars, so narrowing
+    # it by role would empty the pickers on the one page a helper does have.
+    owner = await make_user(email="owner@example.com")
+    helper = await make_user(email="helper@example.com")
+    household = await make_household(
+        name="The Flat", members=[owner, helper], roles={helper.id: HouseholdRole.helper}
+    )
+    client = await auth_client(helper)
+
+    resp = await client.get("/api/v1/completions/filters")
+    assert resp.status_code == 200
+    assert [h["id"] for h in resp.json()["households"]] == [household.id]
+    assert {m["id"] for m in resp.json()["members"]} == {owner.id, helper.id}
+
+
+async def test_a_helper_cannot_undo_even_their_own_completion(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    owner = await make_user(email="owner@example.com")
+    helper = await make_user(email="helper@example.com")
+    household = await make_household(
+        members=[owner, helper], roles={helper.id: HouseholdRole.helper}
+    )
+    chore = await make_chore(household=household, with_occurrence=False)
+    occ = await make_occurrence(
+        chore=chore,
+        scheduled_for=datetime(2026, 7, 20, tzinfo=UTC),
+        status=OccurrenceStatus.done,
+        completed_by=helper,
+        completed_at=datetime(2026, 7, 20, 9, tzinfo=UTC),
+    )
+    client = await auth_client(helper)
+
+    resp = await client.delete(f"/api/v1/completions/{occ.id}")
+    # 404, not 403: the history scope is what excludes it, and History does not exist for
+    # a helper at all, so there is nothing for them to be forbidden from.
+    assert resp.status_code == 404
+
+
+async def test_undo_is_still_self_only_for_a_deputy(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    # Seeing history does not mean editing someone else's: the pre-existing self-only rule
+    # is untouched by roles, and this pins that the deputy scope did not widen it.
+    owner = await make_user(email="owner@example.com")
+    deputy = await make_user(email="deputy@example.com")
+    household = await make_household(
+        members=[owner, deputy], roles={deputy.id: HouseholdRole.deputy}
+    )
+    chore = await make_chore(household=household, with_occurrence=False)
+    occ = await make_occurrence(
+        chore=chore,
+        scheduled_for=datetime(2026, 7, 20, tzinfo=UTC),
+        status=OccurrenceStatus.done,
+        completed_by=owner,
+        completed_at=datetime(2026, 7, 20, 9, tzinfo=UTC),
+    )
+    client = await auth_client(deputy)
+
+    resp = await client.delete(f"/api/v1/completions/{occ.id}")
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "You can only undo your own completions"
+
+
+async def test_a_deputy_undoes_their_own_completion(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    owner = await make_user(email="owner@example.com")
+    deputy = await make_user(email="deputy@example.com")
+    household = await make_household(
+        members=[owner, deputy], roles={deputy.id: HouseholdRole.deputy}
+    )
+    chore = await make_chore(household=household, with_occurrence=False)
+    occ = await make_occurrence(
+        chore=chore,
+        scheduled_for=datetime(2026, 7, 20, tzinfo=UTC),
+        status=OccurrenceStatus.done,
+        completed_by=deputy,
+        completed_at=datetime(2026, 7, 20, 9, tzinfo=UTC),
+    )
+    client = await auth_client(deputy)
+
+    resp = await client.delete(f"/api/v1/completions/{occ.id}")
+    assert resp.status_code == 204
+
+
+async def test_helper_household_is_absent_from_a_users_own_numbers(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    # The cross-household case the "union for nav, scope the data" rule exists for:
+    # organiser in one household, helper in another, and only the first one's history and
+    # statistics come back.
+    user = await make_user()
+    other = await make_user(email="other@example.com")
+    mine = await make_household(name="Mine", members=[user])
+    theirs = await make_household(
+        name="Theirs", members=[other, user], roles={user.id: HouseholdRole.helper}
+    )
+    for household, title in ((mine, "Mine done"), (theirs, "Theirs done")):
+        chore = await make_chore(household=household, title=title, with_occurrence=False)
+        await make_occurrence(
+            chore=chore,
+            scheduled_for=datetime(2026, 7, 20, tzinfo=UTC),
+            status=OccurrenceStatus.done,
+            completed_by=user,
+            completed_at=datetime(2026, 7, 20, 9, tzinfo=UTC),
+        )
+    client = await auth_client(user)
+
+    resp = await client.get("/api/v1/completions")
+    assert [e["title"] for e in resp.json()["items"]] == ["Mine done"]
+    assert (await client.get("/api/v1/stats")).json()["kpis"]["completed_in_range"] == 1

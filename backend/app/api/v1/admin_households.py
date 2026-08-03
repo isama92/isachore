@@ -15,11 +15,11 @@ from app.api.v1.households import (
     set_household_admin,
 )
 from app.core.households import add_member
-from app.models import Household
+from app.models import Household, HouseholdRole
 from app.schemas import (
     HouseholdCreate,
     HouseholdListRead,
-    HouseholdMemberRead,
+    HouseholdMemberRoleRead,
     HouseholdUpdate,
     Page,
 )
@@ -73,12 +73,12 @@ async def create_household(
     payload: HouseholdCreate, admin: AdminUser, session: SessionDep
 ) -> HouseholdListRead:
     # admin_id is required, and it must reference a member, so the creating admin
-    # becomes the household's owner and first member. They (or another admin) can
-    # transfer ownership once real members are added.
+    # becomes the household's owner and first member (an organiser, as owners are).
+    # They (or another admin) can transfer ownership once real members are added.
     household = Household(name=payload.name, admin_id=admin.id)
     session.add(household)
     await session.flush()
-    await add_member(session, household.id, admin.id)
+    await add_member(session, household.id, admin.id, HouseholdRole.organiser)
     await session.commit()
     return await load_household_read(session, household.id)
 
@@ -119,7 +119,7 @@ async def restore_household(
     return await load_household_read(session, household.id)
 
 
-@router.get("/{household_id}/members", response_model=Page[HouseholdMemberRead])
+@router.get("/{household_id}/members", response_model=Page[HouseholdMemberRoleRead])
 async def list_household_members(
     household_id: int,
     _: AdminUser,
@@ -129,7 +129,7 @@ async def list_household_members(
     sort_by: MemberSortBy = "name",
     sort_dir: SortDir = "asc",
     name: Annotated[str | None, Query(max_length=255)] = None,
-) -> Page[HouseholdMemberRead]:
+) -> Page[HouseholdMemberRoleRead]:
     await _get_household_or_404(session, household_id)
     return await build_members_page(
         session,

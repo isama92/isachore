@@ -17,7 +17,7 @@ const ALL = 'all'
 // The household + assignee filter bar shared by the two chore list pages. Each control
 // appears only when there is something to choose between, and the bar renders nothing at
 // all for a lone user in a lone household: two selects with one option each would be pure
-// noise, and this is the first block on Your Chores now that it has no title.
+// noise.
 //
 // `group` picks up the calling page's copy. Both carry the same filter strings under their
 // own key, matching how History and Statistics each carry their own rather than sharing.
