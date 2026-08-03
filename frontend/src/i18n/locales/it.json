@@ -344,6 +344,9 @@
       "helper": "Aiutante"
     },
     "roleLabel": "Ruolo di {{name}}",
+    "roleConfirm": "Assegnare il ruolo {{role}} a {{name}}?",
+    "roleConfirmBody": "Cambia subito ciò che può fare in questo nucleo domestico. Puoi modificarlo di nuovo in qualsiasi momento.",
+    "roleConfirmAction": "Cambia ruolo",
     "roleUpdated": "Ruolo di {{name}} aggiornato",
     "roleError": "Impossibile aggiornare il ruolo",
     "transferConfirm": "Rendere {{name}} amministratore del nucleo domestico?",

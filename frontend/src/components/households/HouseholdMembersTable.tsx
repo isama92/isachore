@@ -70,6 +70,15 @@ export function HouseholdMembersTable({
     initial: { sortBy: 'name', sortDir: 'asc', pageSize: 10, filters: {} },
   })
   const [error, setError] = useState<string | null>(null)
+  // The role change awaiting confirmation, or null. Picking in the Select only stages it;
+  // nothing is sent until the dialog is accepted. Cancelling needs no revert, because the
+  // Select is controlled by `member.role` and that has not moved - the trigger goes on
+  // showing the stored role for as long as the dialog is open, which is also the honest
+  // thing to show, since at that point nothing has changed.
+  const [pending, setPending] = useState<{
+    member: HouseholdMemberWithRole
+    role: HouseholdRole
+  } | null>(null)
 
   async function remove(member: HouseholdMemberWithRole) {
     setError(null)
@@ -118,7 +127,16 @@ export function HouseholdMembersTable({
       return <Badge variant="secondary">{t(`households.roles.${member.role}`)}</Badge>
     }
     return (
-      <Select value={member.role} onValueChange={(v) => void setRole(member, v as HouseholdRole)}>
+      <Select
+        value={member.role}
+        onValueChange={(v) => {
+          // Radix does not fire this for the already-selected item, so the guard is belt and
+          // braces rather than load-bearing - but a confirm dialog for "no change" would be
+          // pure noise if it ever did.
+          const role = v as HouseholdRole
+          if (role !== member.role) setPending({ member, role })
+        }}
+      >
         <SelectTrigger
           className="w-40"
           aria-label={t('households.roleLabel', { name: fullName(member) })}
@@ -218,6 +236,36 @@ export function HouseholdMembersTable({
   return (
     <TooltipProvider>
       {error && <p className="mb-3 text-[13px] font-bold text-danger">{error}</p>}
+      {/* Controlled, and rendered once for the table rather than per row: `onValueChange` is
+          not a trigger click, so there is nothing for an AlertDialogTrigger to wrap. */}
+      <AlertDialog
+        open={pending !== null}
+        onOpenChange={(open) => {
+          if (!open) setPending(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t('households.roleConfirm', {
+                name: pending ? fullName(pending.member) : '',
+                role: pending ? t(`households.roles.${pending.role}`) : '',
+              })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>{t('households.roleConfirmBody')}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pending) void setRole(pending.member, pending.role)
+              }}
+            >
+              {t('households.roleConfirmAction')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <DataTable
         columns={columns}
         table={table}

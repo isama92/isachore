@@ -344,6 +344,9 @@
       "helper": "Helper"
     },
     "roleLabel": "Role for {{name}}",
+    "roleConfirm": "Give {{name}} the {{role}} role?",
+    "roleConfirmBody": "It changes what they can do in this household straight away. You can change it back at any time.",
+    "roleConfirmAction": "Change role",
     "roleUpdated": "{{name}}'s role updated",
     "roleError": "Could not update the role",
     "transferConfirm": "Make {{name}} the household admin?",

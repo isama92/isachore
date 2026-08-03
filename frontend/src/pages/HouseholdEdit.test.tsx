@@ -67,6 +67,16 @@ function renderEdit(fetchMock: FetchMock, authValue: Partial<AuthContextValue> =
   )
 }
 
+// Picking a role stages it behind a confirmation, like deactivating a user on the admin
+// table: this walks the whole gesture, so a test that forgets the dialog fails loudly rather
+// than silently asserting no PATCH.
+async function chooseRole(user: ReturnType<typeof userEvent.setup>, name: string, role: string) {
+  await user.click(screen.getByRole('combobox', { name: `Role for ${name}` }))
+  await user.click(await screen.findByRole('option', { name: role }))
+  const dialog = within(await screen.findByRole('alertdialog'))
+  await user.click(dialog.getByRole('button', { name: 'Change role' }))
+}
+
 describe('HouseholdEdit', () => {
   it('loads the household name and its members', async () => {
     const fetchMock = stubFetch({
@@ -175,8 +185,7 @@ describe('HouseholdEdit', () => {
     await screen.findByText('Jo Ng')
     // The label carries the member's name: one Select per row, so a bare "Role" would be
     // ambiguous the moment a household has two members.
-    await user.click(screen.getByRole('combobox', { name: 'Role for Jo Ng' }))
-    await user.click(await screen.findByRole('option', { name: 'Deputy' }))
+    await chooseRole(user, 'Jo Ng', 'Deputy')
 
     await waitFor(() => {
       const patch = fetchMock.mock.calls.find(
@@ -243,8 +252,7 @@ describe('HouseholdEdit', () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
 
     await screen.findByText('Jo Ng')
-    await user.click(screen.getByRole('combobox', { name: 'Role for Jo Ng' }))
-    await user.click(await screen.findByRole('option', { name: 'Organiser' }))
+    await chooseRole(user, 'Jo Ng', 'Organiser')
 
     // The server's own message, and the roster reloaded so the Select cannot sit there
     // showing a role that was never stored.
@@ -438,8 +446,7 @@ describe('HouseholdEdit', () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
 
     await screen.findByText('Hal Per')
-    await user.click(screen.getByRole('combobox', { name: 'Role for Hal Per' }))
-    await user.click(await screen.findByRole('option', { name: 'Deputy' }))
+    await chooseRole(user, 'Hal Per', 'Deputy')
 
     await waitFor(() => {
       const patch = fetchMock.mock.calls.find(
@@ -476,5 +483,51 @@ describe('HouseholdEdit', () => {
     expect(screen.queryByRole('button', { name: 'Add member' })).not.toBeInTheDocument()
     // ...but they can still leave.
     expect(screen.getByRole('button', { name: 'Leave household' })).toBeInTheDocument()
+  })
+
+  it('sends nothing when a role change is cancelled, and keeps the stored role showing', async () => {
+    // The point of the confirmation. Cancelling needs no revert because the Select is controlled
+    // by `member.role`, which never moved - so the trigger still reads Helper afterwards, and
+    // that is what this asserts rather than trusting the absence of a request alone.
+    const fetchMock = stubFetch({
+      household: makeHousehold({ id: 5, admin_id: 1 }),
+      members: [
+        makeHouseholdMemberWithRole({ id: 1, first_name: 'Alex', last_name: 'Kim' }),
+        makeHouseholdMemberWithRole({ id: 2, first_name: 'Jo', last_name: 'Ng', role: 'helper' }),
+      ],
+    })
+    renderEdit(fetchMock)
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    await screen.findByText('Jo Ng')
+    await user.click(screen.getByRole('combobox', { name: 'Role for Jo Ng' }))
+    await user.click(await screen.findByRole('option', { name: 'Organiser' }))
+    const dialog = within(await screen.findByRole('alertdialog'))
+    await user.click(dialog.getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(false)
+    expect(screen.getByRole('combobox', { name: 'Role for Jo Ng' })).toHaveTextContent('Helper')
+  })
+
+  it('names the member and the new role in the confirmation', async () => {
+    // Both interpolations, because a dialog that says "Give  the  role?" would still pass a
+    // test that only looked for the dialog.
+    const fetchMock = stubFetch({
+      household: makeHousehold({ id: 5, admin_id: 1 }),
+      members: [
+        makeHouseholdMemberWithRole({ id: 1, first_name: 'Alex', last_name: 'Kim' }),
+        makeHouseholdMemberWithRole({ id: 2, first_name: 'Jo', last_name: 'Ng', role: 'helper' }),
+      ],
+    })
+    renderEdit(fetchMock)
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    await screen.findByText('Jo Ng')
+    await user.click(screen.getByRole('combobox', { name: 'Role for Jo Ng' }))
+    await user.click(await screen.findByRole('option', { name: 'Deputy' }))
+
+    const dialog = within(await screen.findByRole('alertdialog'))
+    expect(dialog.getByText('Give Jo Ng the Deputy role?')).toBeInTheDocument()
   })
 })

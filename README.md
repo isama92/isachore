@@ -35,8 +35,9 @@ under **Households**, or they accept an invitation to somebody else's.
 
 Every membership carries a role, so a shared household can hand out chores without
 handing over the household. Roles are set from **Households > edit**, which the owner and its
-organisers reach with the pencil icon while everybody else gets a read-only eye; a page
-somebody's role does not cover is not shown to them in the sidebar at all.
+organisers reach with the pencil icon while everybody else gets a read-only eye; picking a new
+role asks for confirmation before it takes effect. A page somebody's role does not cover is not
+shown to them in the sidebar at all.
 
 |                                                     | admin | organiser | deputy | helper |
 | --------------------------------------------------- | :---: | :-------: | :----: | :----: |
