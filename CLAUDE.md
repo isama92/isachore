@@ -273,9 +273,11 @@ pre-commit run --all-files                           # what the git hook runs
     which 403s, because the caller can see the resource elsewhere and a 404 would be a
     lie. `GET /chores/{id}` is ungated on purpose (the description dialog on Home and
     Unscheduled needs it for helpers), which is why the chores router has both
-    `_get_user_chore_or_404` and `_managed_chore_or_error`. **Because that read is open,
-    `ChoreRead.assignees` and `.current_assignee` are `HouseholdMemberRead`, never
-    `UserRead`.** They used to be the latter, which handed a helper their housemates'
+    `_get_user_chore_or_404` and `_managed_chore_or_error`. The management list has its own
+    schema, `ChoreListRead` - a sibling of `ChoreRead` under `ChoreReadBase`, carrying
+    `has_description: bool` where the detail read carries the HTML (see the rich text section).
+    **Because that detail read is open, `ChoreRead.assignees` and `.current_assignee` are
+    `HouseholdMemberRead`, never `UserRead`.** They used to be the latter, which handed a helper their housemates'
     email addresses, and `ChoreRead` was the only route exposing a `UserRead` to a
     household peer at all - which is why `main.py`'s avatar accepted-risk note can now
     leave peers out of the holder set. Keep any new payload a household peer can reach
@@ -479,11 +481,21 @@ pre-commit run --all-files                           # what the git hook runs
     decoration, not a node, so it cannot touch `getHTML()` or `isEmpty`. Being CSS it is also
     invisible to assistive tech, hence the `aria-placeholder` beside it.
   - Read surfaces: the editor itself, and `DescriptionDialog` opened from the marker icon on
-    `ChoreRow` (Home and Unscheduled). Those two lists carry `has_description: bool`, **not**
-    the HTML - the dialog fetches `GET /chores/{id}` on open, so a household's instructions
-    never ride along on the landing page. `RichText` is the only
-    `dangerouslySetInnerHTML` outside `ui/chart.tsx`, and it is NOT a sanitiser: only ever
-    pass it something the server has already cleaned.
+    `ChoreRow` (Home and Unscheduled). **No list sends the HTML**: Home, Unscheduled and the
+    chores management list all carry `has_description: bool` instead, and whoever wants the
+    markup fetches `GET /chores/{id}`. Only the first two *render* a marker from it; on the
+    management list the flag is carried for shape parity, so adding one there later needs no
+    API change. So a household's instructions never ride along on the
+    landing page, and the worst-case payload of the 100-row management list is not 100 x
+    `MAX_RICH_TEXT_LENGTH`. That list goes further than the other two and never *reads* the
+    column either: `list_chores` selects a labelled `description IS NOT NULL` and applies
+    `defer(Chore.description, raiseload=True)`, so the HTML does not leave Postgres. Note the
+    suite cannot prove that part - the fixtures share one session, so an already-loaded chore
+    keeps its description whatever the option says; check the compiled SQL if you touch it.
+    The one consequence to keep in mind is that `Chores.tsx`'s clone action fetches the source
+    chore before navigating, because a clone built from the row would silently lose the
+    description. `RichText` is the only `dangerouslySetInnerHTML` outside `ui/chart.tsx`, and
+    it is NOT a sanitiser: only ever pass it something the server has already cleaned.
   - `ChoreCreate` and `ChoreEdit` are `lazy()` in `App.tsx` for the same reason Statistics is:
     they are the only routes reaching `ChoreForm`, and that chunk is ~146 kB gzipped. A third page
     rendering `ChoreForm` needs splitting too, or the editor lands back in the main chunk.
@@ -491,6 +503,40 @@ pre-commit run --all-files                           # what the git hook runs
   `api` wrapper in `src/lib/api.ts` (throws `ApiError`). Protected routes wrap in
   `RequireAuth` / `RequireAdmin` (`src/components/`); authenticated pages render
   under the `TopBar`.
+  - **`RequireAuth` renders `<Outlet key={user.id} />`, and that key is load-bearing.**
+    Switching identity (impersonation starting or stopping) has to throw the page away,
+    because *nothing else would*: `refresh()` updates the context and `claimTableSettings`
+    clears the remembered filters, but no page's load effect depends on the auth context -
+    `useServerTable`'s fetch deliberately does not, `useFilterOptions` has `[]` deps, and
+    Home and Unscheduled lazy-initialise `assigneeIds` from `user.id` exactly once. Without
+    it an admin leaving an impersonated session keeps that person's rows on screen. The key
+    is `user.id`, NOT the user object: `refresh()` also runs after a profile save, which
+    must not remount. Both directions are pinned in `RequireAuth.test.tsx`. Note the URL
+    query string is deliberately NOT rewritten, so a filter from the impersonated session
+    stays in the address bar; every list endpoint scopes through `member_household_ids`, so
+    it yields an empty page rather than someone else's data.
+- **Readable 422s**: `lib/validationError.ts` turns pydantic's `detail` *list* into one
+  sentence, and `handle()` in `api.ts` calls it whenever `detail` is not a string. Every
+  hand-raised `HTTPException` carries a string and is shown verbatim; only pydantic sends
+  the list, which used to fall through to `res.statusText` ("Unprocessable Content"). It
+  keys off the stable `type` discriminator rather than the English `msg`, through closed
+  `const` tuples (`VALIDATION_TYPES`, `FIELD_NAMES`) so the dynamic `errors.validation.*` /
+  `errors.fields.*` keys typecheck. Three things not to undo: `value_error` is deliberately
+  absent from `VALIDATION_TYPES`, because our own validators write better English than any
+  generic (it is unwrapped instead, and `EmailStr` is the one special case); `ctx` is passed
+  under i18next's `replace` so a pydantic context key can never land as an i18next option
+  (`count` would silently switch on pluralisation); and the wire shape stays the *array*,
+  since `/api/v1` has future non-browser clients - do NOT add a backend
+  `RequestValidationError` handler that flattens `detail` to a string. Translation goes
+  through the `i18n` singleton, not a captured `t`: `api.ts` has no React context.
+
+  **Open, and not settled by the above:** pydantic's stock handler echoes the rejected value
+  back under `input`, so a password below `min_length=8` comes back in the response body in
+  plaintext (`POST /confirm/{token}`, `PATCH /users/{id}`, the profile password change).
+  `formatValidationDetail` never reads `input`, so nothing leaks in-app - it is a wire and
+  log-capture exposure, and one worth an AVG/ISO 27001 look. Stripping that one key in a
+  `RequestValidationError` handler would keep the array contract intact, so the rule above
+  does not rule it out. It predates this work and has not been decided either way.
 - **Design tokens** (colours, fonts, radii, shadows) live ONLY in
   `frontend/src/index.css`, never hardcode hex in components. They are split by
   role: theme-invariant tokens (fonts, shadows, brand radii) under `@theme`; the

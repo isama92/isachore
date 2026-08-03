@@ -197,6 +197,7 @@
     "new": "Nuova faccenda",
     "edit": "Modifica",
     "clone": "Clona",
+    "cloneError": "Impossibile aprire la copia",
     "loadError": "Impossibile caricare le faccende",
     "deleted": "Faccenda eliminata",
     "deleteError": "Eliminazione non riuscita",

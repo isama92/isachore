@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import type { ColumnDef } from '@tanstack/react-table'
 import { CopyPlusIcon, SquarePenIcon, Trash2Icon } from 'lucide-react'
@@ -10,7 +10,7 @@ import { householdIdsWithRole } from '../lib/permissions'
 import { endpoints } from '../lib/endpoints'
 import { routes } from '../lib/routes'
 import { formatDate, formatDateTime, repeatLabel } from '../lib/chores'
-import type { Chore, ChoreCloneState, Household, Page } from '../lib/types'
+import type { Chore, ChoreCloneState, ChoreListRow, Household, Page } from '../lib/types'
 import { DataTable } from '@/components/data-table/DataTable'
 import { useServerTable } from '@/components/data-table/useServerTable'
 import { Button } from '@/components/ui/button'
@@ -45,7 +45,7 @@ const ALL = 'all'
 export default function Chores() {
   const { t } = useTranslation()
 
-  const table = useServerTable<Chore, ChoreFilters>({
+  const table = useServerTable<ChoreListRow, ChoreFilters>({
     endpoint: endpoints.chores.root,
     storageKey: 'chores',
     initial: {
@@ -61,6 +61,10 @@ export default function Chores() {
   const organised = useMemo(() => householdIdsWithRole(memberships, 'organiser'), [memberships])
   const [households, setHouseholds] = useState<Household[]>([])
   const [error, setError] = useState<string | null>(null)
+  // The row whose source chore is being fetched for a clone, so only that button
+  // disables rather than the whole column.
+  const [cloning, setCloning] = useState<number | null>(null)
+  const navigate = useNavigate()
 
   // Local text-filter state for instant typing feedback; pushed to the table
   // (which refetches server-side) after a short debounce.
@@ -109,7 +113,7 @@ export default function Chores() {
     }
   }, [organised])
 
-  async function remove(chore: Chore) {
+  async function remove(chore: ChoreListRow) {
     setError(null)
     try {
       await api.del(endpoints.chores.byId(chore.id))
@@ -120,7 +124,7 @@ export default function Chores() {
     }
   }
 
-  function deleteDialog(chore: Chore): ReactNode {
+  function deleteDialog(chore: ChoreListRow): ReactNode {
     const label = t('chores.delete')
     return (
       <AlertDialog>
@@ -156,9 +160,25 @@ export default function Chores() {
     )
   }
 
-  // Clone opens the create page prefilled from this chore, carried in router
-  // state. Assignees/tags that don't belong to the chosen household are dropped
-  // there (see ChoreCreate); nothing is dropped for a same-household clone.
+  // Clone opens the create page prefilled from the SOURCE CHORE, not from the row: the row
+  // carries has_description rather than the description itself, so a clone built from it
+  // would silently drop the instructions. GET /chores/{id} is open to every role and is
+  // what the description dialog already uses.
+  async function clone(chore: ChoreListRow) {
+    setError(null)
+    setCloning(chore.id)
+    try {
+      const full = await api.get<Chore>(endpoints.chores.byId(chore.id))
+      await navigate(routes.chores.new, { state: cloneState(full) })
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t('chores.cloneError'))
+    } finally {
+      setCloning(null)
+    }
+  }
+
+  // Assignees/tags that don't belong to the chosen household are dropped on the
+  // create page (see ChoreCreate); nothing is dropped for a same-household clone.
   function cloneState(chore: Chore): { clone: ChoreCloneState } {
     return {
       clone: {
@@ -178,7 +198,7 @@ export default function Chores() {
     }
   }
 
-  function rowActions(chore: Chore): ReactNode {
+  function rowActions(chore: ChoreListRow): ReactNode {
     const editLabel = t('chores.edit')
     const cloneLabel = t('chores.clone')
     return (
@@ -195,10 +215,18 @@ export default function Chores() {
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button asChild variant="ghost" size="icon-sm" aria-label={cloneLabel}>
-              <Link to={routes.chores.new} state={cloneState(chore)}>
-                <CopyPlusIcon />
-              </Link>
+            {/* A button rather than a Link, because the description has to be fetched
+                before the create page can be prefilled. Nothing is lost: router state
+                never survived an open-in-new-tab either. */}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={cloneLabel}
+              disabled={cloning === chore.id}
+              onClick={() => void clone(chore)}
+            >
+              <CopyPlusIcon />
             </Button>
           </TooltipTrigger>
           <TooltipContent>{cloneLabel}</TooltipContent>
@@ -210,7 +238,7 @@ export default function Chores() {
 
   // Keep the tags column compact: show the first tag, then "and N more" with the
   // full list in a tooltip, so a heavily-tagged chore doesn't blow up the row.
-  function tagsCell(tags: Chore['tags']): ReactNode {
+  function tagsCell(tags: ChoreListRow['tags']): ReactNode {
     if (tags.length === 0) {
       return <span className="text-muted-foreground">{t('chores.noTags')}</span>
     }
@@ -261,7 +289,7 @@ export default function Chores() {
     )
   }
 
-  const columns: ColumnDef<Chore>[] = [
+  const columns: ColumnDef<ChoreListRow>[] = [
     {
       accessorKey: 'title',
       header: t('chores.headers.title'),

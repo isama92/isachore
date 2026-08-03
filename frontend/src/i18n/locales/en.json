@@ -197,6 +197,7 @@
     "new": "New chore",
     "edit": "Edit",
     "clone": "Clone",
+    "cloneError": "Could not open the clone",
     "loadError": "Failed to load chores",
     "deleted": "Chore deleted",
     "deleteError": "Delete failed",

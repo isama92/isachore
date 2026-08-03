@@ -129,6 +129,13 @@ export type Chore = {
   tags: Tag[]
 }
 
+// A row of the chores management list: GET /api/v1/chores. Everything a full Chore has
+// except the description, which is answered as a flag - the same treatment DueChore and
+// UnscheduledChore already get, and for the same reason: the table renders a marker, and
+// at 100 rows a page the HTML was the largest payload in the app. Expressed as an Omit so
+// the two cannot drift; anything wanting the description reads GET /chores/{id}.
+export type ChoreListRow = Omit<Chore, 'description'> & { has_description: boolean }
+
 // A completed-chore row for the History view: GET /api/v1/completions.
 // `title` is the snapshot taken at completion (survives a rename/soft-delete);
 // `completed_at` is when it was checked off and `scheduled_for` the occurrence's

@@ -1,4 +1,4 @@
-from app.schemas.chore import ChoreCreate, ChoreRead, ChoreUpdate
+from app.schemas.chore import ChoreCreate, ChoreListRead, ChoreRead, ChoreUpdate
 from app.schemas.completion import HistoryEntryRead, HistoryFilterOptions
 from app.schemas.home import (
     CompleteChoreRequest,
@@ -41,6 +41,7 @@ from app.schemas.user import (
 
 __all__ = [
     "ChoreCreate",
+    "ChoreListRead",
     "ChoreRead",
     "ChoreUpdate",
     "CompleteChoreRequest",
