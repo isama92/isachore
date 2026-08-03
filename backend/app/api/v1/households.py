@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import ColumnElement, delete, func, or_, select
+from sqlalchemy import ColumnElement, delete, func, or_, select, update
 
 from app.api.deps import CurrentUser, SessionDep
 from app.core.config import settings
@@ -16,6 +16,8 @@ from app.core.households import (
     is_active_member,
     member_count_column,
     member_of,
+    require_role,
+    role_in_household,
 )
 from app.core.invitations import round_up_to_hour
 from app.core.security import INVITATION_TOKEN_TTL, generate_token
@@ -23,6 +25,7 @@ from app.models import (
     Household,
     HouseholdInvitation,
     HouseholdInvitationStatus,
+    HouseholdRole,
     User,
     UserStatus,
     household_members,
@@ -31,7 +34,8 @@ from app.schemas import (
     HouseholdCreate,
     HouseholdInvitationRead,
     HouseholdListRead,
-    HouseholdMemberRead,
+    HouseholdMemberRoleRead,
+    HouseholdMemberUpdate,
     HouseholdUpdate,
     Page,
 )
@@ -42,8 +46,9 @@ HouseholdSortBy = Literal["id", "name", "created_at"]
 MemberSortBy = Literal["id", "name"]
 SortDir = Literal["asc", "desc"]
 
-# The most outstanding (pending) invitations a household may have at once; the
-# owner must revoke one (or have someone accept) to add more.
+# The most outstanding (pending) invitations a household may have at once; someone must
+# revoke one (or have it accepted) to add more. Per household, not per inviter, so the
+# organisers who can now invite share one budget.
 MAX_PENDING_INVITATIONS = 5
 
 
@@ -113,8 +118,14 @@ async def build_members_page(
     sort_by: str,
     sort_dir: str,
     name: str | None,
-) -> Page[HouseholdMemberRead]:
-    """Active members of a household as a paginated envelope."""
+) -> Page[HouseholdMemberRoleRead]:
+    """Active members of a household, with each one's role, as a paginated envelope.
+
+    The role comes off the association row, so this is the one members payload that
+    carries it: `HouseholdMemberRead` is shared with the assignee pickers, History's
+    `completed_by` and the invitation page, none of which join a membership at all.
+    Roles are not a sort key on purpose - sorting them alphabetically (deputy, helper,
+    organiser) would suggest a ranking that isn't one."""
     filters: list[ColumnElement[bool]] = [
         household_members.c.household_id == household_id,
         User.status == UserStatus.active,
@@ -124,7 +135,9 @@ async def build_members_page(
         filters.append(or_(User.first_name.ilike(pattern), User.last_name.ilike(pattern)))
 
     list_query = (
-        select(User).join(household_members, household_members.c.user_id == User.id).where(*filters)
+        select(User, household_members.c.role)
+        .join(household_members, household_members.c.user_id == User.id)
+        .where(*filters)
     )
     count_query = (
         select(func.count())
@@ -141,8 +154,16 @@ async def build_members_page(
     result = await session.execute(
         list_query.order_by(*order_by).limit(page_size).offset((page - 1) * page_size)
     )
-    return Page[HouseholdMemberRead](
-        items=[HouseholdMemberRead.model_validate(user) for user in result.scalars()],
+    return Page[HouseholdMemberRoleRead](
+        items=[
+            HouseholdMemberRoleRead(
+                id=user.id,
+                first_name=user.first_name,
+                last_name=user.last_name,
+                role=HouseholdRole(role),
+            )
+            for user, role in result.all()
+        ],
         total=total,
         page=page,
         page_size=page_size,
@@ -183,13 +204,93 @@ async def load_household_read(
 
 
 async def set_household_admin(session: SessionDep, household: Household, new_admin_id: int) -> None:
-    """Transfer ownership: the new owner must be an active member of the household."""
+    """Transfer ownership: the new owner must be an active member of the household.
+
+    Promoting them to organiser is part of the transfer rather than a separate step,
+    because the owner is by definition one and their row is the one the role endpoint
+    refuses to touch. Hand a helper the household without this and they would own a
+    household they cannot manage the chores of, with no way to fix it. The previous
+    owner keeps `organiser` and becomes an ordinary one, so the new owner can demote
+    them like anybody else."""
     if not await is_active_member(session, household.id, new_admin_id):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="The new household admin must be a member of the household",
         )
     household.admin_id = new_admin_id
+    await session.execute(
+        update(household_members)
+        .where(
+            household_members.c.household_id == household.id,
+            household_members.c.user_id == new_admin_id,
+        )
+        .values(role=HouseholdRole.organiser)
+    )
+
+
+def refuse_owner_row(household: Household, user_id: int) -> None:
+    """409 if `user_id` owns the household. Their role is derived from owning it, so the way to
+    move it is to transfer, which promotes the new owner - and that path exists on both
+    surfaces, so the message is actionable for a site admin too.
+
+    A named guard rather than an inline check, because *where* it fires matters: the user
+    surface calls it before its organiser rule so an organiser targeting the owner is told about
+    the target rather than about themselves, and `set_member_role` calls it again so the admin
+    surface gets it without repeating the reasoning."""
+    if household.admin_id == user_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The household admin is always an organiser; transfer ownership instead",
+        )
+
+
+async def set_member_role(
+    session: SessionDep, household: Household, user_id: int, role: HouseholdRole
+) -> HouseholdMemberRoleRead:
+    """Write one member's role, or 409 / 404. The single chokepoint both surfaces call, so the
+    two target rules are enforced once - the same arrangement as `remove_member`.
+
+    Refuses the owner's row (see `refuse_owner_row`) and a disabled member, who keeps their row
+    but is hidden everywhere, so re-roling one would change a permission nothing displays.
+
+    What is NOT here is who may call it: the user surface adds the organiser rules on top, the
+    admin surface relies on `AdminUser`. Commits, like `remove_member`, because both callers only
+    read the household first.
+    """
+    refuse_owner_row(household, user_id)
+    # One query for the 404 guard and for the response, rather than `is_active_member` followed
+    # by a second fetch: the membership join is the existence check, and `expire_on_commit=False`
+    # (db/session.py) is what lets the row outlive the commit below.
+    member = (
+        await session.execute(
+            select(User)
+            .join(household_members, household_members.c.user_id == User.id)
+            .where(
+                household_members.c.household_id == household.id,
+                household_members.c.user_id == user_id,
+                User.status == UserStatus.active,
+            )
+        )
+    ).scalar_one_or_none()
+    if member is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Household member not found"
+        )
+    await session.execute(
+        update(household_members)
+        .where(
+            household_members.c.household_id == household.id,
+            household_members.c.user_id == user_id,
+        )
+        .values(role=role)
+    )
+    await session.commit()
+    return HouseholdMemberRoleRead(
+        id=member.id,
+        first_name=member.first_name,
+        last_name=member.last_name,
+        role=role,
+    )
 
 
 async def remove_member(session: SessionDep, household_id: int, user_id: int) -> None:
@@ -243,13 +344,29 @@ async def _get_my_household_or_404(
 
 async def _get_owned_household(session: SessionDep, user_id: int, household_id: int) -> Household:
     """A household the caller both belongs to (404 otherwise) and owns (403
-    otherwise). Gates the edit / delete / member-management endpoints."""
+    otherwise). Gates renaming, deleting and removing members - the things that stay the
+    owner's alone. Managing *people* is one step wider, see `_get_organised_household`."""
     household = await _get_my_household_or_404(session, user_id, household_id)
     if household.admin_id != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the household admin can do this",
         )
+    return household
+
+
+async def _get_organised_household(
+    session: SessionDep, user_id: int, household_id: int
+) -> Household:
+    """A household the caller belongs to (404 otherwise) and organises (403 otherwise).
+
+    Gates inviting and role-setting, which the owner shares with the household's organisers:
+    a house with several adults should not route every membership change through one person.
+    The owner passes because owners are always organisers. What it does NOT cover is the
+    narrower rule on *which* roles an organiser may set - that is caller-and-target specific,
+    so it lives in `update_household_member`."""
+    household = await _get_my_household_or_404(session, user_id, household_id)
+    await require_role(session, household_id, user_id, HouseholdRole.organiser)
     return household
 
 
@@ -278,11 +395,12 @@ async def list_households(
 async def create_household(
     payload: HouseholdCreate, user: CurrentUser, session: SessionDep
 ) -> HouseholdListRead:
-    # The creator becomes the household owner and its first member.
+    # The creator becomes the household owner and its first member, and owners are
+    # organisers: there is nobody else who could promote them.
     household = Household(name=payload.name, admin_id=user.id)
     session.add(household)
     await session.flush()
-    await add_member(session, household.id, user.id)
+    await add_member(session, household.id, user.id, HouseholdRole.organiser)
     await session.commit()
     return await load_household_read(session, household.id)
 
@@ -319,7 +437,7 @@ async def delete_household(household_id: int, user: CurrentUser, session: Sessio
     await session.commit()
 
 
-@router.get("/{household_id}/members", response_model=Page[HouseholdMemberRead])
+@router.get("/{household_id}/members", response_model=Page[HouseholdMemberRoleRead])
 async def list_household_members(
     household_id: int,
     user: CurrentUser,
@@ -329,7 +447,9 @@ async def list_household_members(
     sort_by: MemberSortBy = "name",
     sort_dir: SortDir = "asc",
     name: Annotated[str | None, Query(max_length=255)] = None,
-) -> Page[HouseholdMemberRead]:
+) -> Page[HouseholdMemberRoleRead]:
+    # Membership is enough to read the roster, roles included: everyone in a household
+    # may see who else is in it and what they are allowed to do.
     await _get_my_household_or_404(session, user.id, household_id)
     return await build_members_page(
         session,
@@ -340,6 +460,40 @@ async def list_household_members(
         sort_dir=sort_dir,
         name=name,
     )
+
+
+@router.patch("/{household_id}/members/{user_id}", response_model=HouseholdMemberRoleRead)
+async def update_household_member(
+    household_id: int,
+    user_id: int,
+    payload: HouseholdMemberUpdate,
+    user: CurrentUser,
+    session: SessionDep,
+) -> HouseholdMemberRoleRead:
+    """Set one member's role. The owner may set any of the three; an organiser may only move
+    people between deputy and helper.
+
+    That asymmetry is the point: an organiser can share the day-to-day load without being able
+    to grow the set of people who could demote them. So they may not hand out `organiser`, may
+    not touch a row that already holds it, and therefore may not demote themselves either -
+    that last one falls out of the same rule rather than needing its own check.
+
+    The checks are ordered deliberately. The owner's row is refused with a 409 **before** any
+    caller-specific rule, because "the owner is always an organiser" is a property of the
+    target: everyone gets the same actionable answer (transfer ownership, which promotes the
+    new owner) instead of an organiser getting a 403 about a rule that is not the real reason.
+    """
+    household = await _get_organised_household(session, user.id, household_id)
+    # Before the organiser rule, so an organiser targeting the owner hears about the target.
+    refuse_owner_row(household, user_id)
+    if household.admin_id != user.id:
+        target_role = await role_in_household(session, household_id, user_id)
+        if target_role == HouseholdRole.organiser or payload.role == HouseholdRole.organiser:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the household admin can grant or change the organiser role",
+            )
+    return await set_member_role(session, household, user_id, payload.role)
 
 
 @router.delete("/{household_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -358,7 +512,7 @@ async def leave_household(household_id: int, user: CurrentUser, session: Session
     await remove_member(session, household_id, user.id)
 
 
-# --- invitations (owner-managed) ----------------------------------------
+# --- invitations (owner and organisers) ---------------------------------
 
 
 def _invitation_url(token: str) -> str:
@@ -408,7 +562,20 @@ async def _get_invitation_or_404(
 async def create_invitation(
     household_id: int, user: CurrentUser, session: SessionDep
 ) -> HouseholdInvitationRead:
-    await _get_owned_household(session, user.id, household_id)
+    await _get_organised_household(session, user.id, household_id)
+    # Serialise this household's invite creation before counting. The cap is a read-decide-
+    # write with no constraint behind it, so without the lock concurrent callers all read the
+    # same count and all insert - and the overshoot is not bounded at one: measured on the dev
+    # stack, 12 parallel POSTs against an empty household landed 11 invitations against a cap of
+    # 5. That became reachable when inviting widened from the owner alone to every organiser,
+    # since one person clicking one button does not race itself.
+    #
+    # Transaction-scoped, so it releases on the commit or rollback below with nothing to unwind,
+    # and keyed on the household so two households never wait on each other. Cheap here: this
+    # runs a handful of times per household, and only ever after `_get_organised_household` has
+    # already established the caller belongs to it - so an unauthenticated request cannot reach
+    # the lock at all.
+    await session.execute(select(func.pg_advisory_xact_lock(household_id)))
     # Cap outstanding invites: only pending ones count (expired/accepted/revoked
     # don't). The hourly sweep keeps `status` current, so a stale pending row
     # only lingers in the count for up to the sweep interval.
@@ -423,8 +590,11 @@ async def create_invitation(
     if (live_pending or 0) >= MAX_PENDING_INVITATIONS:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
+            # "This household", not "you": any organiser can now invite, so the 5 pending
+            # ones are as likely to be somebody else's, and this string is rendered verbatim.
             detail=(
-                f"You already have {MAX_PENDING_INVITATIONS} pending invitations; revoke one first."
+                f"This household already has {MAX_PENDING_INVITATIONS} pending invitations; "
+                "revoke one first."
             ),
         )
     invitation = HouseholdInvitation(
@@ -445,7 +615,7 @@ async def create_invitation(
 async def list_invitations(
     household_id: int, user: CurrentUser, session: SessionDep
 ) -> list[HouseholdInvitationRead]:
-    await _get_owned_household(session, user.id, household_id)
+    await _get_organised_household(session, user.id, household_id)
     # Newest first; accepted/revoked/expired invitations are kept until deleted.
     result = await session.execute(
         select(HouseholdInvitation)
@@ -461,7 +631,7 @@ async def list_invitations(
 async def revoke_invitation(
     household_id: int, invitation_id: int, user: CurrentUser, session: SessionDep
 ) -> HouseholdInvitationRead:
-    await _get_owned_household(session, user.id, household_id)
+    await _get_organised_household(session, user.id, household_id)
     invitation = await _get_invitation_or_404(session, household_id, invitation_id)
     if not _is_live_pending(invitation):
         raise HTTPException(
@@ -480,7 +650,7 @@ async def revoke_invitation(
 async def delete_invitation(
     household_id: int, invitation_id: int, user: CurrentUser, session: SessionDep
 ) -> None:
-    await _get_owned_household(session, user.id, household_id)
+    await _get_organised_household(session, user.id, household_id)
     invitation = await _get_invitation_or_404(session, household_id, invitation_id)
     # A live pending invite must be revoked, not deleted; accepted / revoked /
     # expired ones are deletable.

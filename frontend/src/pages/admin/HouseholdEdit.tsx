@@ -127,10 +127,14 @@ export default function AdminHouseholdEdit() {
             <h2 className="mb-4 font-display text-lg font-bold tracking-tight">
               {t('households.membersTitle')}
             </h2>
+            {/* `viewerUnrestricted`: a site admin may set any of the three roles here, the same
+                reach as the household's own owner. The organiser asymmetry on the user surface
+                is a rule about a household member, not about an operator. */}
             <HouseholdMembersTable
               basePath={endpoints.adminHouseholds.byId(household.id)}
               adminId={household.admin_id}
               canManage
+              viewerUnrestricted
             />
           </section>
         </>

@@ -6,6 +6,7 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { EyeIcon, SquarePenIcon, Trash2Icon } from 'lucide-react'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
+import { hasRoleIn } from '../lib/permissions'
 import { endpoints } from '../lib/endpoints'
 import { routes } from '../lib/routes'
 import { formatDateTime, formatDateTimeFull } from '../lib/format'
@@ -31,7 +32,7 @@ type HouseholdFilters = { name: string }
 
 export default function Households() {
   const { t } = useTranslation()
-  const { user: me } = useAuth()
+  const { user: me, memberships, refresh } = useAuth()
 
   const table = useServerTable<Household, HouseholdFilters>({
     endpoint: endpoints.households.root,
@@ -57,6 +58,10 @@ export default function Households() {
     setError(null)
     try {
       await api.del(endpoints.households.byId(household.id))
+      // A soft-deleted household drops out of `memberships_for`, so deleting one shrinks the
+      // caller's roles exactly as leaving does - and deleting your last one can take the
+      // management pages with it. Same reason as `leave()` in HouseholdEdit.
+      await refresh()
       toast.success(t('households.deleted'))
       table.reload()
     } catch (err) {
@@ -103,16 +108,20 @@ export default function Households() {
   }
 
   function rowActions(household: Household): ReactNode {
-    // Only the owner may edit/delete; other members get a read-only View.
     const owned = me?.id === household.admin_id
-    const label = owned ? t('households.editAction') : t('households.view')
+    // The pencil covers organisers too, not just the owner. They cannot rename or delete the
+    // household, but they DO set deputy and helper roles and manage its invitations there, and
+    // an eye labelled "View" said the page had nothing for them - a capability nobody can find
+    // is not shipped. Deleting stays `owned`, so the row's controls still differ.
+    const canOpen = owned || hasRoleIn(memberships, household.id, 'organiser')
+    const label = canOpen ? t('households.editAction') : t('households.view')
     return (
       <div className="flex items-center justify-end gap-0.5">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button asChild variant="ghost" size="icon-sm" aria-label={label}>
               <Link to={routes.households.edit.to(household.id)}>
-                {owned ? <SquarePenIcon /> : <EyeIcon />}
+                {canOpen ? <SquarePenIcon /> : <EyeIcon />}
               </Link>
             </Button>
           </TooltipTrigger>

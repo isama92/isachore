@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
 // and a "Done" button. Shared by the two list pages, which
 // differ only in what they put in `detail` and how they react to a completion:
 //
-// - Your Chores passes a due label and `exiting`, so the row plays an exit animation and
+// - My Chores passes a due label and `exiting`, so the row plays an exit animation and
 //   the rows below glide up: completing a chore either re-dates it or removes it.
 // - Unscheduled Chores passes a recency label and `busy`, because the row stays put and
 //   simply re-reads "Last done today" once the refetch lands.

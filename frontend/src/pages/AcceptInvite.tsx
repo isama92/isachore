@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button'
 
 export default function AcceptInvite() {
   const { t } = useTranslation()
-  const { user, loading: authLoading } = useAuth()
+  const { user, loading: authLoading, refresh } = useAuth()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const token = searchParams.get('token') ?? ''
@@ -50,6 +50,10 @@ export default function AcceptInvite() {
     setJoining(true)
     try {
       await api.post(endpoints.invitations.accept(token))
+      // Joining gives the caller a role, so the auth context has to re-read it. A helper's
+      // sidebar happens to match the no-household one, so nothing looks wrong today - which is
+      // precisely why this would break silently the day invitees land on anything else.
+      await refresh()
       toast.success(t('invite.joined', { household: info?.household_name ?? '' }))
       await navigate(routes.households.list)
     } catch (err) {

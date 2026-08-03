@@ -13,13 +13,15 @@ from app.api.v1.households import (
     load_household_read,
     remove_member,
     set_household_admin,
+    set_member_role,
 )
 from app.core.households import add_member
-from app.models import Household
+from app.models import Household, HouseholdRole
 from app.schemas import (
     HouseholdCreate,
     HouseholdListRead,
-    HouseholdMemberRead,
+    HouseholdMemberRoleRead,
+    HouseholdMemberUpdate,
     HouseholdUpdate,
     Page,
 )
@@ -73,12 +75,12 @@ async def create_household(
     payload: HouseholdCreate, admin: AdminUser, session: SessionDep
 ) -> HouseholdListRead:
     # admin_id is required, and it must reference a member, so the creating admin
-    # becomes the household's owner and first member. They (or another admin) can
-    # transfer ownership once real members are added.
+    # becomes the household's owner and first member (an organiser, as owners are).
+    # They (or another admin) can transfer ownership once real members are added.
     household = Household(name=payload.name, admin_id=admin.id)
     session.add(household)
     await session.flush()
-    await add_member(session, household.id, admin.id)
+    await add_member(session, household.id, admin.id, HouseholdRole.organiser)
     await session.commit()
     return await load_household_read(session, household.id)
 
@@ -119,7 +121,7 @@ async def restore_household(
     return await load_household_read(session, household.id)
 
 
-@router.get("/{household_id}/members", response_model=Page[HouseholdMemberRead])
+@router.get("/{household_id}/members", response_model=Page[HouseholdMemberRoleRead])
 async def list_household_members(
     household_id: int,
     _: AdminUser,
@@ -129,7 +131,7 @@ async def list_household_members(
     sort_by: MemberSortBy = "name",
     sort_dir: SortDir = "asc",
     name: Annotated[str | None, Query(max_length=255)] = None,
-) -> Page[HouseholdMemberRead]:
+) -> Page[HouseholdMemberRoleRead]:
     await _get_household_or_404(session, household_id)
     return await build_members_page(
         session,
@@ -140,6 +142,28 @@ async def list_household_members(
         sort_dir=sort_dir,
         name=name,
     )
+
+
+@router.patch("/{household_id}/members/{user_id}", response_model=HouseholdMemberRoleRead)
+async def update_household_member(
+    household_id: int,
+    user_id: int,
+    payload: HouseholdMemberUpdate,
+    _: AdminUser,
+    session: SessionDep,
+) -> HouseholdMemberRoleRead:
+    """Set a member's role from the admin surface. Any of the three, on any active member.
+
+    No organiser asymmetry here, unlike the user surface: that rule exists so an organiser
+    cannot grow the set of people who could demote *them*, which is a rule about a household
+    member and does not describe a site admin. An operator on this page can already transfer
+    the household and remove members, so withholding the organiser role would be arbitrary.
+
+    Resolves through `_get_household_or_404`, so it reaches soft-deleted households like the
+    other routes here - a role is worth fixing before restoring one.
+    """
+    household = await _get_household_or_404(session, household_id)
+    return await set_member_role(session, household, user_id, payload.role)
 
 
 @router.delete("/{household_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)

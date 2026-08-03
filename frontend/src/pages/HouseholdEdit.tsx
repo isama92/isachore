@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { LogOutIcon } from 'lucide-react'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
+import { hasRoleIn } from '../lib/permissions'
 import { endpoints } from '../lib/endpoints'
 import { routes } from '../lib/routes'
 import type { Household } from '../lib/types'
@@ -29,7 +30,7 @@ import { Label } from '@/components/ui/label'
 export default function HouseholdEdit() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { user: me } = useAuth()
+  const { user: me, memberships, refresh } = useAuth()
   const { id = '' } = useParams()
 
   const [household, setHousehold] = useState<Household | null>(null)
@@ -64,6 +65,11 @@ export default function HouseholdEdit() {
     setError(null)
     try {
       await api.post(endpoints.households.leave(id))
+      // Leaving drops a membership, so the caller's roles just shrank. Without this the
+      // sidebar keeps offering whatever that household granted: History and Chores render
+      // empty, and Tags 404s ("You are not a household organiser anywhere") with nothing on
+      // screen able to clear it, since no stored filter is at fault.
+      await refresh()
       toast.success(t('households.left'))
       await navigate(routes.households.list)
     } catch (err) {
@@ -71,8 +77,12 @@ export default function HouseholdEdit() {
     }
   }
 
-  // Only the owner may edit; other members see a read-only view.
+  // Three levels on this page, not two. The owner edits the household itself; an organiser
+  // shares the *people* work (setting deputy/helper roles, and invitations) but sees the
+  // household read-only; a deputy or helper sees all of it read-only. The viewer's role comes
+  // from the auth context, which already holds it - no extra request.
   const canManage = !!household && me?.id === household.admin_id
+  const isOrganiser = hasRoleIn(memberships, Number(id), 'organiser')
   const basePath = endpoints.households.byId(id)
 
   return (
@@ -104,7 +114,14 @@ export default function HouseholdEdit() {
             <h2 className="mb-4 font-display text-lg font-bold tracking-tight">
               {t('households.membersTitle')}
             </h2>
-            <HouseholdMembersTable basePath={basePath} adminId={household.admin_id} canManage />
+            {/* This branch IS the owner (canManage above is `me.id === household.admin_id`),
+                so every non-owner row gets all three roles. */}
+            <HouseholdMembersTable
+              basePath={basePath}
+              adminId={household.admin_id}
+              canManage
+              viewerUnrestricted
+            />
           </section>
           <section className="mt-10">
             <HouseholdInvitations basePath={basePath} />
@@ -151,12 +168,21 @@ export default function HouseholdEdit() {
             <h2 className="mb-4 font-display text-lg font-bold tracking-tight">
               {t('households.membersTitle')}
             </h2>
+            {/* `canManage={false}`: removing members stays the owner's. `viewerRole` is what
+                gives an organiser their deputy/helper Selects and leaves a deputy or helper
+                with badges - see assignableRoles. */}
             <HouseholdMembersTable
               basePath={basePath}
               adminId={household.admin_id}
               canManage={false}
+              viewerRole={isOrganiser ? 'organiser' : null}
             />
           </section>
+          {isOrganiser && (
+            <section className="mt-10">
+              <HouseholdInvitations basePath={basePath} />
+            </section>
+          )}
         </>
       )}
     </main>

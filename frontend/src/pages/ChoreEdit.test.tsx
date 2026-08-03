@@ -3,7 +3,7 @@ import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router'
 import ChoreEdit from './ChoreEdit'
-import { mockFetch, renderWithProviders } from '../test/utils'
+import { membershipsFor, mockFetch, renderWithProviders } from '../test/utils'
 import { makeChore, makeHouseholdMember, makeTag, makeUser } from '../test/fixtures'
 import type { Page } from '../lib/types'
 
@@ -32,7 +32,7 @@ const savedChore = makeChore({
   title: 'Scrub the tub',
   description: 'Old notes',
   household: { id: 4, name: 'Beach House' },
-  assignees: [makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' })],
+  assignees: [makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })],
   tags: [makeTag({ id: 3, name: 'deep-clean' })],
 })
 
@@ -60,7 +60,12 @@ function renderEdit() {
       <Route path="/chores/:id/edit" element={<ChoreEdit />} />
       <Route path="/chores" element={<div>chores-list</div>} />
     </Routes>,
-    { authValue: { user: me }, route: '/chores/7/edit' },
+    // The saved chore belongs to household 4, and ChoreEdit leaves for the list unless the
+    // caller organises *that* household - the route guard only proves they organise somewhere.
+    {
+      authValue: { user: me, memberships: membershipsFor('organiser', 4) },
+      route: '/chores/7/edit',
+    },
   )
 }
 
@@ -86,7 +91,7 @@ describe('ChoreEdit', () => {
       assignment_type: 'alphabetical',
       turn_length: 3,
       household: { id: 4, name: 'Beach House' },
-      assignees: [makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' })],
+      assignees: [makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })],
     })
     mockFetch([
       { path: '/api/v1/chores/7', method: 'GET', body: rotating },
@@ -186,7 +191,7 @@ describe('ChoreEdit', () => {
   })
 
   it('pre-fills the current assignee for a manual chore', async () => {
-    const jo = makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' })
+    const jo = makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })
     const manual = makeChore({
       id: 7,
       title: 'Dishes',
@@ -213,8 +218,8 @@ describe('ChoreEdit', () => {
   })
 
   it('lets an auto-rotating chore be handed to someone else, and says it is one turn', async () => {
-    const jo = makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' })
-    const sam = makeUser({ id: 3, first_name: 'Sam', last_name: 'Lee' })
+    const jo = makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })
+    const sam = makeHouseholdMember({ id: 3, first_name: 'Sam', last_name: 'Lee' })
     const rotating = makeChore({
       id: 7,
       title: 'Dishes',
@@ -286,7 +291,7 @@ describe('ChoreEdit', () => {
   })
 
   it('does not offer the turn hint for a manual chore, whose pick is not temporary', async () => {
-    const jo = makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' })
+    const jo = makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })
     mockFetch([
       {
         path: '/api/v1/chores/7',
@@ -347,10 +352,10 @@ describe('ChoreEdit', () => {
 })
 
 describe('clearing the current assignee', () => {
-  // makeUser for the chore's own assignees (ChoreRead embeds the full user), makeHouseholdMember
-  // for the members endpoint (data-minimised: no email). Same split as the tests above.
-  const jo = makeUser({ id: 2, first_name: 'Jo', last_name: 'Ng' })
-  const sam = makeUser({ id: 3, first_name: 'Sam', last_name: 'Lee' })
+  // makeHouseholdMember for both the chore's own assignees and the members endpoint: the
+  // chore read is data-minimised too now, so there is no longer a split to keep.
+  const jo = makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })
+  const sam = makeHouseholdMember({ id: 3, first_name: 'Sam', last_name: 'Lee' })
   const members = [
     makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' }),
     makeHouseholdMember({ id: 3, first_name: 'Sam', last_name: 'Lee' }),
@@ -480,5 +485,35 @@ describe('clearing the current assignee', () => {
     await user.click(screen.getByRole('button', { name: 'Save changes' }))
     await screen.findByText('chores-list')
     expect(patchBody(fetchMock)).toMatchObject({ clear_current_assignee: true })
+  })
+})
+
+describe('per-household role', () => {
+  it('leaves for the chores list when the chore is not in a household you organise', async () => {
+    // RequireRole only proves the caller organises *somewhere*, and reading a chore is open
+    // to every role, so this is the one check that can catch "organiser here, helper there".
+    // The chore lives in household 4; the caller organises 1 and is a helper in 4.
+    const fetchMock = mockFetch([{ path: '/api/v1/chores/7', method: 'GET', body: savedChore }])
+    renderWithProviders(
+      <Routes>
+        <Route path="/chores/:id/edit" element={<ChoreEdit />} />
+        <Route path="/chores" element={<div>chores-list</div>} />
+      </Routes>,
+      {
+        authValue: {
+          user: me,
+          memberships: [
+            { household_id: 1, role: 'organiser' },
+            { household_id: 4, role: 'helper' },
+          ],
+        },
+        route: '/chores/7/edit',
+      },
+    )
+
+    expect(await screen.findByText('chores-list')).toBeInTheDocument()
+    // It leaves before asking for that household's tags, which is organiser-only and would
+    // have failed the load with a message about nothing in particular.
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/v1/tags'))).toBe(false)
   })
 })

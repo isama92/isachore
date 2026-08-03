@@ -18,12 +18,18 @@ from app.core.chores import (
     next_slot_after,
     snap_to_slot,
 )
-from app.core.households import escape_like, get_member_household, member_household_ids
+from app.core.households import (
+    escape_like,
+    get_member_household,
+    member_household_ids,
+    require_role,
+)
 from app.models import (
     AssignmentType,
     Chore,
     ChoreOccurrence,
     Household,
+    HouseholdRole,
     OccurrenceStatus,
     RepeatPeriod,
     Tag,
@@ -134,12 +140,27 @@ async def _get_user_chore_or_404(session: SessionDep, user: User, chore_id: int)
     return chore
 
 
+async def _managed_chore_or_error(session: SessionDep, user: User, chore_id: int) -> Chore:
+    """A chore the caller may *change*: one they can see (404 otherwise) in a household
+    where they are an organiser (403 otherwise).
+
+    Reading a chore deliberately has no such gate (`get_chore` keeps
+    `_get_user_chore_or_404`): the description dialog on Home and Unscheduled fetches the
+    full chore, and helpers use it. Only writes need the role."""
+    chore = await _get_user_chore_or_404(session, user, chore_id)
+    await require_role(session, chore.household_id, user.id, HouseholdRole.organiser)
+    return chore
+
+
 async def _resolve_household_or_404(
     session: SessionDep, user: User, household_id: int
 ) -> Household:
+    """The household a new chore is being created in. Non-organisers get a 403 rather
+    than the 404 a non-member gets, since they can see the household perfectly well."""
     household = await get_member_household(session, user.id, household_id)
     if household is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Household not found")
+    await require_role(session, household.id, user.id, HouseholdRole.organiser)
     return household
 
 
@@ -453,10 +474,17 @@ async def list_chores(
     household_id: Annotated[int | None, Query(ge=1)] = None,
     title: Annotated[str | None, Query(max_length=255)] = None,
 ) -> Page[ChoreRead]:
-    # Scope to non-deleted chores in the user's active households; an optional
-    # household_id narrows to one of them (a non-member id yields an empty page),
-    # and an optional title does a case-insensitive substring match.
-    filters = [Chore.deleted_at.is_(None), Chore.household_id.in_(member_household_ids(user.id))]
+    # This is the chores *management* list, so it is scoped to non-deleted chores in the
+    # active households where the caller is an organiser - the ones they can actually act
+    # on. A household they are only a deputy or helper in yields nothing here while its
+    # chores stay fully visible on Home and Unscheduled, which is the intent: less data
+    # rather than a 403, since the list spans every household at once. An optional
+    # household_id narrows further (an id they cannot manage yields an empty page), and an
+    # optional title does a case-insensitive substring match.
+    filters = [
+        Chore.deleted_at.is_(None),
+        Chore.household_id.in_(member_household_ids(user.id, HouseholdRole.organiser)),
+    ]
     if household_id is not None:
         filters.append(Chore.household_id == household_id)
     if title and title.strip():
@@ -498,7 +526,7 @@ async def get_chore(chore_id: int, user: CurrentUser, session: SessionDep) -> Ch
 async def update_chore(
     chore_id: int, payload: ChoreUpdate, user: CurrentUser, session: SessionDep
 ) -> Chore:
-    chore = await _get_user_chore_or_404(session, user, chore_id)
+    chore = await _managed_chore_or_error(session, user, chore_id)
     # The household is fixed at creation; re-validate assignees/tags against it.
     assignees = await _resolve_assignees(session, chore.household, payload.assignee_ids)
     tags = await _resolve_tags(session, chore.household, payload.tag_ids)
@@ -536,7 +564,7 @@ async def update_chore(
 
 @router.delete("/{chore_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_chore(chore_id: int, user: CurrentUser, session: SessionDep) -> None:
-    chore = await _get_user_chore_or_404(session, user, chore_id)
+    chore = await _managed_chore_or_error(session, user, chore_id)
     chore.deleted_at = datetime.now(UTC)
     await session.commit()
 

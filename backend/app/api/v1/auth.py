@@ -15,6 +15,7 @@ from app.api.deps import (
 )
 from app.core.audit import record_event
 from app.core.crypto import crypto_configured
+from app.core.households import memberships_for
 from app.core.rate_limit import (
     clear_login_failures,
     clear_two_factor_failures,
@@ -41,6 +42,7 @@ from app.core.tokens import purge_expired_tokens, purge_expired_two_factor_chall
 from app.core.two_factor import consume_valid_code
 from app.models import AuditAction, AuthToken, TwoFactorChallenge, User, UserStatus
 from app.schemas import LoginRequest, LoginResponse, MeRead, TwoFactorVerifyRequest, UserRead
+from app.schemas.user import MembershipRead
 
 # Refused when a user has 2FA enabled but the server can't decrypt the seed
 # (APP_KEY unset/invalid). Fail closed: never let a 2FA account in on password
@@ -61,6 +63,23 @@ def _mint_session(response: Response, token: str, *, remember: bool) -> None:
         max_age=int(TOKEN_TTL.total_seconds()) if remember else None,
     )
     clear_auth_cookie(response, ADMIN_COOKIE_NAME)
+
+
+async def _me_read(session: SessionDep, user: User, *, impersonating: bool = False) -> MeRead:
+    """The signed-in user as every endpoint that hands one back reports them: with their
+    household memberships.
+
+    Login, the second 2FA step and /auth/me all go through this so a client can never hold
+    a session whose roles are missing. The sidebar decides what to show from `memberships`,
+    so a login response without them would render the minimal nav until the next reload -
+    and it is the login path, not the reload, that most users see first."""
+    memberships = [
+        MembershipRead(household_id=household_id, role=role)
+        for household_id, role in await memberships_for(session, user.id)
+    ]
+    return MeRead.model_validate(user).model_copy(
+        update={"impersonating": impersonating, "memberships": memberships}
+    )
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -143,17 +162,17 @@ async def login(
 
     await clear_login_failures(redis, email=email)
     _mint_session(response, token, remember=payload.remember)
-    return LoginResponse(user=UserRead.model_validate(user))
+    return LoginResponse(user=await _me_read(session, user))
 
 
-@router.post("/verify-2fa", response_model=UserRead)
+@router.post("/verify-2fa", response_model=MeRead)
 async def verify_two_factor(
     payload: TwoFactorVerifyRequest,
     session: SessionDep,
     redis: RedisDep,
     request: Request,
     response: Response,
-) -> User:
+) -> MeRead:
     """Second step of a two-step login: verify the TOTP (or recovery) code
     against the challenge parked by /login, then mint the real session."""
     challenge_token = request.cookies.get(TWO_FACTOR_COOKIE_NAME)
@@ -217,7 +236,7 @@ async def verify_two_factor(
     await clear_two_factor_failures(redis, user_id=user.id)
     _mint_session(response, token, remember=challenge.remember)
     clear_auth_cookie(response, TWO_FACTOR_COOKIE_NAME)
-    return user
+    return await _me_read(session, user)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -249,7 +268,7 @@ async def logout(request: Request, session: SessionDep, response: Response) -> N
 @router.get("/me", response_model=MeRead)
 async def me(request: Request, user: CurrentUser, session: SessionDep) -> MeRead:
     impersonating = await get_impersonator(request, session) is not None
-    return MeRead.model_validate(user).model_copy(update={"impersonating": impersonating})
+    return await _me_read(session, user, impersonating=impersonating)
 
 
 @router.post("/stop-impersonating", response_model=UserRead)

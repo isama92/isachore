@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
 import type { ColumnDef } from '@tanstack/react-table'
 import { SquarePenIcon, Trash2Icon } from 'lucide-react'
+import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
+import { householdIdsWithRole } from '../lib/permissions'
 import { endpoints } from '../lib/endpoints'
 import { routes } from '../lib/routes'
 import type { Household, Page, Tag } from '../lib/types'
@@ -46,6 +48,9 @@ export default function Tags() {
     initial: { sortBy: 'name', sortDir: 'asc', pageSize: 10, filters: { household_id: '' } },
   })
 
+  const { memberships } = useAuth()
+  // Memoised so it is a stable dependency of the load effect below.
+  const organised = useMemo(() => householdIdsWithRole(memberships, 'organiser'), [memberships])
   const [households, setHouseholds] = useState<Household[]>([])
   const [householdsLoaded, setHouseholdsLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -59,22 +64,24 @@ export default function Tags() {
     filtersRef.current = table.filters
   })
 
-  // Households for the selector (and to know the default the backend falls to).
+  // Households for the selector (and to know the default the backend falls to), narrowed to
+  // the ones the caller organises: tags are organiser-only, so the others would 404.
   useEffect(() => {
     let cancelled = false
     api
       .get<Page<Household>>(`${endpoints.households.root}?sort_by=id&sort_dir=asc&page_size=100`)
       .then((page) => {
         if (cancelled) return
-        setHouseholds(page.items)
+        const mine = page.items.filter((h) => organised.has(h.id))
+        setHouseholds(mine)
         // Pruning a dead household_id matters more here than on Chores or History,
         // which merely return an empty page for one: list_tags answers 404, the hook
         // only forgets stored settings on 400/422, and the selector is hidden when
         // the user has fewer than two households. A remembered id for a household
-        // since left would otherwise fail this page on every visit with nothing on
-        // screen to clear it.
+        // since left - or since demoted out of organising - would otherwise fail this
+        // page on every visit with nothing on screen to clear it.
         const active = filtersRef.current.household_id
-        if (active !== '' && !page.items.some((h) => String(h.id) === active)) {
+        if (active !== '' && !mine.some((h) => String(h.id) === active)) {
           setFilterRef.current('household_id', '')
         }
       })
@@ -87,7 +94,7 @@ export default function Tags() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [organised])
 
   async function remove(tag: Tag) {
     setError(null)

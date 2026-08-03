@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { toast } from 'sonner'
 import { api, setUnauthorizedHandler } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
-import type { LoginResponse, Me, User } from '../lib/types'
+import type { LoginResponse, Me, Membership, User } from '../lib/types'
 import { claimTableSettings, clearTableSettings } from '../components/data-table/useServerTable'
 import { useTheme } from '../theme/useTheme'
 import i18n, { changeLanguage } from '../i18n/i18n'
@@ -11,6 +11,13 @@ import { AuthContext } from './context'
 export default function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [impersonating, setImpersonating] = useState(false)
+  // Household roles, adopted wherever a user is. Every response that carries the signed-in
+  // user carries these too (login and verify-2fa included), so there is no path that sets
+  // one without the other and leaves the sidebar guessing. The `?? []` where they are read
+  // is for version skew rather than for the type: this app installs as a PWA, so a
+  // service-worker-cached shell can outlive the API build it was written against, and an
+  // absent list should cost the user some nav items rather than a blank screen.
+  const [memberships, setMemberships] = useState<Membership[]>([])
   const [loading, setLoading] = useState(true)
   const { setTheme, setAccent } = useTheme()
   // Mirrors `user` for the 401 handler so it can read the live session without
@@ -47,12 +54,14 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         claimTableSettings(me.id)
         setUser(me)
         setImpersonating(me.impersonating)
+        setMemberships(me.memberships ?? [])
         syncAppearance(me)
       })
       .catch(() => {
         if (cancelled) return
         setUser(null)
         setImpersonating(false)
+        setMemberships([])
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -79,6 +88,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     if (!userRef.current) return
     setUser(null)
     setImpersonating(false)
+    setMemberships([])
     // Same reason as logout: this is a session ending, and on a shared device it is
     // the likeliest way one ends, since it takes no action from the user at all.
     clearTableSettings()
@@ -96,10 +106,23 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       claimTableSettings(me.id)
       setUser(me)
       setImpersonating(me.impersonating)
+      setMemberships(me.memberships ?? [])
       syncAppearance(me)
     } catch {
-      setUser(null)
-      setImpersonating(false)
+      // Deliberately clears nothing. A 401 here is already handled centrally: `lib/api.ts`
+      // calls the handler registered above, which clears the session, forgets the table
+      // settings and explains itself with a toast - strictly more than this could do.
+      //
+      // Anything else means only that re-reading the roles failed: a dropped connection, or a
+      // 502 from the proxy mid-deploy. The cookie is still good, and every caller of refresh()
+      // is on a path whose actual work already succeeded (a household created, an invitation
+      // accepted, one left or deleted), so signing the user out would be a self-inflicted
+      // logout as the reward for a success. Safe to keep the previous copy because memberships
+      // are advisory - the API re-checks every request, so a stale one can only show or hide a
+      // nav item until the next /auth/me.
+      //
+      // Note the mount effect above DOES clear on failure, and must: there, not knowing who
+      // the user is IS the answer, and the logged-out probe is the common case.
     }
   }, [syncAppearance])
 
@@ -114,6 +137,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       claimTableSettings(res.user.id)
       setUser(res.user)
       setImpersonating(false)
+      setMemberships(res.user.memberships ?? [])
       syncAppearance(res.user)
       return { twoFactorRequired: false }
     },
@@ -122,10 +146,11 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
 
   const verifyTwoFactor = useCallback(
     async (code: string) => {
-      const me = await api.post<User>(endpoints.auth.verifyTwoFactor, { code })
+      const me = await api.post<Me>(endpoints.auth.verifyTwoFactor, { code })
       claimTableSettings(me.id)
       setUser(me)
       setImpersonating(false)
+      setMemberships(me.memberships ?? [])
       syncAppearance(me)
     },
     [syncAppearance],
@@ -135,6 +160,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     await api.post(endpoints.auth.logout)
     setUser(null)
     setImpersonating(false)
+    setMemberships([])
     // Remembered table filters name colleagues and households, so they must not
     // outlive the session on a shared device. Theme and language deliberately do
     // survive: they are this browser's preferences, not one account's data.
@@ -142,8 +168,8 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const value = useMemo(
-    () => ({ user, impersonating, loading, login, verifyTwoFactor, logout, refresh }),
-    [user, impersonating, loading, login, verifyTwoFactor, logout, refresh],
+    () => ({ user, impersonating, memberships, loading, login, verifyTwoFactor, logout, refresh }),
+    [user, impersonating, memberships, loading, login, verifyTwoFactor, logout, refresh],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

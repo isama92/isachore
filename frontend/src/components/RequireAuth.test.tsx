@@ -44,6 +44,6 @@ describe('RequireAuth', () => {
     expect(screen.getByRole('button', { name: 'Toggle sidebar' })).toBeInTheDocument()
     // The sidebar shows the identity block and primary nav.
     expect(screen.getByText('Alex Member')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Your Chores' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'My Chores' })).toBeInTheDocument()
   })
 })

@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate, useParams } from 'react-router'
 import { toast } from 'sonner'
+import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
+import { hasRoleIn } from '../lib/permissions'
 import { endpoints } from '../lib/endpoints'
 import { routes } from '../lib/routes'
 import { ChoreForm, type ChoreSubmit } from '@/components/chores/ChoreForm'
@@ -13,6 +15,7 @@ export default function ChoreEdit() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { id = '' } = useParams()
+  const { memberships } = useAuth()
   const [chore, setChore] = useState<Chore | null>(null)
   const [members, setMembers] = useState<HouseholdMember[]>([])
   const [tags, setTags] = useState<Tag[]>([])
@@ -24,8 +27,16 @@ export default function ChoreEdit() {
     let cancelled = false
     api
       .get<Chore>(endpoints.chores.byId(id))
-      .then((data) =>
-        Promise.all([
+      .then((data) => {
+        // RequireRole only proves the caller organises *somewhere*, and reading a chore is
+        // open to every role (the description dialog needs it), so the chore in hand may
+        // belong to a household where they are only a deputy or helper. Leave before
+        // fetching that household's tags, which is organiser-only and would fail the load
+        // with a message about nothing in particular.
+        if (!hasRoleIn(memberships, data.household.id, 'organiser')) {
+          return navigate(routes.chores.list, { replace: true })
+        }
+        return Promise.all([
           api.get<Page<HouseholdMember>>(
             `${endpoints.households.members(data.household.id)}?page_size=100`,
           ),
@@ -38,8 +49,8 @@ export default function ChoreEdit() {
           setChore(data)
           setMembers(membersPage.items)
           setTags(tagsPage.items)
-        }),
-      )
+        })
+      })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof ApiError ? err.message : t('choreEdit.loadError'))
       })
@@ -49,7 +60,7 @@ export default function ChoreEdit() {
     return () => {
       cancelled = true
     }
-  }, [id, t])
+  }, [id, t, memberships, navigate])
 
   async function handleSubmit(values: ChoreSubmit) {
     await api.patch<Chore>(endpoints.chores.byId(id), values)

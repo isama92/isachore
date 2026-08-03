@@ -18,6 +18,7 @@ from app.core import security
 from app.core.assignment import initial_assignee
 from app.core.chores import RecurrenceRule, first_occurrence
 from app.core.config import settings
+from app.core.households import add_member
 from app.core.security import generate_token, hash_token
 from app.db.base import Base
 from app.db.redis import get_redis
@@ -29,6 +30,7 @@ from app.models import (
     Chore,
     ChoreOccurrence,
     Household,
+    HouseholdRole,
     OccurrenceStatus,
     RepeatPeriod,
     Tag,
@@ -233,7 +235,14 @@ def make_household(db_session: AsyncSession) -> Callable[..., Awaitable[Househol
         members: list[User] | None = None,
         admin: User | None = None,
         deleted_at: datetime | None = None,
+        roles: dict[int, HouseholdRole] | None = None,
     ) -> Household:
+        # Every member is an organiser unless `roles` (keyed by user id) says otherwise.
+        # That default is deliberate and load-bearing: before roles existed, membership
+        # granted everything, so it is what keeps the chores / tags / stats / history
+        # suites testing the behaviour they were written for instead of quietly becoming
+        # several hundred assertions about 403s. Tests about a role pass `roles`.
+        #
         # admin_id is NOT NULL. Default the owner to the given admin, else the
         # first member; with neither, mint a throwaway owner (not added as a
         # member) so member-less fixtures keep their member_count of 0.
@@ -255,9 +264,18 @@ def make_household(db_session: AsyncSession) -> Callable[..., Awaitable[Househol
             await db_session.flush()
             admin_id = owner.id
         household = Household(name=name, admin_id=admin_id, deleted_at=deleted_at)
-        if members:
-            household.members.extend(members)
         db_session.add(household)
+        await db_session.flush()  # assigns household.id, which add_member needs
+        # Not `household.members.extend(...)`: the relationship writes the two foreign keys
+        # only, so every row would land on the role column's helper server_default and the
+        # `roles` argument above would silently do nothing.
+        for member in members or []:
+            await add_member(
+                db_session,
+                household.id,
+                member.id,
+                (roles or {}).get(member.id, HouseholdRole.organiser),
+            )
         await db_session.commit()
         await db_session.refresh(household)
         return household

@@ -98,7 +98,7 @@ describe('AcceptInvite', () => {
         return jsonBody(undefined, 204)
       },
     })
-    renderWithProviders(
+    const { value } = renderWithProviders(
       <Routes>
         <Route path="/invite" element={<AcceptInvite />} />
         <Route path="/households" element={<div>households-list</div>} />
@@ -112,6 +112,10 @@ describe('AcceptInvite', () => {
     expect(await screen.findByText('households-list')).toBeInTheDocument()
     expect(accepted).toContain('/api/v1/invitations/abc/accept')
     expect(fetchMock).toHaveBeenCalled()
+    // Joining grants a role, which the sidebar and RequireRole read from the auth context.
+    // A helper's nav happens to match the no-household nav, so nothing looks wrong today -
+    // which is exactly why this needs pinning rather than eyeballing.
+    expect(value.refresh).toHaveBeenCalled()
   })
 
   it('surfaces an already-a-member conflict', async () => {

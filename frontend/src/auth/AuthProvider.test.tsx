@@ -8,15 +8,19 @@ import { api } from '../lib/api'
 import ThemeProvider from '../theme/ThemeProvider'
 import i18n from '../i18n/i18n'
 import { jsonResponse, mockFetch } from '../test/utils'
-import { makeMe, makeUser } from '../test/fixtures'
+import { makeMe } from '../test/fixtures'
 
 function Harness() {
-  const { user, impersonating, loading, login, verifyTwoFactor, logout, refresh } = useAuth()
+  const { user, impersonating, memberships, loading, login, verifyTwoFactor, logout, refresh } =
+    useAuth()
   return (
     <div>
       <span data-testid="loading">{String(loading)}</span>
       <span data-testid="user">{user ? user.email : 'none'}</span>
       <span data-testid="impersonating">{String(impersonating)}</span>
+      <span data-testid="memberships">
+        {memberships.map((m) => `${m.household_id}:${m.role}`).join(',') || 'none'}
+      </span>
       <button onClick={() => void login('a@example.com', 'password12345', true)}>login</button>
       <button onClick={() => void verifyTwoFactor('123456')}>verify</button>
       <button onClick={() => void logout()}>logout</button>
@@ -80,7 +84,7 @@ describe('AuthProvider', () => {
       {
         path: '/api/v1/auth/login',
         method: 'POST',
-        body: { two_factor_required: false, user: makeUser({ email: 'a@example.com' }) },
+        body: { two_factor_required: false, user: makeMe({ email: 'a@example.com' }) },
       },
     ])
     renderProvider()
@@ -114,7 +118,7 @@ describe('AuthProvider', () => {
       {
         path: '/api/v1/auth/verify-2fa',
         method: 'POST',
-        body: makeUser({ email: 'a@example.com' }),
+        body: makeMe({ email: 'a@example.com' }),
       },
     ])
     renderProvider()
@@ -317,7 +321,7 @@ describe('AuthProvider', () => {
       {
         path: '/api/v1/auth/login',
         method: 'POST',
-        body: { two_factor_required: false, user: makeUser({ id: 99, email: 'b@example.com' }) },
+        body: { two_factor_required: false, user: makeMe({ id: 99, email: 'b@example.com' }) },
       },
     ])
     localStorage.setItem('isachore-table-admin-users', '{"filters":{"email":"someone@x.com"}}')
@@ -395,5 +399,114 @@ describe('AuthProvider', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(401, { detail: 'x' })))
     await expect(api.get('/api/v1/thing')).rejects.toMatchObject({ status: 401 })
     expect(toastSpy).not.toHaveBeenCalled()
+  })
+
+  it('adopts the household roles from /auth/me, and drops them on logout', async () => {
+    // The sidebar reads these, so a session that carries a user but no roles renders the
+    // minimal nav - and a logout that leaves them behind would light it up for nobody.
+    mockFetch([
+      {
+        path: '/api/v1/auth/me',
+        body: makeMe({
+          email: 'a@example.com',
+          memberships: [
+            { household_id: 1, role: 'organiser' },
+            { household_id: 2, role: 'helper' },
+          ],
+        }),
+      },
+      { path: '/api/v1/auth/logout', method: 'POST', status: 204 },
+    ])
+    renderProvider()
+
+    await waitFor(() =>
+      expect(screen.getByTestId('memberships')).toHaveTextContent('1:organiser,2:helper'),
+    )
+
+    await userEvent.click(screen.getByText('logout'))
+    await waitFor(() => expect(screen.getByTestId('memberships')).toHaveTextContent('none'))
+  })
+
+  it('takes the roles from the login response, without a second /auth/me', async () => {
+    // Login sets the auth state directly, so if the roles did not ride along the first
+    // screen after signing in would show the minimal nav until the next reload.
+    const fetchMock = mockFetch([
+      { path: '/api/v1/auth/me', status: 401, body: { detail: 'Not authenticated' } },
+      {
+        path: '/api/v1/auth/login',
+        method: 'POST',
+        body: {
+          two_factor_required: false,
+          user: makeMe({
+            email: 'a@example.com',
+            memberships: [{ household_id: 3, role: 'deputy' }],
+          }),
+        },
+      },
+    ])
+    renderProvider()
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'))
+    const meCallsBefore = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes('/auth/me'),
+    ).length
+
+    await userEvent.click(screen.getByText('login'))
+
+    await waitFor(() => expect(screen.getByTestId('memberships')).toHaveTextContent('3:deputy'))
+    const meCallsAfter = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes('/auth/me'),
+    ).length
+    expect(meCallsAfter).toBe(meCallsBefore)
+  })
+
+  it('keeps the session when refresh fails for any reason other than 401', async () => {
+    // The four mutation paths that call refresh() do so AFTER their own work succeeded, so a
+    // dropped connection or a 502 from the proxy mid-deploy must not cost the user their
+    // session: the cookie is still good, and memberships are advisory. Before this was fixed
+    // the blanket catch signed them out client-side and RequireAuth bounced them to login.
+    let failNext = false
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/auth/me')) {
+        if (failNext) return jsonResponse(502, { detail: 'Bad Gateway' })
+        return jsonResponse(200, makeMe({ email: 'a@example.com' }))
+      }
+      return jsonResponse(404, {})
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderProvider()
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('a@example.com'))
+
+    failNext = true
+    await userEvent.click(screen.getByText('refresh'))
+
+    // Still signed in, and the memberships it already had are untouched.
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.filter(([u]) => String(u).includes('/auth/me'))).toHaveLength(2),
+    )
+    expect(screen.getByTestId('user')).toHaveTextContent('a@example.com')
+    expect(screen.getByTestId('memberships')).toHaveTextContent('1:organiser')
+  })
+
+  it('still ends the session when refresh comes back 401', async () => {
+    // The other half: a genuinely expired session must not be kept alive by the change above.
+    // It is the central 401 handler in lib/api.ts that clears here, not refresh's catch, which
+    // is why that catch can afford to do nothing.
+    let expired = false
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/auth/me')) {
+        if (expired) return jsonResponse(401, { detail: 'Not authenticated' })
+        return jsonResponse(200, makeMe({ email: 'a@example.com' }))
+      }
+      return jsonResponse(404, {})
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderProvider()
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('a@example.com'))
+
+    expired = true
+    await userEvent.click(screen.getByText('refresh'))
+
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('none'))
+    expect(screen.getByTestId('memberships')).toHaveTextContent('none')
   })
 })

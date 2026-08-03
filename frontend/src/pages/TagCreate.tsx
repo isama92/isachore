@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
+import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
+import { householdIdsWithRole } from '../lib/permissions'
 import { endpoints } from '../lib/endpoints'
 import { routes } from '../lib/routes'
 import { TagForm } from '@/components/tags/TagForm'
@@ -19,20 +21,25 @@ import type { Household, Page, Tag } from '../lib/types'
 export default function TagCreate() {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const { memberships } = useAuth()
+  // Memoised so it is a stable dependency of the load effect below.
+  const organised = useMemo(() => householdIdsWithRole(memberships, 'organiser'), [memberships])
   const [households, setHouseholds] = useState<Household[]>([])
   const [householdId, setHouseholdId] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Load the user's households once; default the tag to the lowest-id one.
+  // Load the user's households once, narrowed to the ones they organise (tags are
+  // organiser-only, so anything else would 403 on submit); default to the lowest-id one.
   useEffect(() => {
     let cancelled = false
     api
       .get<Page<Household>>(`${endpoints.households.root}?sort_by=id&sort_dir=asc&page_size=100`)
       .then((page) => {
         if (cancelled) return
-        setHouseholds(page.items)
-        setHouseholdId(page.items[0]?.id ?? null)
+        const mine = page.items.filter((h) => organised.has(h.id))
+        setHouseholds(mine)
+        setHouseholdId(mine[0]?.id ?? null)
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof ApiError ? err.message : t('tagCreate.loadError'))
@@ -43,7 +50,7 @@ export default function TagCreate() {
     return () => {
       cancelled = true
     }
-  }, [t])
+  }, [t, organised])
 
   async function handleSubmit(name: string, color: string) {
     await api.post<Tag>(endpoints.tags.root, { household_id: householdId, name, color })

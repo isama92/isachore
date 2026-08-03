@@ -4,7 +4,7 @@ from sqlalchemy.orm import joinedload
 
 from app.api.deps import CurrentUser, SessionDep
 from app.core.households import add_member, is_active_member
-from app.models import HouseholdInvitation, HouseholdInvitationStatus
+from app.models import HouseholdInvitation, HouseholdInvitationStatus, HouseholdRole
 from app.schemas import HouseholdInvitationInfo, HouseholdMemberRead
 
 router = APIRouter()
@@ -63,7 +63,10 @@ async def accept_invitation(token: str, user: CurrentUser, session: SessionDep) 
             status_code=status.HTTP_409_CONFLICT,
             detail="You are already a member of this household",
         )
-    await add_member(session, invitation.household_id, user.id)
+    # New members start as helpers: they can tick chores off and nothing else until the
+    # household admin promotes them. Least privilege, because an invite link says nothing
+    # about whether the person on the other end is a housemate or somebody's kid.
+    await add_member(session, invitation.household_id, user.id, HouseholdRole.helper)
     # Flip to accepted (not deleted): keeps the invite in the owner's list as a
     # record and makes it single-use (resolve now requires pending).
     invitation.status = HouseholdInvitationStatus.accepted

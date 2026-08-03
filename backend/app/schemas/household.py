@@ -2,6 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.household import HouseholdRole
 from app.models.household_invitation import HouseholdInvitationStatus
 
 
@@ -13,6 +14,27 @@ class HouseholdMemberRead(BaseModel):
     id: int
     first_name: str
     last_name: str
+
+
+class HouseholdMemberRoleRead(HouseholdMemberRead):
+    """A member as the household's own members table sees them: with their role.
+
+    Deliberately a subclass used by the two members endpoints alone. `role` lives on the
+    `household_members` association row, and the six other payloads built from
+    `HouseholdMemberRead` (assignees on Home, Unscheduled and a chore read, History's
+    `completed_by`, the filter options, an invitation's `invited_by`) have no membership in
+    hand to read one from - putting it on the base would either leak a role into all of them
+    or fail validation there."""
+
+    role: HouseholdRole
+
+
+class HouseholdMemberUpdate(BaseModel):
+    """Body of PATCH /households/{id}/members/{user_id}. Role is the only mutable
+    thing about a membership, and an unknown one is a 422 rather than a stored value
+    the permission checks would silently read as "no role"."""
+
+    role: HouseholdRole
 
 
 class HouseholdListRead(BaseModel):
@@ -27,8 +49,8 @@ class HouseholdListRead(BaseModel):
 
     id: int
     name: str
-    # The owner (household admin). Only this member may edit the household and
-    # manage its members on the user surface.
+    # The owner (household admin). Only this member may edit or delete the household,
+    # remove members and transfer it; setting roles and inviting are organiser-level.
     admin_id: int
     created_at: datetime
     deleted_at: datetime | None

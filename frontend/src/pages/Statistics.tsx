@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, XAxis, YAxis } from 'recharts'
+import { useAuth } from '../auth/useAuth'
 import { api } from '../lib/api'
+import { householdIdsWithRole } from '../lib/permissions'
 import { endpoints } from '../lib/endpoints'
 import { formatDate } from '../lib/chores'
 import { fullName } from '../lib/user'
@@ -113,6 +115,16 @@ export default function Statistics() {
   const [range, setRange] = useState<StatsRange>('30d')
   const [filters, setFilters] = useState<Filters>({ user_id: '', household_id: '' })
   const [data, setData] = useState<StatsData | null>(null)
+  const { memberships } = useAuth()
+  // The households this page has data for. /completions/filters is deliberately NOT
+  // role-narrowed (it also feeds the Home and Unscheduled filter bars, which every role
+  // uses), so the narrowing happens here instead - otherwise the picker would offer a
+  // household the caller is only a helper in and selecting it would come back empty.
+  //
+  // The "Completed by" picker keeps that dead end: it still lists members of helper-only
+  // households, and the payload carries no member -> household association to narrow it by.
+  // Nothing leaks (those names are already on Home), but do not read this as complete.
+  const visible = useMemo(() => householdIdsWithRole(memberships, 'deputy'), [memberships])
   const [options, setOptions] = useState<HistoryFilterOptions>(EMPTY_OPTIONS)
   const [error, setError] = useState<string | null>(null)
 
@@ -123,7 +135,9 @@ export default function Statistics() {
     api
       .get<HistoryFilterOptions>(endpoints.completions.filters)
       .then((d) => {
-        if (!cancelled) setOptions(d)
+        if (!cancelled) {
+          setOptions({ ...d, households: d.households.filter((h) => visible.has(h.id)) })
+        }
       })
       .catch(() => {
         if (!cancelled) setOptions(EMPTY_OPTIONS)
@@ -131,7 +145,7 @@ export default function Statistics() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [visible])
 
   // The aggregated stats, refetched whenever the range or a filter changes.
   useEffect(() => {

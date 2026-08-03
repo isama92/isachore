@@ -7,7 +7,7 @@ from sqlalchemy import select
 from app.api.deps import CurrentUser, SessionDep
 from app.core.chores import DueStatus, days_late, days_until_due, due_status
 from app.core.households import member_household_ids
-from app.models import Chore, ChoreOccurrence, OccurrenceStatus, RepeatPeriod, User
+from app.models import Chore, ChoreOccurrence, HouseholdRole, OccurrenceStatus, RepeatPeriod, User
 from app.schemas.stats import (
     CompletionBucket,
     PersonStat,
@@ -39,14 +39,17 @@ async def get_stats(
     household_id: Annotated[int | None, Query(ge=1)] = None,
     user_id: Annotated[int | None, Query(ge=1)] = None,
 ) -> StatsRead:
-    """Aggregated completion and overdue statistics across the user's active
-    households (so housemates' work is included), for the Statistics page.
+    """Aggregated completion and overdue statistics across the active households where the
+    caller is at least a deputy (so housemates' work is included), for the Statistics page.
 
     `range` (7d/30d/90d) windows the completion-based metrics; the overdue snapshot
     (`status_breakdown`, `currently_overdue`, `active_chores`) is always live. Optional
     `household_id` narrows to one household; `user_id` narrows completions to that
     person's credited completions and the live snapshot to occurrences currently on
-    their plate. A household/person the user can't see just yields empty scope.
+    their plate. A household/person the user can't see just yields empty scope, and so does a
+    household they are only a helper in - a helper is not shown other people's numbers, and
+    the page spans every household at once, so narrowing the scope is what enforces that
+    rather than a 403.
 
     Unscheduled chores have no deadline, so they are counted where the question is "how much
     got done, and by whom" (`completed_in_range`, `completions_over_time`, `per_person`) and
@@ -65,7 +68,7 @@ async def get_stats(
     weekly = range_days > WEEKLY_ABOVE_DAYS
     granularity = "week" if weekly else "day"
 
-    scope = Chore.household_id.in_(member_household_ids(user.id))
+    scope = Chore.household_id.in_(member_household_ids(user.id, HouseholdRole.deputy))
 
     # --- Live snapshot: the open occurrences (range-independent) ---
     # Soft-deleted chores drop out here (nothing left to do), matching the Home scope;

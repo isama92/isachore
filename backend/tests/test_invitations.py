@@ -10,6 +10,7 @@ from app.models import (
     Household,
     HouseholdInvitation,
     HouseholdInvitationStatus,
+    HouseholdRole,
     User,
     household_members,
 )
@@ -86,12 +87,41 @@ async def test_owner_creates_invitation(
     assert (expires_at.minute, expires_at.second, expires_at.microsecond) == (0, 0, 0)
 
 
-async def test_non_owner_cannot_create_invitation(
+async def test_cap_message_names_the_household_not_the_caller(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    """The 409 detail is rendered verbatim by `HouseholdInvitations`, and inviting is no longer
+    one person's job: the 5 pending invites are as likely to be somebody else's, so "you already
+    have" would point an organiser at invitations they never made."""
+    owner = await make_user(email="owner@example.com")
+    organiser = await make_user(email="organiser@example.com")
+    household = await make_household(name="Flat 3B", members=[owner, organiser])
+    # All five minted by the OWNER, so the caller below genuinely has none of their own.
+    for _ in range(5):
+        await _make_invitation(db_session, household, owner)
+    client = await auth_client(organiser)
+
+    resp = await client.post(f"/api/v1/households/{household.id}/invitations")
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == (
+        "This household already has 5 pending invitations; revoke one first."
+    )
+
+
+async def test_below_organiser_cannot_create_invitation(
     make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
 ) -> None:
     alice = await make_user(email="alice@example.com")
     bob = await make_user(email="bob@example.com")
-    household = await make_household(name="Flat 3B", members=[alice, bob])
+    # Bob is a helper: inviting is open to the owner and to organisers, and
+    # make_household defaults members to organiser, so the role has to be said out loud
+    # or this would pass for the wrong reason.
+    household = await make_household(
+        name="Flat 3B", members=[alice, bob], roles={bob.id: HouseholdRole.helper}
+    )
     client = await auth_client(bob)
 
     resp = await client.post(f"/api/v1/households/{household.id}/invitations")
@@ -180,19 +210,24 @@ async def test_delete_invitation_missing_404(
     assert resp.status_code == 404
 
 
-async def test_list_invitations_non_owner_forbidden(
+async def test_list_invitations_below_organiser_forbidden(
     make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
 ) -> None:
     alice = await make_user(email="alice@example.com")
     bob = await make_user(email="bob@example.com")
-    household = await make_household(name="Flat 3B", members=[alice, bob])
+    # Bob is a helper: inviting is open to the owner and to organisers, and
+    # make_household defaults members to organiser, so the role has to be said out loud
+    # or this would pass for the wrong reason.
+    household = await make_household(
+        name="Flat 3B", members=[alice, bob], roles={bob.id: HouseholdRole.helper}
+    )
     client = await auth_client(bob)
 
     resp = await client.get(f"/api/v1/households/{household.id}/invitations")
     assert resp.status_code == 403
 
 
-# --- owner: revoke ------------------------------------------------------
+# --- revoke (owner and organisers) --------------------------------------
 
 
 async def test_revoke_pending_invitation(
@@ -231,7 +266,7 @@ async def test_revoke_non_pending_rejected(
         assert resp.status_code == 409, kwargs
 
 
-async def test_revoke_non_owner_forbidden(
+async def test_revoke_below_organiser_forbidden(
     make_user: MakeUser,
     make_household: MakeHousehold,
     auth_client: AuthClient,
@@ -239,7 +274,12 @@ async def test_revoke_non_owner_forbidden(
 ) -> None:
     alice = await make_user(email="alice@example.com")
     bob = await make_user(email="bob@example.com")
-    household = await make_household(name="Flat 3B", members=[alice, bob])
+    # Bob is a helper: inviting is open to the owner and to organisers, and
+    # make_household defaults members to organiser, so the role has to be said out loud
+    # or this would pass for the wrong reason.
+    household = await make_household(
+        name="Flat 3B", members=[alice, bob], roles={bob.id: HouseholdRole.helper}
+    )
     token = await _make_invitation(db_session, household, alice)
     iid = await _invitation_id(db_session, token)
     client = await auth_client(bob)
@@ -500,7 +540,7 @@ async def test_delete_invitation_foreign_household_404(
     assert survived == 1
 
 
-async def test_delete_invitation_non_owner_forbidden(
+async def test_delete_invitation_below_organiser_forbidden(
     make_user: MakeUser,
     make_household: MakeHousehold,
     auth_client: AuthClient,
@@ -508,7 +548,12 @@ async def test_delete_invitation_non_owner_forbidden(
 ) -> None:
     alice = await make_user(email="alice@example.com")
     bob = await make_user(email="bob@example.com")
-    household = await make_household(name="Flat 3B", members=[alice, bob])
+    # Bob is a helper: inviting is open to the owner and to organisers, and
+    # make_household defaults members to organiser, so the role has to be said out loud
+    # or this would pass for the wrong reason.
+    household = await make_household(
+        name="Flat 3B", members=[alice, bob], roles={bob.id: HouseholdRole.helper}
+    )
     await _make_invitation(db_session, household, alice)
     invitation_id = await db_session.scalar(select(HouseholdInvitation.id))
     client = await auth_client(bob)

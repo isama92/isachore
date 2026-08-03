@@ -90,7 +90,9 @@ async def test_list_tags_without_household(make_user: MakeUser, auth_client: Aut
 
     resp = await client.get("/api/v1/tags")
     assert resp.status_code == 404
-    assert resp.json()["detail"] == "You are not a member of any household"
+    # The fallback is narrowed to organised households, so it reports the role rather
+    # than bare membership. True of a member of nothing too: they organise nowhere.
+    assert resp.json()["detail"] == "You are not a household organiser anywhere"
 
 
 async def test_list_tags_soft_deleted_only_household(
@@ -106,7 +108,7 @@ async def test_list_tags_soft_deleted_only_household(
 
     resp = await client.get("/api/v1/tags")
     assert resp.status_code == 404
-    assert resp.json()["detail"] == "You are not a member of any household"
+    assert resp.json()["detail"] == "You are not a household organiser anywhere"
 
 
 async def test_list_tags_requires_auth(client: AsyncClient) -> None:

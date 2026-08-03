@@ -3,7 +3,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import History from './History'
-import { renderWithProviders } from '../test/utils'
+import { renderWithProviders, membershipsFor } from '../test/utils'
 import { makeHistoryEntry, makeHouseholdMember, makeUser } from '../test/fixtures'
 import type { HistoryEntry, HistoryFilterOptions } from '../lib/types'
 
@@ -162,7 +162,9 @@ describe('History', () => {
         members: [me],
       },
     })
-    renderWithProviders(<History />)
+    renderWithProviders(<History />, {
+      authValue: { memberships: membershipsFor('deputy', 1, 2) },
+    })
     const user = userEvent.setup({ pointerEventsCheck: 0 })
 
     await screen.findByText('Scrub the tub')
@@ -278,5 +280,38 @@ describe('History', () => {
     )
 
     expect(deleteCalls(fetchMock)).toHaveLength(0)
+  })
+
+  it('offers only the households the user is at least a deputy in', async () => {
+    // /completions/filters is deliberately un-narrowed (it also feeds Home and Unscheduled),
+    // so this page narrows its own household picker. A helper household there would be a dead
+    // option: the list is already scoped to deputy+, so choosing it returns nothing.
+    const fetchMock = stubFetch({
+      entries: [makeHistoryEntry({ id: 1, title: 'Scrub the tub' })],
+      options: {
+        households: [
+          { id: 1, name: 'Flat 3B' },
+          { id: 2, name: 'Beach House' },
+        ],
+        members: [me],
+      },
+    })
+    renderWithProviders(<History />, {
+      authValue: {
+        user: authUser,
+        memberships: [
+          { household_id: 1, role: 'deputy' },
+          { household_id: 2, role: 'helper' },
+        ],
+      },
+    })
+
+    await screen.findByText('Scrub the tub')
+    expect(screen.queryByRole('combobox', { name: 'Household' })).not.toBeInTheDocument()
+    // The positive half: the options really loaded, so the missing Select is the narrowing
+    // rather than a fixture that never answered.
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/completions/filters'))).toBe(
+      true,
+    )
   })
 })
