@@ -210,7 +210,22 @@ pre-commit run --all-files                           # what the git hook runs
   `HOUSEHOLD_ROLES` tuple in `lib/types.ts` (strongest first), which
   `lib/permissions.ts` derives its ranks from. A role added to the enum but missing from
   `_ROLE_LADDER` satisfies no predicate at all, which `test_every_role_is_on_the_ladder`
-  pins. Capabilities: every role completes chores (scheduled and unscheduled) and reads
+  pins.
+
+  **"A new role needs no migration" is about ADDING one. Removing a rung needs a data
+  migration before the deploy**, and the two failure modes are nothing alike. Off-the-ladder
+  fails quietly, as above. A value that is not in the enum at all fails hard, because three
+  places coerce the raw string: `role_in_household` and `memberships_for`
+  (`core/households.py`) and `build_members_page` (`api/v1/households.py`), and
+  `HouseholdRole('guest')` raises `ValueError`. Measured with one hand-edited row: that
+  member's `/auth/me` AND `POST /auth/login` both 500, so they are locked out rather than
+  degraded, and `GET /households/{id}/members` 500s for **every housemate** and for site
+  admins on Admin > Households. `/home` and `/unscheduled` survive, because
+  `member_household_ids` compares in SQL (`role IN (...)`) and never coerces. The 422 at the
+  schema layer keeps this unreachable through the API, so it is operator error - but it is not
+  contained to whoever holds the row.
+
+  Capabilities: every role completes chores (scheduled and unscheduled) and reads
   the household list; deputy adds History and Statistics; organiser adds chore and tag
   management, plus inviting and setting deputy/helper roles. Nine things to keep
   straight:
