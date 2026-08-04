@@ -40,6 +40,8 @@ function stubFetch(opts: {
   // The chore GET /chores/{id} answers with. The clone action reads the description from
   // there, since the list rows no longer carry it.
   detail?: Chore
+  // Overrides `detail` when a test needs to control *when* that read resolves.
+  detailResponse?: () => Promise<Response>
   households?: Household[]
   mutate?: (method: string, url: string) => Response
 }): FetchMock {
@@ -55,6 +57,7 @@ function stubFetch(opts: {
       return jsonBody({ items: opts.chores, total: opts.chores.length, page: 1, page_size: 20 })
     }
     if (method === 'GET' && /\/api\/v1\/chores\/\d+$/.test(path)) {
+      if (opts.detailResponse) return opts.detailResponse()
       return opts.detail ? jsonBody(opts.detail) : jsonBody({ detail: 'Chore not found' }, 404)
     }
     if (method !== 'GET' && opts.mutate) return opts.mutate(method, url)
@@ -233,6 +236,30 @@ describe('Chores', () => {
       repeat_interval: 3,
       weekdays: [1, 4],
     })
+  })
+
+  it('marks the clone button busy while it reads the source chore', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    let release: (r: Response) => void = () => {}
+    stubFetch({
+      chores: [makeChoreRow({ id: 7, title: 'Scrub the tub' })],
+      // Hold the detail read open, which is the slow connection the affordance is for.
+      detailResponse: () => new Promise<Response>((resolve) => (release = resolve)),
+    })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+
+    // Re-queried each time: the table re-renders around the click, so a node captured
+    // beforehand can be the detached one and would report a stale attribute.
+    const cloneButton = () => screen.getByRole('button', { name: 'Clone' })
+    await screen.findByText('Scrub the tub')
+    await user.click(cloneButton())
+
+    // A bare `disabled` reads as a dead button; aria-busy is what says "working".
+    await waitFor(() => expect(cloneButton()).toHaveAttribute('aria-busy', 'true'))
+    expect(cloneButton()).toBeDisabled()
+
+    release(jsonBody(makeChore({ id: 7, title: 'Scrub the tub' })))
+    await waitFor(() => expect(cloneButton()).toHaveAttribute('aria-busy', 'false'))
   })
 
   it('stays put and explains itself when the source chore cannot be read', async () => {

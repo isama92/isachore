@@ -517,13 +517,13 @@ async def list_chores(
         .limit(page_size)
         .offset((page - 1) * page_size)
     )
-    rows = result.all()
-    chores = [chore for chore, _ in rows]
-    await _attach_current_assignee(session, chores)
-    for chore, has_description in rows:
+    chores = []
+    for chore, has_description in result.all():
         # A transient attribute the schema reads, the same trick _attach_current_assignee
         # uses for current_assignee.
         chore.has_description = has_description
+        chores.append(chore)
+    await _attach_current_assignee(session, chores)
     items = [ChoreListRead.model_validate(chore) for chore in chores]
     return Page[ChoreListRead](items=items, total=total, page=page, page_size=page_size)
 

@@ -16,6 +16,7 @@ import { useServerTable } from '@/components/data-table/useServerTable'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { Spinner } from '@/components/ui/spinner'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -217,16 +218,19 @@ export default function Chores() {
           <TooltipTrigger asChild>
             {/* A button rather than a Link, because the description has to be fetched
                 before the create page can be prefilled. Nothing is lost: router state
-                never survived an open-in-new-tab either. */}
+                never survived an open-in-new-tab either. It does mean this is the one row
+                action that is not instant, so it says so: a bare `disabled` reads as a
+                dead button on a slow connection. */}
             <Button
               type="button"
               variant="ghost"
               size="icon-sm"
               aria-label={cloneLabel}
               disabled={cloning === chore.id}
+              aria-busy={cloning === chore.id}
               onClick={() => void clone(chore)}
             >
-              <CopyPlusIcon />
+              {cloning === chore.id ? <Spinner size="sm" /> : <CopyPlusIcon />}
             </Button>
           </TooltipTrigger>
           <TooltipContent>{cloneLabel}</TooltipContent>

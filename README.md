@@ -261,6 +261,17 @@ you migrate by hand.
 > rolling restart is not itself a race; its hazard is the older container serving
 > against the schema the newer one just migrated.
 
+#### API response changes
+
+`/api/v1` is a JSON API meant for future mobile clients as well as the web app,
+so a field disappearing from a response is a breaking change even though the
+path did not move. Anything of that kind is listed here.
+
+- **`GET /api/v1/chores` no longer returns `description` on a list row.** It sends
+  `has_description: bool` instead; fetch `GET /api/v1/chores/{id}` for the markup.
+  `POST /chores`, `GET /chores/{id}` and `PATCH /chores/{id}` are unchanged and
+  still carry the full description.
+
 One more consequence of migrating before serving: the backend now needs the
 database at startup, where before it would come up and answer 503s until Postgres
 appeared. Docker's restart policy does not honour `depends_on`, so after a host

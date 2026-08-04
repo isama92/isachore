@@ -511,10 +511,30 @@ pre-commit run --all-files                           # what the git hook runs
     Home and Unscheduled lazy-initialise `assigneeIds` from `user.id` exactly once. Without
     it an admin leaving an impersonated session keeps that person's rows on screen. The key
     is `user.id`, NOT the user object: `refresh()` also runs after a profile save, which
-    must not remount. Both directions are pinned in `RequireAuth.test.tsx`. Note the URL
+    must not remount. Both directions are pinned in `RequireAuth.test.tsx`. What makes the
+    remount actually clean is an ordering in `AuthProvider`: all four adoption paths call
+    `claimTableSettings(me.id)` *synchronously* immediately before `setUser(me)`
+    (`AuthProvider.tsx:54,106,137,150`). `useServerTable` reads `localStorage` in a lazy
+    `useState` initialiser during the mount render, before any effect, so moving that clear
+    into an effect would hand the remounted page the impersonated user's stored filters for
+    one fetch. Keep it synchronous and keep it first. Note the URL
     query string is deliberately NOT rewritten, so a filter from the impersonated session
     stays in the address bar; every list endpoint scopes through `member_household_ids`, so
     it yields an empty page rather than someone else's data.
+- **A Radix Checkbox inside a form swallows Enter**, deliberately (WAI-ARIA says Space
+  toggles a checkbox), which is stricter than the native `<input type="checkbox">` it stands
+  in for: there, Enter submits. `Login.tsx` hands the key back, and if a second form ever
+  needs the same thing, copy all four clauses rather than the first one.
+  `preventDefault()` runs first because Radix's `composeEventHandlers` runs the consumer's
+  handler before its own and skips its own once the default is prevented, so that single
+  call both frees the key and keeps Enter from toggling the box. Then `requestSubmit()`,
+  never the submit handler directly, so constraint validation still runs. And `requestSubmit()`
+  consults no button, so unlike implicit submission it is NOT stopped by a disabled submit
+  button: without `e.repeat` and the submitting flag, a held Enter auto-repeats a burst of
+  requests. Three other forms have the same shape and are deliberately untouched
+  (`ChoreForm`, `admin/ServerSettings`, `users/UserForm` - the last is the one where the
+  checkbox is the final control before submit). Extract a `lib/` helper if a second one
+  adopts it; one caller does not earn the indirection.
 - **Readable 422s**: `lib/validationError.ts` turns pydantic's `detail` *list* into one
   sentence, and `handle()` in `api.ts` calls it whenever `detail` is not a string. Every
   hand-raised `HTTPException` carries a string and is shown verbatim; only pydantic sends
