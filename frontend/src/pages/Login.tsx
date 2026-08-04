@@ -125,6 +125,29 @@ export default function Login() {
                   id="remember"
                   checked={remember}
                   onCheckedChange={(v) => setRemember(v === true)}
+                  // Radix swallows Enter on a checkbox (WAI-ARIA says Space is what
+                  // toggles one), which is stricter than the native control it stands in
+                  // for: Enter inside a real <input type="checkbox"> submits the form.
+                  // On a two-field sign-in that is the difference between "Enter works"
+                  // and "Enter works unless you tabbed one step too far".
+                  //
+                  // preventDefault() first, so Radix's own composed handler is skipped -
+                  // it runs ours before its own and bails once the default is prevented.
+                  // Then requestSubmit(), NOT onSubmit(e): requestSubmit runs the
+                  // browser's constraint validation, so Enter here will not post an empty
+                  // password any more than Enter in the email field would.
+                  //
+                  // The two are not otherwise identical, which is what the guard is for.
+                  // Implicit submission fires a click at the default button and so does
+                  // nothing while that button is disabled; requestSubmit() consults no
+                  // button at all. Without `submitting` and `repeat`, holding Enter would
+                  // auto-repeat a burst of login attempts straight into the Redis throttle
+                  // and lock the user out of their own sign-in.
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter' || e.repeat || submitting) return
+                    e.preventDefault()
+                    e.currentTarget.form?.requestSubmit()
+                  }}
                 />
                 <Label
                   htmlFor="remember"

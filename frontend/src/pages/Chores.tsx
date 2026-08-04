@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import type { ColumnDef } from '@tanstack/react-table'
 import { CopyPlusIcon, SquarePenIcon, Trash2Icon } from 'lucide-react'
@@ -10,12 +10,13 @@ import { householdIdsWithRole } from '../lib/permissions'
 import { endpoints } from '../lib/endpoints'
 import { routes } from '../lib/routes'
 import { formatDate, formatDateTime, repeatLabel } from '../lib/chores'
-import type { Chore, ChoreCloneState, Household, Page } from '../lib/types'
+import type { Chore, ChoreCloneState, ChoreListRow, Household, Page } from '../lib/types'
 import { DataTable } from '@/components/data-table/DataTable'
 import { useServerTable } from '@/components/data-table/useServerTable'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { Spinner } from '@/components/ui/spinner'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -45,7 +46,7 @@ const ALL = 'all'
 export default function Chores() {
   const { t } = useTranslation()
 
-  const table = useServerTable<Chore, ChoreFilters>({
+  const table = useServerTable<ChoreListRow, ChoreFilters>({
     endpoint: endpoints.chores.root,
     storageKey: 'chores',
     initial: {
@@ -61,6 +62,22 @@ export default function Chores() {
   const organised = useMemo(() => householdIdsWithRole(memberships, 'organiser'), [memberships])
   const [households, setHouseholds] = useState<Household[]>([])
   const [error, setError] = useState<string | null>(null)
+  // The row whose source chore is being fetched for a clone, so only that button
+  // disables rather than the whole column.
+  const [cloning, setCloning] = useState<number | null>(null)
+  const navigate = useNavigate()
+
+  // This page's error banner sits above the filter bar, so on a page of up to 100 rows a
+  // row action failing near the bottom reports itself entirely off-screen. Clone is what
+  // made that reachable - it is the one row action that can now fail on the way *out*,
+  // rather than only through a confirmation dialog the user is already looking at - but
+  // delete and a failed page load land in the same paragraph and get the same treatment.
+  // `nearest` does nothing when the banner is already in view. role="alert" on the
+  // paragraph covers what scrolling cannot: assistive tech is told wherever it sits.
+  const errorRef = useRef<HTMLParagraphElement>(null)
+  useEffect(() => {
+    if (error || table.error) errorRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [error, table.error])
 
   // Local text-filter state for instant typing feedback; pushed to the table
   // (which refetches server-side) after a short debounce.
@@ -109,7 +126,7 @@ export default function Chores() {
     }
   }, [organised])
 
-  async function remove(chore: Chore) {
+  async function remove(chore: ChoreListRow) {
     setError(null)
     try {
       await api.del(endpoints.chores.byId(chore.id))
@@ -120,7 +137,7 @@ export default function Chores() {
     }
   }
 
-  function deleteDialog(chore: Chore): ReactNode {
+  function deleteDialog(chore: ChoreListRow): ReactNode {
     const label = t('chores.delete')
     return (
       <AlertDialog>
@@ -156,9 +173,25 @@ export default function Chores() {
     )
   }
 
-  // Clone opens the create page prefilled from this chore, carried in router
-  // state. Assignees/tags that don't belong to the chosen household are dropped
-  // there (see ChoreCreate); nothing is dropped for a same-household clone.
+  // Clone opens the create page prefilled from the SOURCE CHORE, not from the row: the row
+  // carries has_description rather than the description itself, so a clone built from it
+  // would silently drop the instructions. GET /chores/{id} is open to every role and is
+  // what the description dialog already uses.
+  async function clone(chore: ChoreListRow) {
+    setError(null)
+    setCloning(chore.id)
+    try {
+      const full = await api.get<Chore>(endpoints.chores.byId(chore.id))
+      await navigate(routes.chores.new, { state: cloneState(full) })
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t('chores.cloneError'))
+    } finally {
+      setCloning(null)
+    }
+  }
+
+  // Assignees/tags that don't belong to the chosen household are dropped on the
+  // create page (see ChoreCreate); nothing is dropped for a same-household clone.
   function cloneState(chore: Chore): { clone: ChoreCloneState } {
     return {
       clone: {
@@ -178,7 +211,7 @@ export default function Chores() {
     }
   }
 
-  function rowActions(chore: Chore): ReactNode {
+  function rowActions(chore: ChoreListRow): ReactNode {
     const editLabel = t('chores.edit')
     const cloneLabel = t('chores.clone')
     return (
@@ -195,10 +228,21 @@ export default function Chores() {
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button asChild variant="ghost" size="icon-sm" aria-label={cloneLabel}>
-              <Link to={routes.chores.new} state={cloneState(chore)}>
-                <CopyPlusIcon />
-              </Link>
+            {/* A button rather than a Link, because the description has to be fetched
+                before the create page can be prefilled. Nothing is lost: router state
+                never survived an open-in-new-tab either. It does mean this is the one row
+                action that is not instant, so it says so: a bare `disabled` reads as a
+                dead button on a slow connection. */}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={cloneLabel}
+              disabled={cloning === chore.id}
+              aria-busy={cloning === chore.id}
+              onClick={() => void clone(chore)}
+            >
+              {cloning === chore.id ? <Spinner size="sm" /> : <CopyPlusIcon />}
             </Button>
           </TooltipTrigger>
           <TooltipContent>{cloneLabel}</TooltipContent>
@@ -210,7 +254,7 @@ export default function Chores() {
 
   // Keep the tags column compact: show the first tag, then "and N more" with the
   // full list in a tooltip, so a heavily-tagged chore doesn't blow up the row.
-  function tagsCell(tags: Chore['tags']): ReactNode {
+  function tagsCell(tags: ChoreListRow['tags']): ReactNode {
     if (tags.length === 0) {
       return <span className="text-muted-foreground">{t('chores.noTags')}</span>
     }
@@ -261,7 +305,7 @@ export default function Chores() {
     )
   }
 
-  const columns: ColumnDef<Chore>[] = [
+  const columns: ColumnDef<ChoreListRow>[] = [
     {
       accessorKey: 'title',
       header: t('chores.headers.title'),
@@ -360,7 +404,9 @@ export default function Chores() {
         </div>
 
         {(error || table.error) && (
-          <p className="mb-4 text-[13px] font-bold text-danger">{error ?? t('chores.loadError')}</p>
+          <p ref={errorRef} role="alert" className="mb-4 text-[13px] font-bold text-danger">
+            {error ?? t('chores.loadError')}
+          </p>
         )}
 
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">

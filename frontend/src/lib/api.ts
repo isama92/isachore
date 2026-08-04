@@ -1,3 +1,5 @@
+import { formatValidationDetail } from './validationError'
+
 export class ApiError extends Error {
   status: number
 
@@ -22,8 +24,15 @@ async function handle<T>(res: Response): Promise<T> {
     let detail = res.statusText
     try {
       const data: unknown = await res.json()
-      if (data && typeof data === 'object' && 'detail' in data && typeof data.detail === 'string') {
-        detail = data.detail
+      if (data && typeof data === 'object' && 'detail' in data) {
+        if (typeof data.detail === 'string') {
+          // Every hand-raised HTTPException in the backend.
+          detail = data.detail
+        } else {
+          // Pydantic sends a list of issues instead. formatValidationDetail returns null
+          // for anything it does not recognise, which keeps the status-text fallback.
+          detail = formatValidationDetail(data.detail) ?? detail
+        }
       }
     } catch {
       // response body was not JSON; keep the status text

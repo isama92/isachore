@@ -370,6 +370,89 @@ async def test_list_chores_with_assignees_and_tags(
     assert chore["assignment_type"] == "manual"
 
 
+async def test_list_chores_reports_a_description_flag_not_the_html(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # The management table never renders the markup, and at 100 rows a page a
+    # MAX_RICH_TEXT_LENGTH field on each was the largest payload in the app.
+    user = await make_user()
+    household = await make_household(members=[user])
+    await make_chore(household=household, title="With", description="<p>Under the sink</p>")
+    await make_chore(household=household, title="Without", description=None)
+    client = await auth_client(user)
+
+    items = (await client.get("/api/v1/chores?sort_by=title")).json()["items"]
+    assert [(c["title"], c["has_description"]) for c in items] == [
+        ("With", True),
+        ("Without", False),
+    ]
+    assert all("description" not in c for c in items)
+
+
+async def test_list_chores_treats_visually_empty_html_as_no_description(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    # Posted through the API rather than seeded, because the coupling being pinned is
+    # end-to-end: an untouched editor submits <p><br></p>, the write path collapses it to
+    # NULL, and *that* is what lets the flag be a bare IS NOT NULL rather than needing an
+    # emptiness check of its own. Seeding a pre-sanitised value would only re-test
+    # core.richtext.
+    user = await make_user()
+    household = await make_household(members=[user])
+    client = await auth_client(user)
+    created = await client.post(
+        "/api/v1/chores",
+        json={
+            "household_id": household.id,
+            "title": "Looks written in, is not",
+            "description": "<p><br></p>",
+            "start_date": "2026-07-16",
+            "repeats": "weekly",
+            "assignment_type": "manual",
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["description"] is None
+
+    assert (await client.get("/api/v1/chores")).json()["items"][0]["has_description"] is False
+
+
+async def test_list_chore_row_carries_no_more_than_the_table_needs(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    # Deliberately an exact set, mirroring test_unscheduled / test_home: a subset check
+    # would pass while `description` crept back in. Adding a field here means extending
+    # this list on purpose, which is the review moment worth keeping.
+    user = await make_user()
+    household = await make_household(members=[user])
+    await make_chore(household=household, description="<p>Under the sink</p>")
+    client = await auth_client(user)
+
+    item = (await client.get("/api/v1/chores")).json()["items"][0]
+    assert set(item) == {
+        "id",
+        "title",
+        "has_description",
+        "start_date",
+        "repeats",
+        "assignment_type",
+        "turn_length",
+        "repeat_interval",
+        "weekdays",
+        "created_at",
+        "household",
+        "assignees",
+        "current_assignee",
+        "tags",
+    }
+
+
 async def test_list_chores_excludes_other_households(
     make_user: MakeUser,
     make_household: MakeHousehold,

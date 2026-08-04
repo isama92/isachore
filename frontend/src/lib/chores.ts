@@ -35,11 +35,12 @@ export const weekdayKeys = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as 
 
 export type WeekdayKey = (typeof weekdayKeys)[number]
 
-// Mirrors the backend's core.chores.MAX_INTERVAL. Bounding it here too keeps a large
-// value from coming back as a pydantic 422, whose `detail` is a list rather than a string,
-// so the api wrapper cannot translate it and the form would show the browser's own
-// "Unprocessable Content". The form's `max` attribute is what actually stops a submit; the
-// clamp on the way out is belt and braces for a value arriving some other way.
+// Mirrors the backend's core.chores.MAX_INTERVAL. Bounding it here too keeps the round trip
+// out of the way: lib/validationError.ts does now render a pydantic 422 readably, but
+// "Repeat every: Must be 365 or less" arriving after a failed save is still worse than the
+// field refusing the value in the first place. The form's `max` attribute is what actually
+// stops a submit; the clamp on the way out is belt and braces for a value arriving some
+// other way.
 export const MAX_REPEAT_INTERVAL = 365
 
 // A chore's schedule as one localised string: "Weekly", "Weekly (Tue, Fri)",

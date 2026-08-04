@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import contains_eager, selectinload
+from sqlalchemy.orm import contains_eager, defer, selectinload
 
 from app.api.deps import CurrentUser, SessionDep
 from app.api.v1.households import SortDir
@@ -39,6 +39,7 @@ from app.models import (
 )
 from app.schemas import (
     ChoreCreate,
+    ChoreListRead,
     ChoreRead,
     ChoreUpdate,
     CompleteChoreRequest,
@@ -463,7 +464,7 @@ async def create_chore(payload: ChoreCreate, user: CurrentUser, session: Session
     return await _load_chore(session, chore.id)
 
 
-@router.get("", response_model=Page[ChoreRead])
+@router.get("", response_model=Page[ChoreListRead])
 async def list_chores(
     user: CurrentUser,
     session: SessionDep,
@@ -473,7 +474,7 @@ async def list_chores(
     sort_dir: SortDir = "asc",
     household_id: Annotated[int | None, Query(ge=1)] = None,
     title: Annotated[str | None, Query(max_length=255)] = None,
-) -> Page[ChoreRead]:
+) -> Page[ChoreListRead]:
     # This is the chores *management* list, so it is scoped to non-deleted chores in the
     # active households where the caller is an organiser - the ones they can actually act
     # on. A household they are only a deputy or helper in yields nothing here while its
@@ -496,23 +497,35 @@ async def list_chores(
     order_by = [col.desc() if descending else col.asc() for col in CHORE_SORT_COLUMNS[sort_by]]
     order_by.append(Chore.id.desc() if descending else Chore.id.asc())  # stable tiebreaker
 
+    # The description is answered as a labelled boolean and the column itself deferred, so
+    # the HTML never leaves Postgres - not merely "is left off the wire". At the page cap
+    # that is 100 x MAX_RICH_TEXT_LENGTH of markup not read, not serialised and not sent,
+    # for a table that never renders it. `raiseload` makes a future
+    # `chore.description` here fail with a clear error rather than the MissingGreenlet a
+    # bare defer() turns an attribute access into under asyncpg.
     result = await session.execute(
-        select(Chore)
+        select(Chore, Chore.description.is_not(None).label("has_description"))
         .join(Household, Household.id == Chore.household_id)  # to-one: no row multiplication
         .options(
             selectinload(Chore.assignees),
             selectinload(Chore.tags),
             contains_eager(Chore.household),
+            defer(Chore.description, raiseload=True),
         )
         .where(*filters)
         .order_by(*order_by)
         .limit(page_size)
         .offset((page - 1) * page_size)
     )
-    chores = list(result.scalars().all())
+    chores = []
+    for chore, has_description in result.all():
+        # A transient attribute the schema reads, the same trick _attach_current_assignee
+        # uses for current_assignee.
+        chore.has_description = has_description
+        chores.append(chore)
     await _attach_current_assignee(session, chores)
-    items = [ChoreRead.model_validate(chore) for chore in chores]
-    return Page[ChoreRead](items=items, total=total, page=page, page_size=page_size)
+    items = [ChoreListRead.model_validate(chore) for chore in chores]
+    return Page[ChoreListRead](items=items, total=total, page=page, page_size=page_size)
 
 
 @router.get("/{chore_id}", response_model=ChoreRead)

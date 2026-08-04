@@ -59,15 +59,19 @@ def _normalised_schedule(
     if repeats == RepeatPeriod.manual:
         return None, 1, None
     if start_date is None:
-        raise ValueError("start_date is required unless the chore is unscheduled")
+        # Reads as copy, not as a field name: the frontend's 422 formatter passes a
+        # `value_error` through verbatim (lib/validationError.ts), deliberately, because a
+        # generic would say less. So whatever is written here IS what the user is shown.
+        raise ValueError("A start date is required unless the chore is unscheduled")
     if repeats != RepeatPeriod.weekly or not weekdays:
         return start_date, repeat_interval, None
     return start_date, repeat_interval, sorted(set(weekdays))
 
 
 class ChoreHouseholdRead(BaseModel):
-    """The household a chore belongs to, embedded in ChoreRead so the list column
-    and the read-only edit header can show its name without a second request."""
+    """The household a chore belongs to, embedded in both chore reads (it sits on
+    ChoreReadBase) so the list column and the read-only edit header can show its name
+    without a second request."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -75,12 +79,14 @@ class ChoreHouseholdRead(BaseModel):
     name: str
 
 
-class ChoreRead(BaseModel):
+class ChoreReadBase(BaseModel):
+    """Everything both chore reads carry. The two differ only in how they answer "is there
+    a description": the detail read sends the HTML, the management list sends a flag."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     title: str
-    description: str | None
     # None for an unscheduled chore, which has no start date (see the model).
     start_date: date | None
     repeats: RepeatPeriod
@@ -109,6 +115,33 @@ class ChoreRead(BaseModel):
     # its period, so this is not a "no occurrence" signal.
     current_assignee: HouseholdMemberRead | None = None
     tags: list[TagRead]
+
+
+class ChoreRead(ChoreReadBase):
+    """A single chore: create, `GET /chores/{id}` and patch. Open to every role, since the
+    description dialog on My Chores and Unscheduled fetches it."""
+
+    description: str | None
+
+
+class ChoreListRead(ChoreReadBase):
+    """A row of the management list.
+
+    The management table never renders the HTML, and at 100 rows a page a
+    `MAX_RICH_TEXT_LENGTH` field on each was by some way the largest payload in the app
+    (measured on the dev seed with five described chores: 103 kB down to 12 kB). Whoever
+    wants the description reads the chore.
+
+    Unlike DueChoreRead / UnscheduledChoreRead, whose flag drives the marker icon on the
+    ChoreRow, nothing on the management page renders this one *yet*: it is here so every
+    chore list answers "is there a description" the same way, and so adding that marker
+    later needs no API change.
+
+    NULL is the only "no description" - `core.richtext` collapses visually-empty HTML on
+    write - so this needs no emptiness check.
+    """
+
+    has_description: bool
 
 
 class ChoreCreate(BaseModel):

@@ -1,5 +1,6 @@
 import type {
   Chore,
+  ChoreListRow,
   DueChore,
   HistoryEntry,
   Household,
@@ -84,6 +85,21 @@ export function makeChore(overrides: Partial<Chore> = {}): Chore {
     tags: [],
     ...overrides,
   }
+}
+
+// A row as GET /api/v1/chores actually sends one: no description, a flag instead. Built off
+// makeChore so the shared fields cannot drift, the same way makeMe builds off makeUser.
+//
+// The description is *deleted* rather than left as null. The list read does not send the
+// key at all, and a fixture that carried it would let a component quietly read a value the
+// real payload has never had. Widening the local type is what makes delete legal here;
+// destructuring it away instead would trip no-unused-vars, which is configured without
+// ignoreRestSiblings.
+export function makeChoreRow(overrides: Partial<ChoreListRow> = {}): ChoreListRow {
+  const { has_description = false, ...rest } = overrides
+  const row: Omit<Chore, 'description'> & { description?: string | null } = makeChore(rest)
+  delete row.description
+  return { ...row, has_description }
 }
 
 export function makeHousehold(overrides: Partial<Household> = {}): Household {

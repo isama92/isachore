@@ -6,8 +6,15 @@ import { toast } from 'sonner'
 import Chores from './Chores'
 import { renderWithProviders, membershipsFor } from '../test/utils'
 import { formatDate, formatDateTime } from '../lib/chores'
-import { makeChore, makeHousehold, makeHouseholdMember, makeTag, makeUser } from '../test/fixtures'
-import type { Chore, Household } from '../lib/types'
+import {
+  makeChore,
+  makeChoreRow,
+  makeHousehold,
+  makeHouseholdMember,
+  makeTag,
+  makeUser,
+} from '../test/fixtures'
+import type { Chore, ChoreListRow, Household } from '../lib/types'
 
 // Reads the router state pushed by the clone action so a test can assert it.
 function CloneProbe() {
@@ -29,7 +36,12 @@ function jsonBody(data: unknown, status = 200): Response {
 }
 
 function stubFetch(opts: {
-  chores: Chore[]
+  chores: ChoreListRow[]
+  // The chore GET /chores/{id} answers with. The clone action reads the description from
+  // there, since the list rows no longer carry it.
+  detail?: Chore
+  // Overrides `detail` when a test needs to control *when* that read resolves.
+  detailResponse?: () => Promise<Response>
   households?: Household[]
   mutate?: (method: string, url: string) => Response
 }): FetchMock {
@@ -43,6 +55,10 @@ function stubFetch(opts: {
     }
     if (method === 'GET' && path.endsWith('/api/v1/chores')) {
       return jsonBody({ items: opts.chores, total: opts.chores.length, page: 1, page_size: 20 })
+    }
+    if (method === 'GET' && /\/api\/v1\/chores\/\d+$/.test(path)) {
+      if (opts.detailResponse) return opts.detailResponse()
+      return opts.detail ? jsonBody(opts.detail) : jsonBody({ detail: 'Chore not found' }, 404)
     }
     if (method !== 'GET' && opts.mutate) return opts.mutate(method, url)
     return jsonBody(undefined, 204)
@@ -67,7 +83,7 @@ function lastChoresGet(fetchMock: FetchMock): string {
 
 describe('Chores', () => {
   it('lists chores with household, assignee count, tags and labels', async () => {
-    const chore = makeChore({
+    const chore = makeChoreRow({
       id: 7,
       title: 'Scrub the tub',
       household: { id: 4, name: 'Beach House' },
@@ -93,7 +109,7 @@ describe('Chores', () => {
   })
 
   it('spells out the interval and pinned weekdays in the repeats column', async () => {
-    const chore = makeChore({
+    const chore = makeChoreRow({
       id: 9,
       title: 'Washing machine',
       repeats: 'weekly',
@@ -109,7 +125,7 @@ describe('Chores', () => {
 
   it('shows the current assignee next to the assignment strategy', async () => {
     const robin = makeHouseholdMember({ id: 2, first_name: 'Robin', last_name: 'Doe' })
-    const chore = makeChore({
+    const chore = makeChoreRow({
       id: 8,
       title: 'Water plants',
       assignment_type: 'alphabetical',
@@ -125,7 +141,7 @@ describe('Chores', () => {
   })
 
   it('collapses many tags to the first plus an "and N more" hover tooltip', async () => {
-    const chore = makeChore({
+    const chore = makeChoreRow({
       id: 8,
       title: 'Big job',
       tags: [
@@ -150,7 +166,7 @@ describe('Chores', () => {
   })
 
   it('shows placeholders for an unassigned, untagged chore', async () => {
-    stubFetch({ chores: [makeChore({ title: 'Lonely' })] })
+    stubFetch({ chores: [makeChoreRow({ title: 'Lonely' })] })
     renderWithProviders(<Chores />, { authValue: { user: me } })
 
     expect(await screen.findByText('Lonely')).toBeInTheDocument()
@@ -166,7 +182,7 @@ describe('Chores', () => {
   })
 
   it('links each row to its edit page', async () => {
-    stubFetch({ chores: [makeChore({ id: 7, title: 'Scrub the tub' })] })
+    stubFetch({ chores: [makeChoreRow({ id: 7, title: 'Scrub the tub' })] })
     renderWithProviders(<Chores />, { authValue: { user: me } })
 
     await screen.findByText('Scrub the tub')
@@ -175,21 +191,25 @@ describe('Chores', () => {
 
   it('clones a chore into the prefilled create page, carrying its details in router state', async () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
-    const chore = makeChore({
+    const details = {
       id: 7,
       title: 'Scrub the tub',
-      description: 'Do it well',
       // Non-default recurrence, so a hardcoded 1 / [] in cloneState would fail here
       // rather than coinciding with the fixture defaults.
-      repeats: 'weekly',
+      repeats: 'weekly' as const,
       repeat_interval: 3,
       weekdays: [1, 4],
-      assignment_type: 'least_done',
+      assignment_type: 'least_done' as const,
       household: { id: 4, name: 'Beach House' },
       assignees: [makeHouseholdMember({ id: 2 }), makeHouseholdMember({ id: 3 })],
       tags: [makeTag({ id: 9, name: 'deep-clean' })],
+    }
+    // The row says only that a description exists; the description itself comes back from
+    // GET /chores/{id}, which is what the clone must read it from.
+    stubFetch({
+      chores: [makeChoreRow({ ...details, has_description: true })],
+      detail: makeChore({ ...details, description: 'Do it well' }),
     })
-    stubFetch({ chores: [chore] })
     renderWithProviders(
       <Routes>
         <Route path="/chores" element={<Chores />} />
@@ -199,17 +219,14 @@ describe('Chores', () => {
     )
 
     const row = (await screen.findByText('Scrub the tub')).closest('tr')!
-    const cloneLink = within(row).getByRole('link', { name: 'Clone' })
-    expect(cloneLink).toHaveAttribute('href', '/chores/new')
+    await user.click(within(row).getByRole('button', { name: 'Clone' }))
 
-    await user.click(cloneLink)
-
-    const state = JSON.parse(screen.getByTestId('clone-state').textContent!) as {
-      clone: Record<string, unknown>
-    }
+    const probe = await screen.findByTestId('clone-state')
+    const state = JSON.parse(probe.textContent!) as { clone: Record<string, unknown> }
     expect(state.clone).toMatchObject({
       household_id: 4,
       title: 'Scrub the tub',
+      // The whole point: dropped from the list payload, so it has to be fetched.
       description: 'Do it well',
       repeats: 'weekly',
       assignment_type: 'least_done',
@@ -221,8 +238,74 @@ describe('Chores', () => {
     })
   })
 
+  it('marks the clone button busy while it reads the source chore', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    let release: (r: Response) => void = () => {}
+    stubFetch({
+      chores: [makeChoreRow({ id: 7, title: 'Scrub the tub' })],
+      // Hold the detail read open, which is the slow connection the affordance is for.
+      detailResponse: () => new Promise<Response>((resolve) => (release = resolve)),
+    })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+
+    // Re-queried each time: the table re-renders around the click, so a node captured
+    // beforehand can be the detached one and would report a stale attribute.
+    const cloneButton = () => screen.getByRole('button', { name: 'Clone' })
+    await screen.findByText('Scrub the tub')
+    await user.click(cloneButton())
+
+    // A bare `disabled` reads as a dead button; aria-busy is what says "working".
+    await waitFor(() => expect(cloneButton()).toHaveAttribute('aria-busy', 'true'))
+    expect(cloneButton()).toBeDisabled()
+
+    release(jsonBody(makeChore({ id: 7, title: 'Scrub the tub' })))
+    await waitFor(() => expect(cloneButton()).toHaveAttribute('aria-busy', 'false'))
+  })
+
+  it('stays put and explains itself when the source chore cannot be read', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    // No `detail`, so the stub 404s the chore read - the chore was deleted by a housemate
+    // between the list loading and the click.
+    stubFetch({ chores: [makeChoreRow({ id: 7, title: 'Scrub the tub' })] })
+    renderWithProviders(
+      <Routes>
+        <Route path="/chores" element={<Chores />} />
+        <Route path="/chores/new" element={<CloneProbe />} />
+      </Routes>,
+      { authValue: { user: me }, route: '/chores' },
+    )
+
+    const row = (await screen.findByText('Scrub the tub')).closest('tr')!
+    await user.click(within(row).getByRole('button', { name: 'Clone' }))
+
+    expect(await screen.findByText('Chore not found')).toBeInTheDocument()
+    expect(screen.queryByTestId('clone-state')).not.toBeInTheDocument()
+  })
+
+  it('announces the clone failure and brings the banner into view', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    // jsdom stubs scrollIntoView as a no-op in test/setup.ts, so spy on the prototype.
+    const scrollIntoView = vi
+      .spyOn(Element.prototype, 'scrollIntoView')
+      .mockImplementation(() => {})
+    stubFetch({ chores: [makeChoreRow({ id: 7, title: 'Scrub the tub' })] })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+
+    await screen.findByText('Scrub the tub')
+    expect(scrollIntoView).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Clone' }))
+
+    // The banner sits above the filter bar. On a 100-row page a row action failing near
+    // the bottom would otherwise report itself off-screen, with the button simply
+    // un-disabling and nothing else happening.
+    const banner = await screen.findByRole('alert')
+    expect(banner).toHaveTextContent('Chore not found')
+    expect(scrollIntoView).toHaveBeenCalled()
+    scrollIntoView.mockRestore()
+  })
+
   it('sorts by creation date, newest first, by default', async () => {
-    const fetchMock = stubFetch({ chores: [makeChore({ title: 'Scrub the tub' })] })
+    const fetchMock = stubFetch({ chores: [makeChoreRow({ title: 'Scrub the tub' })] })
     renderWithProviders(<Chores />, { authValue: { user: me } })
 
     await screen.findByText('Scrub the tub')
@@ -239,7 +322,7 @@ describe('Chores', () => {
   })
 
   it('shows when each chore was created, including the time', async () => {
-    const chore = makeChore({
+    const chore = makeChoreRow({
       title: 'Scrub the tub',
       created_at: '2026-03-04T09:30:00Z',
       start_date: '2026-07-16',
@@ -259,7 +342,7 @@ describe('Chores', () => {
     // An unscheduled chore has no start date at all. The Repeats cell beside it already
     // says "Unscheduled", so the date cell only needs to not render an empty gap.
     stubFetch({
-      chores: [makeChore({ title: 'Sort the loft', repeats: 'manual', start_date: null })],
+      chores: [makeChoreRow({ title: 'Sort the loft', repeats: 'manual', start_date: null })],
     })
     renderWithProviders(<Chores />, { authValue: { user: me } })
 
@@ -269,7 +352,7 @@ describe('Chores', () => {
   })
 
   it('sorts ascending when the Created header is clicked', async () => {
-    const fetchMock = stubFetch({ chores: [makeChore({ title: 'Scrub the tub' })] })
+    const fetchMock = stubFetch({ chores: [makeChoreRow({ title: 'Scrub the tub' })] })
     renderWithProviders(<Chores />, { authValue: { user: me } })
     const user = userEvent.setup({ pointerEventsCheck: 0 })
 
@@ -290,7 +373,7 @@ describe('Chores', () => {
         filters: { household_id: '', title: 'tub' },
       }),
     )
-    const fetchMock = stubFetch({ chores: [makeChore({ id: 7, title: 'Scrub the tub' })] })
+    const fetchMock = stubFetch({ chores: [makeChoreRow({ id: 7, title: 'Scrub the tub' })] })
     renderWithProviders(<Chores />, { authValue: { user: me } })
 
     await screen.findByText('Scrub the tub')
@@ -318,7 +401,7 @@ describe('Chores', () => {
       }),
     )
     const fetchMock = stubFetch({
-      chores: [makeChore({ id: 7, title: 'Scrub the tub' })],
+      chores: [makeChoreRow({ id: 7, title: 'Scrub the tub' })],
       households: [
         makeHousehold({ id: 1, name: 'Flat 3B' }),
         makeHousehold({ id: 2, name: 'Beach House' }),
@@ -351,7 +434,7 @@ describe('Chores', () => {
       }),
     )
     const fetchMock = stubFetch({
-      chores: [makeChore({ id: 7, title: 'Scrub the tub' })],
+      chores: [makeChoreRow({ id: 7, title: 'Scrub the tub' })],
       households: [
         makeHousehold({ id: 1, name: 'Flat 3B' }),
         makeHousehold({ id: 2, name: 'Beach House' }),
@@ -366,7 +449,7 @@ describe('Chores', () => {
 
   it('shows a household filter and pushes the choice into the query', async () => {
     const fetchMock = stubFetch({
-      chores: [makeChore({ id: 7, title: 'Scrub the tub' })],
+      chores: [makeChoreRow({ id: 7, title: 'Scrub the tub' })],
       households: [
         makeHousehold({ id: 1, name: 'Flat 3B' }),
         makeHousehold({ id: 2, name: 'Beach House' }),
@@ -386,7 +469,7 @@ describe('Chores', () => {
 
   it('hides the household filter when the user has a single household', async () => {
     stubFetch({
-      chores: [makeChore({ title: 'Scrub the tub' })],
+      chores: [makeChoreRow({ title: 'Scrub the tub' })],
       households: [makeHousehold({ id: 1, name: 'Flat 3B' })],
     })
     renderWithProviders(<Chores />, { authValue: { user: me } })
@@ -397,7 +480,7 @@ describe('Chores', () => {
 
   it('filters by title (debounced) and pushes the term into the query', async () => {
     const fetchMock = stubFetch({
-      chores: [makeChore({ id: 7, title: 'Scrub the tub' })],
+      chores: [makeChoreRow({ id: 7, title: 'Scrub the tub' })],
     })
     renderWithProviders(<Chores />, { authValue: { user: me } })
     const user = userEvent.setup({ pointerEventsCheck: 0 })
@@ -410,7 +493,7 @@ describe('Chores', () => {
 
   it('shows the title filter even when the user has a single household', async () => {
     stubFetch({
-      chores: [makeChore({ title: 'Scrub the tub' })],
+      chores: [makeChoreRow({ title: 'Scrub the tub' })],
       households: [makeHousehold({ id: 1, name: 'Flat 3B' })],
     })
     renderWithProviders(<Chores />, { authValue: { user: me } })
@@ -421,7 +504,7 @@ describe('Chores', () => {
   })
 
   it('pins the actions column to the right edge', async () => {
-    stubFetch({ chores: [makeChore({ title: 'Scrub the tub' })] })
+    stubFetch({ chores: [makeChoreRow({ title: 'Scrub the tub' })] })
     renderWithProviders(<Chores />, { authValue: { user: me } })
 
     await screen.findByText('Scrub the tub')
@@ -434,7 +517,7 @@ describe('Chores', () => {
     const toastSpy = vi.spyOn(toast, 'success')
     let deleted = ''
     const fetchMock = stubFetch({
-      chores: [makeChore({ id: 7, title: 'Scrub the tub' })],
+      chores: [makeChoreRow({ id: 7, title: 'Scrub the tub' })],
       mutate: (method, url) => {
         if (method === 'DELETE') deleted = url
         return jsonBody(undefined, 204)
@@ -455,7 +538,7 @@ describe('Chores', () => {
 
   it('does not delete when the dialog is cancelled', async () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
-    const fetchMock = stubFetch({ chores: [makeChore({ id: 7, title: 'Scrub the tub' })] })
+    const fetchMock = stubFetch({ chores: [makeChoreRow({ id: 7, title: 'Scrub the tub' })] })
     renderWithProviders(<Chores />, { authValue: { user: me } })
 
     const row = (await screen.findByText('Scrub the tub')).closest('tr')!
@@ -469,7 +552,7 @@ describe('Chores', () => {
 
   it('does not use the word "permanently" in the delete dialog', async () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
-    stubFetch({ chores: [makeChore({ id: 7, title: 'Scrub the tub' })] })
+    stubFetch({ chores: [makeChoreRow({ id: 7, title: 'Scrub the tub' })] })
     renderWithProviders(<Chores />, { authValue: { user: me } })
 
     const row = (await screen.findByText('Scrub the tub')).closest('tr')!
@@ -491,7 +574,7 @@ describe('Chores', () => {
     // picker is a dead option: choosing it filters an already-filtered list down to nothing
     // behind a blank Select. With one left the Select hides (it renders above one).
     const fetchMock = stubFetch({
-      chores: [makeChore({ id: 7, title: 'Scrub the tub' })],
+      chores: [makeChoreRow({ id: 7, title: 'Scrub the tub' })],
       households: [
         makeHousehold({ id: 1, name: 'Flat 3B' }),
         makeHousehold({ id: 2, name: 'Beach House' }),
