@@ -675,6 +675,20 @@ pre-commit run --all-files                           # what the git hook runs
   language), NOT `TopBar`. Toasts: `toast.success(...)` from `sonner`, a single
   `<Toaster />` in `main.tsx`. Feedback pattern: success -> toast, errors ->
   inline text.
+
+  **On a list page that caveat needs help, because "inline" there means a banner above
+  the filter bar, and a row action failing on row 90 of 100 reports itself entirely
+  off-screen.** The answer is not a toast, which forks the convention and would leave two
+  actions on one page behaving differently; it is to make the banner reach the user:
+  `role="alert"` on the paragraph, plus `scrollIntoView({ block: 'nearest' })` in an
+  effect keyed on the error (a no-op when it is already visible, and setState-free so it
+  is exempt from the no-setState-in-effect rule). `Chores.tsx` does this, because clone is
+  the one row action that can fail on the way *out* rather than from inside a confirmation
+  dialog the user is already looking at. The same banner sits on `Tags`, `Households`,
+  `History`, `Home`, `Unscheduled` and both admin tables, all with row actions that can
+  fail, and none of them do this yet - lift the ref-plus-effect if you touch one, or sweep
+  the lot into a shared component. A form's inline error needs none of this: it sits
+  beside the button that was just pressed.
 - **i18n**: `react-i18next` + `i18next`. `frontend/src/i18n/` mirrors `theme/`:
   `languages.ts` (the closed `Language` set `'en' | 'it'`, `LANGUAGES` autonyms,
   `DEFAULT_LANGUAGE` = `en`, `isLanguage` guard, `localeFor` -> BCP47),

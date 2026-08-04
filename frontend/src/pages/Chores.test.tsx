@@ -282,6 +282,28 @@ describe('Chores', () => {
     expect(screen.queryByTestId('clone-state')).not.toBeInTheDocument()
   })
 
+  it('announces the clone failure and brings the banner into view', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    // jsdom stubs scrollIntoView as a no-op in test/setup.ts, so spy on the prototype.
+    const scrollIntoView = vi
+      .spyOn(Element.prototype, 'scrollIntoView')
+      .mockImplementation(() => {})
+    stubFetch({ chores: [makeChoreRow({ id: 7, title: 'Scrub the tub' })] })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+
+    await screen.findByText('Scrub the tub')
+    expect(scrollIntoView).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Clone' }))
+
+    // The banner sits above the filter bar. On a 100-row page a row action failing near
+    // the bottom would otherwise report itself off-screen, with the button simply
+    // un-disabling and nothing else happening.
+    const banner = await screen.findByRole('alert')
+    expect(banner).toHaveTextContent('Chore not found')
+    expect(scrollIntoView).toHaveBeenCalled()
+    scrollIntoView.mockRestore()
+  })
+
   it('sorts by creation date, newest first, by default', async () => {
     const fetchMock = stubFetch({ chores: [makeChoreRow({ title: 'Scrub the tub' })] })
     renderWithProviders(<Chores />, { authValue: { user: me } })

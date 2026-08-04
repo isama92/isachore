@@ -67,6 +67,18 @@ export default function Chores() {
   const [cloning, setCloning] = useState<number | null>(null)
   const navigate = useNavigate()
 
+  // This page's error banner sits above the filter bar, so on a page of up to 100 rows a
+  // row action failing near the bottom reports itself entirely off-screen. Clone is what
+  // made that reachable - it is the one row action that can now fail on the way *out*,
+  // rather than only through a confirmation dialog the user is already looking at - but
+  // delete and a failed page load land in the same paragraph and get the same treatment.
+  // `nearest` does nothing when the banner is already in view. role="alert" on the
+  // paragraph covers what scrolling cannot: assistive tech is told wherever it sits.
+  const errorRef = useRef<HTMLParagraphElement>(null)
+  useEffect(() => {
+    if (error || table.error) errorRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [error, table.error])
+
   // Local text-filter state for instant typing feedback; pushed to the table
   // (which refetches server-side) after a short debounce.
   const [titleInput, setTitleInput] = useState(table.filters.title)
@@ -392,7 +404,9 @@ export default function Chores() {
         </div>
 
         {(error || table.error) && (
-          <p className="mb-4 text-[13px] font-bold text-danger">{error ?? t('chores.loadError')}</p>
+          <p ref={errorRef} role="alert" className="mb-4 text-[13px] font-bold text-danger">
+            {error ?? t('chores.loadError')}
+          </p>
         )}
 
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
