@@ -607,8 +607,6 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
 
 ### Todo
 
-- [ ] Add a skip button (next to complete), and change the charts to also show the skipped chores
 - [ ] Live updates when a housemate completes a chore (websocket)
 - [ ] Chore change log (who changed what)
-- [ ] Log when somebody undo a chore (add new table)
 - [ ] The due below the chore in the "my chores" page doesn't consider timezone but only utc, so at 1am it still doesn't show today's task but yesterday's
