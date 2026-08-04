@@ -183,8 +183,9 @@ export default function Statistics() {
     },
     skipped: {
       label: t('statistics.overTime.skipped'),
-      // Grey, not a second accent: this series is the absence of work, and it matches the
-      // Skip button that produces it. Also what keeps it legible stacked on any --primary.
+      // Grey, not a second accent: this series is the absence of work. A different grey from
+      // the Skip button's on purpose (see --stat-skipped in index.css), and one that stays
+      // legible stacked on any --primary.
       color: 'var(--color-stat-skipped)',
     },
   } satisfies ChartConfig
@@ -389,7 +390,12 @@ export default function Statistics() {
                     <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={32} />
                     <ChartTooltip
                       content={
-                        <ChartTooltipContent labelFormatter={(v) => formatBucket(String(v))} />
+                        // hideZero because this chart is stacked: recharts sends both series
+                        // whatever their values, so most days would otherwise read "Skipped 0".
+                        <ChartTooltipContent
+                          hideZero
+                          labelFormatter={(v) => formatBucket(String(v))}
+                        />
                       }
                     />
                     <ChartLegend content={<ChartLegendContent />} />

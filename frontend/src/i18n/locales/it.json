@@ -149,7 +149,7 @@
     "done": "Fatto",
     "skip": "Salta: “{{title}}”",
     "skipConfirm": "Saltare “{{title}}”?",
-    "skipConfirmBody": "La faccenda passa alla data successiva e non viene registrato nulla come fatto. Viene registrata come saltata.",
+    "skipConfirmBody": "Verrà registrata come saltata e la faccenda passa alla data successiva senza che nulla venga conteggiato come fatto.",
     "skipConfirmAction": "Salta",
     "skipError": "Impossibile saltare la faccenda",
     "loadError": "Impossibile caricare le tue faccende in scadenza",

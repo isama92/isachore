@@ -157,9 +157,9 @@ async def get_stats(
 
     # Pre-seed every bucket to 0 so the chart has a continuous axis over the range. Both
     # series get the same keys, so the stacked bars line up even where one of them is empty.
+    bucket_keys: list[date] = []
     if weekly:
         cursor, last = _week_start(start_date), _week_start(today)
-        bucket_keys = []
         while cursor <= last:
             bucket_keys.append(cursor)
             cursor += timedelta(days=7)
@@ -210,11 +210,11 @@ async def get_stats(
     # four buckets: it differs from the first by however many unscheduled chores were done in
     # the range, and from the second by the skips, which are closures rather than work.
     scheduled_total = on_time + late + early
-    # Over the union of both series' keys, and reading each with `.get`: the two dicts are
-    # seeded identically and the query's window matches that seeding, so today every key is in
-    # both. But the writes above tolerate a key that is not (`.get(key, 0) + 1`), so reading
-    # one side with `[]` would turn any future drift between the window and the seeding into a
-    # KeyError, and iterating one side alone would silently drop the bucket.
+    # Over the union of both series' keys, reading each with `.get`. The invariant is that the
+    # query's window and the seeding above agree, so every key lands in both dicts; the writes
+    # deliberately do not depend on it (`.get(key, 0) + 1`) and neither does this, so a bucket
+    # outside the seeded axis shows up as an extra point rather than a KeyError or a silently
+    # dropped count. Cheaper to keep symmetrical than to prove the invariant on every edit.
     completions_over_time = [
         CompletionBucket(
             bucket=day.isoformat(),

@@ -609,4 +609,9 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
 
 - [ ] Live updates when a housemate completes a chore (websocket)
 - [ ] Chore change log (who changed what)
+- [ ] Let an organiser undo a housemate's completion or skip. Today `undo_completion` needs
+      both deputy scope and `completed_by_user_id == you`, so a helper's closure can be undone
+      by nobody at all: they cannot reach History, and everyone who can gets the 403. It bites
+      hardest on a mis-skip, which moves the chore's schedule rather than just logging a row
+      (the confirmation dialog on My Chores is the current mitigation, not a fix)
 - [ ] The due below the chore in the "my chores" page doesn't consider timezone but only utc, so at 1am it still doesn't show today's task but yesterday's

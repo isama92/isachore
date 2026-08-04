@@ -376,3 +376,44 @@ async def test_skipping_re_derives_when_the_assignee_left_the_pool(
 
     assert (await client.post(f"/api/v1/chores/{chore.id}/skip")).status_code == 201
     assert await _open_assignee(db_session, chore.id) == ava.id
+
+
+async def test_skip_by_someone_other_than_the_assignee(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    """The everyday case, since any member may skip any chore in their household: Ben is on the
+    hook and Ava presses skip.
+
+    This is where the two rules meet, and each on its own is satisfiable for the wrong reason.
+    Every other test here has the caller holding the occurrence (or no pool at all), so an
+    implementation that recorded the closure against the *assignee*, or handed the successor to
+    whoever *pressed the button*, would agree with them all. Only here do the two answers have
+    to come apart: recorded against Ava, still Ben's turn.
+    """
+    ava = await make_user(email="ava@example.com", first_name="Ava")
+    ben = await make_user(email="ben@example.com", first_name="Ben")
+    household = await make_household(members=[ava, ben])
+    chore = await make_chore(
+        household=household,
+        start_date=NOW.date(),
+        repeats=RepeatPeriod.daily,
+        assignment_type=AssignmentType.alphabetical,
+        assignees=[ava, ben],
+        current_assignee=ben,
+    )
+    client = await auth_client(ava)
+
+    resp = await client.post(f"/api/v1/chores/{chore.id}/skip")
+    assert resp.status_code == 201
+    assert resp.json()["completed_by_user_id"] == ava.id
+    assert resp.json()["skipped"] is True
+
+    occurrences = await _occurrences(db_session, chore.id)
+    closed = next(o for o in occurrences if o.status == OccurrenceStatus.done)
+    assert closed.completed_by_user_id == ava.id  # recorded against whoever pressed skip
+    assert closed.assignee_id == ben.id  # ...on the occurrence that was Ben's
+    assert await _open_assignee(db_session, chore.id) == ben.id  # and still is

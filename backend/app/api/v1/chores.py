@@ -337,13 +337,18 @@ def _retained_assignee(
     NULL here means the chore is the household's and nobody in particular is up (see
     `clear_current_assignee`), so there is no turn to keep, and deriving somebody from the
     strategy would both invent a turn and silently undo a deliberate hand-back. This is where
-    skipping parts company with completing: `_successor_assignee` re-derives on a turn
-    boundary, so a clear survives only "until the next completion" - a skip is not one.
+    skipping parts company with completing: a clear survives completions only up to the next
+    turn *boundary*, since `_successor_assignee` returns the (absent) current assignee while
+    `should_reassign` is false and re-derives once it is - so with `turn_length=3` a clear
+    outlives two completions and dies on the third. A skip is never that boundary.
 
     The strategy fallback is for the other case only, where the row names somebody the pool no
-    longer contains: standing still would leave the chore on a person who cannot do it. Same
-    keep-if-still-valid shape as `_reconcile_open_occurrence`, rather than a second rule.
-    Needs no session, since unlike a handoff it counts nothing."""
+    longer contains: standing still would leave the chore on a person who cannot do it. Note
+    this is deliberately NOT the same rule as `_reconcile_open_occurrence`'s, which recomputes
+    for an unassigned row as well as a stale one - that is an edit reconciling the whole chore,
+    where "no assignee" is a gap to fill, while here it is an answer to respect. The two agree
+    on the stale case and differ on the empty one, and the difference is the point of this
+    function. Needs no session, since unlike a handoff it counts nothing."""
     if not pool or current_assignee_id is None:
         return None
     current = next((u for u in pool if u.id == current_assignee_id), None)
@@ -758,6 +763,15 @@ async def skip_chore(chore_id: int, user: CurrentUser, session: SessionDep) -> C
     past and nothing to skip. That refusal is also what keeps "every skipped row belongs to a
     scheduled chore" true at the data layer rather than only in the UI, which is what lets the
     punctuality breakdown in stats.py host a skipped slice alongside its three due-date ones.
+
+    Deliberately UNBOUNDED, as a recorded decision rather than an oversight: nothing checks
+    that the occurrence is actually due, so a chore can be skipped repeatedly and pushed
+    arbitrarily far forward, and skipping somebody else's chore moves their deadline with no
+    notification. That is exactly the latitude completing already has (nothing stops you
+    completing a chore weeks early either), every skip leaves a history row naming who did it,
+    and Home only ever surfaces overdue/today/soon, so a pushed-out chore simply leaves the
+    view. Bounding it would need a notion of "too early" that the completion path does not
+    have; if that is ever wanted, both paths should get it together.
     """
     chore = await _get_user_chore_or_404(session, user, chore_id)
     if chore.repeats == RepeatPeriod.manual:
@@ -777,5 +791,7 @@ async def skip_chore(chore_id: int, user: CurrentUser, session: SessionDep) -> C
         occ,
         closed_by_id=user.id,
         skipped=True,
-        conflict_detail="This chore has no open occurrence to skip",
+        # Not the pre-check's wording: reaching this means the slot WAS open and a concurrent
+        # request closed it underneath us, so "nothing to skip" would describe the wrong event.
+        conflict_detail="This chore has already been closed",
     )

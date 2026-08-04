@@ -285,10 +285,15 @@
      distinct whatever the accent. The punctuality colours mirror the
      --due-* pattern (green = on time, red = late, blue = early). All resolve
      lazily per flavour like --due-* above, so they read in light and dark.
-     --stat-skipped is deliberately the same de-emphasis grey as --due-later and
-     --done-stale rather than an accent: it is the one series that is the absence
-     of work, and it matches the grey of the Skip button that produces it. Being
-     grey it also stays legible stacked against any --primary. */
+     --stat-skipped is deliberately grey rather than an accent: it is the one
+     series that is the absence of work. It joins --due-later and --done-stale on
+     --placeholder (overlay0), which is the de-emphasis grey for FILLED areas -
+     NOT --muted-foreground (subtext0), which the Skip button and the History
+     badge use for de-emphasised text and which is too heavy for a whole arc or
+     bar. So the chart grey and the button grey are deliberately different values
+     from the same family, and the two diverge in opposite directions between the
+     light and dark flavours; do not "fix" one to match the other. Being grey it
+     also stays legible stacked against any --primary. */
   --chart-1: var(--ctp-teal);
   --chart-2: var(--ctp-blue);
   --chart-3: var(--ctp-peach);
