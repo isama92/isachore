@@ -32,6 +32,80 @@ describe('formatValidationDetail', () => {
     )
   })
 
+  it('agrees with a bound of one', () => {
+    // min_length=1 is on a chore title, both name fields, tag and household names and the
+    // 2FA code, so "Must be at least 1 characters" was properly reachable.
+    expect(
+      formatValidationDetail([
+        {
+          type: 'string_too_short',
+          loc: ['body', 'name'],
+          msg: 'String should have at least 1 character',
+          ctx: { min_length: 1 },
+        },
+      ]),
+    ).toBe('Name: Must be at least 1 character')
+  })
+
+  it('agrees with a bound of one in Italian too', async () => {
+    await i18n.changeLanguage('it')
+    expect(
+      formatValidationDetail([
+        { type: 'too_long', loc: ['body', 'weekdays'], msg: 'x', ctx: { max_length: 1 } },
+      ]),
+    ).toBe('Nei giorni: Deve contenere al massimo 1 elemento')
+  })
+
+  it('falls back to pydantic English rather than rendering a raw placeholder', () => {
+    // Pydantic always sends ctx for a constrained type, so this is a body that did not come
+    // from pydantic. "Must be {{le}} or less" would be worse than the developer English.
+    expect(
+      formatValidationDetail([
+        {
+          type: 'less_than_equal',
+          loc: ['body', 'repeat_interval'],
+          msg: 'Input should be less than or equal to 365',
+        },
+      ]),
+    ).toBe('Repeat every: Input should be less than or equal to 365')
+  })
+
+  it('falls back for a pluralised type with no bound, where the key itself would show', () => {
+    // Worse than a placeholder: without `count` i18next finds neither _one nor _other and
+    // returns the bare key, so the user would read "errors.validation.string_too_long".
+    expect(
+      formatValidationDetail([
+        { type: 'string_too_long', loc: ['body', 'title'], msg: 'String is too long' },
+      ]),
+    ).toBe('Title: String is too long')
+  })
+
+  it('falls back when a pluralised bound is not a number', () => {
+    // A non-numeric count picks no plural form either, so it has the same bare-key failure
+    // as a missing one and needs the same answer.
+    expect(
+      formatValidationDetail([
+        {
+          type: 'string_too_long',
+          loc: ['body', 'title'],
+          msg: 'String is too long',
+          ctx: { max_length: 'lots' },
+        },
+      ]),
+    ).toBe('Title: String is too long')
+  })
+
+  it('survives a type name that collides with an Object prototype key', () => {
+    // Note this does NOT pin the hasOwn guard: with `in` the lookup would return a function
+    // whose `ctxKey` is undefined, and the missing-bound check would send it to the same
+    // fallback. It is here as an adversarial input, not as a guard test.
+    expect(
+      formatValidationDetail([
+        { type: 'constructor', loc: ['body', 'title'], msg: 'Something odd' },
+      ]),
+    ).toBe('Title: Something odd')
+  })
+
   it('reads a numeric bound out of ctx for the query-parameter types', () => {
     expect(
       formatValidationDetail([
@@ -72,10 +146,10 @@ describe('formatValidationDetail', () => {
         {
           type: 'value_error',
           loc: ['body'],
-          msg: 'Value error, start_date is required unless the chore is unscheduled',
+          msg: 'Value error, A start date is required unless the chore is unscheduled',
         },
       ]),
-    ).toBe('start_date is required unless the chore is unscheduled')
+    ).toBe('A start date is required unless the chore is unscheduled')
   })
 
   it('answers an EmailStr rejection itself rather than passing its wording on', () => {

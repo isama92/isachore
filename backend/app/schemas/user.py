@@ -142,7 +142,9 @@ class ProfileUpdate(BaseModel):
     @model_validator(mode="after")
     def _password_pair(self) -> "ProfileUpdate":
         if self.new_password is not None and not self.current_password:
-            raise ValueError("current_password is required to set a new password")
+            # User-facing copy, not a developer message: a `value_error` is passed through
+            # verbatim by the frontend's 422 formatter (see the note in schemas/chore.py).
+            raise ValueError("Your current password is required to set a new one")
         return self
 
 

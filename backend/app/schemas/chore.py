@@ -59,7 +59,10 @@ def _normalised_schedule(
     if repeats == RepeatPeriod.manual:
         return None, 1, None
     if start_date is None:
-        raise ValueError("start_date is required unless the chore is unscheduled")
+        # Reads as copy, not as a field name: the frontend's 422 formatter passes a
+        # `value_error` through verbatim (lib/validationError.ts), deliberately, because a
+        # generic would say less. So whatever is written here IS what the user is shown.
+        raise ValueError("A start date is required unless the chore is unscheduled")
     if repeats != RepeatPeriod.weekly or not weekdays:
         return start_date, repeat_interval, None
     return start_date, repeat_interval, sorted(set(weekdays))

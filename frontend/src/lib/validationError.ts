@@ -15,48 +15,64 @@ import i18n from '../i18n/i18n'
  * rather than its English `msg`, which is phrased for developers.
  */
 
-// Pydantic error types we have our own wording for. Deliberately a closed tuple: the
-// template literal below is what makes `t()` typecheck, so a type not listed here falls
-// through to pydantic's own `msg` rather than producing a missing-key string.
+// Pydantic error types we have our own wording for, mapped to the `ctx` key their sentence
+// interpolates (null when it takes no value). Deliberately a closed set: the template
+// literal below is what makes `t()` typecheck, so a type not listed here falls through to
+// pydantic's own `msg` rather than producing a missing-key string.
+//
+// `plural: true` marks a bound the sentence has to agree with grammatically - "at least 1
+// characters" is reachable, since `min_length=1` sits on a chore title, both name fields,
+// tag and household names and the 2FA code.
 //
 // `value_error` is deliberately ABSENT. It is what a custom validator raises, and our two
 // (schemas/chore.py, schemas/user.py) write better English than any generic could - see
 // messageFor below, which unwraps them.
-const VALIDATION_TYPES = [
-  'missing',
-  'string_type',
-  'string_too_short',
-  'string_too_long',
-  'string_pattern_mismatch',
-  'greater_than',
-  'greater_than_equal',
-  'less_than',
-  'less_than_equal',
-  'int_type',
-  'int_parsing',
-  'bool_type',
-  'bool_parsing',
-  'date_type',
-  'date_parsing',
-  'date_from_datetime_parsing',
-  'datetime_parsing',
-  'list_type',
-  'too_short',
-  'too_long',
-  'literal_error',
-  'enum',
-  'json_invalid',
-] as const
+const VALIDATION_TYPES = {
+  missing: null,
+  string_type: null,
+  string_pattern_mismatch: null,
+  int_type: null,
+  int_parsing: null,
+  bool_type: null,
+  bool_parsing: null,
+  date_type: null,
+  date_parsing: null,
+  date_from_datetime_parsing: null,
+  datetime_parsing: null,
+  list_type: null,
+  json_invalid: null,
+  string_too_short: { ctxKey: 'min_length', plural: true },
+  string_too_long: { ctxKey: 'max_length', plural: true },
+  too_short: { ctxKey: 'min_length', plural: true },
+  too_long: { ctxKey: 'max_length', plural: true },
+  greater_than: { ctxKey: 'gt', plural: false },
+  greater_than_equal: { ctxKey: 'ge', plural: false },
+  less_than: { ctxKey: 'lt', plural: false },
+  less_than_equal: { ctxKey: 'le', plural: false },
+  literal_error: { ctxKey: 'expected', plural: false },
+  enum: { ctxKey: 'expected', plural: false },
+} as const satisfies Record<string, null | { ctxKey: string; plural: boolean }>
 
-type ValidationType = (typeof VALIDATION_TYPES)[number]
+type ValidationType = keyof typeof VALIDATION_TYPES
 
 function isValidationType(value: string): value is ValidationType {
-  return (VALIDATION_TYPES as readonly string[]).includes(value)
+  // hasOwn, not `in`: `in` walks the prototype chain, so a type called `constructor` or
+  // `toString` would pass the guard and then index to a function. Today that would still
+  // come out right, because the resulting spec has no `ctxKey` and mappedMessage's missing
+  // bound check sends it to the `msg` fallback - which is why no test can tell the two
+  // apart. hasOwn is simply the predicate that means what this asks, rather than one that
+  // relies on that coincidence holding.
+  return Object.hasOwn(VALIDATION_TYPES, value)
 }
 
-// Wire field names we can name in the user's language, wording matched to the label on the
-// form the field belongs to (so "Repeat every", not "Interval"). Anything absent falls back
-// to the raw name; see labelFor.
+// Wire field names we can name in the user's language. The wording was *taken* from the
+// label on the form each field belongs to, so "Repeat every" rather than "Interval" - but
+// these are independent strings, and nothing keeps them in step if a form label is later
+// reworded. That is the deliberate trade: `$t(choreCreate.titleLabel)`-style nesting would
+// couple them, at the cost of a reference that breaks silently (i18next renders the literal
+// `$t(...)` on a miss) and of picking one referent for names like `title` and `name` that
+// several forms share. Re-check this list when renaming a form label. Anything absent falls
+// back to the raw wire name; see labelFor.
 const FIELD_NAMES = [
   'email',
   'password',
@@ -137,12 +153,33 @@ function interpolationFor(ctx: unknown): Record<string, string | number> {
   return values
 }
 
+/** Our own wording for a mapped type, or null when `ctx` did not carry the value the
+ *  sentence needs - in which case the caller falls back to pydantic's `msg`, since an
+ *  unresolved `{{max_length}}` (or, for a pluralised key, the bare key) is worse than
+ *  developer English. Pydantic always sends `ctx` for a constrained type, so this only
+ *  fires on a body that did not come from pydantic. */
+function mappedMessage(type: ValidationType, ctx: unknown): string | null {
+  const spec = VALIDATION_TYPES[type]
+  if (spec === null) return i18n.t(`errors.validation.${type}`)
+
+  const values = interpolationFor(ctx)
+  const bound = values[spec.ctxKey]
+  if (bound === undefined) return null
+  if (!spec.plural) return i18n.t(`errors.validation.${type}`, { replace: values })
+  if (typeof bound !== 'number') return null
+  // `count` selects the plural form and nothing else: the sentence still interpolates out
+  // of `replace`, so it stays true that no pydantic ctx key can reach i18next as an option
+  // of its own (a raw `count` in ctx would otherwise switch on pluralisation by accident).
+  return i18n.t(`errors.validation.${type}`, { count: bound, replace: values })
+}
+
 function messageFor(issue: ValidationIssue): string {
   const type = typeof issue.type === 'string' ? issue.type : ''
   const msg = typeof issue.msg === 'string' ? issue.msg.trim() : ''
 
   if (isValidationType(type)) {
-    return i18n.t(`errors.validation.${type}`, { replace: interpolationFor(issue.ctx) })
+    const mapped = mappedMessage(type, issue.ctx)
+    if (mapped !== null) return mapped
   }
   if (type === 'value_error') {
     if (msg.startsWith(EMAIL_ERROR_PREFIX)) return i18n.t('errors.validation.email')
