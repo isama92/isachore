@@ -224,6 +224,7 @@
   --color-stat-on-time: var(--stat-on-time);
   --color-stat-late: var(--stat-late);
   --color-stat-early: var(--stat-early);
+  --color-stat-skipped: var(--stat-skipped);
 }
 
 /* Theme palettes = the four Catppuccin flavours. Each [data-theme] block sets
@@ -277,13 +278,22 @@
   --done-week: var(--ctp-yellow);
   --done-stale: var(--placeholder);
 
-  /* Statistics charts. Single-series bar charts (completions over time, per
-     person) use --primary, so they track the user's chosen accent. --chart-1..5
+  /* Statistics charts. The work-done series (completions over time, per person)
+     uses --primary, so it tracks the user's chosen accent. --chart-1..5
      is the reserved categorical ramp for any future multi-series chart: fixed
      Catppuccin accents (independent of --primary) so those series stay mutually
-     distinct whatever the accent. The three punctuality colours mirror the
+     distinct whatever the accent. The punctuality colours mirror the
      --due-* pattern (green = on time, red = late, blue = early). All resolve
-     lazily per flavour like --due-* above, so they read in light and dark. */
+     lazily per flavour like --due-* above, so they read in light and dark.
+     --stat-skipped is deliberately grey rather than an accent: it is the one
+     series that is the absence of work. It joins --due-later and --done-stale on
+     --placeholder (overlay0), which is the de-emphasis grey for FILLED areas -
+     NOT --muted-foreground (subtext0), which the Skip button and the History
+     badge use for de-emphasised text and which is too heavy for a whole arc or
+     bar. So the chart grey and the button grey are deliberately different values
+     from the same family, and the two diverge in opposite directions between the
+     light and dark flavours; do not "fix" one to match the other. Being grey it
+     also stays legible stacked against any --primary. */
   --chart-1: var(--ctp-teal);
   --chart-2: var(--ctp-blue);
   --chart-3: var(--ctp-peach);
@@ -292,6 +302,7 @@
   --stat-on-time: var(--ctp-green);
   --stat-late: var(--ctp-red);
   --stat-early: var(--ctp-sky);
+  --stat-skipped: var(--placeholder);
 }
 
 /* Latte (light). Also serves as the no-attribute fallback via :root. */

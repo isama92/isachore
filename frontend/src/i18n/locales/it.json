@@ -147,6 +147,11 @@
     "markDone": "Fatto: “{{title}}”",
     "showDescription": "Descrizione: “{{title}}”",
     "done": "Fatto",
+    "skip": "Salta: “{{title}}”",
+    "skipConfirm": "Saltare “{{title}}”?",
+    "skipConfirmBody": "Verrà registrata come saltata e la faccenda passa alla data successiva senza che nulla venga conteggiato come fatto.",
+    "skipConfirmAction": "Salta",
+    "skipError": "Impossibile saltare la faccenda",
     "loadError": "Impossibile caricare le tue faccende in scadenza",
     "completeError": "Impossibile segnare la faccenda come completata",
     "filters": {
@@ -234,19 +239,20 @@
   },
   "history": {
     "title": "Cronologia",
-    "empty": "Ancora nessuna faccenda completata.",
+    "empty": "Ancora niente da mostrare.",
     "loadError": "Impossibile caricare la cronologia",
     "onTime": "Puntuale",
+    "skipped": "Saltata",
     "daysLate_one": "{{count}} giorno di ritardo",
     "daysLate_other": "{{count}} giorni di ritardo",
     "notDue": "—",
     "unknownUser": "Sconosciuto",
     "undo": "Annulla",
-    "undone": "Completamento annullato",
+    "undone": "Voce annullata",
     "undoError": "Annullamento non riuscito",
-    "undoConfirm": "Annullare questo completamento?",
-    "undoConfirmBody": "Il completamento verrà rimosso e la faccenda potrebbe tornare da fare.",
-    "undoConfirmAction": "Annulla completamento",
+    "undoConfirm": "Annullare questa voce?",
+    "undoConfirmBody": "La voce verrà rimossa e la faccenda potrebbe tornare da fare.",
+    "undoConfirmAction": "Annulla voce",
     "headers": {
       "title": "Faccenda",
       "household": "Nucleo domestico",
@@ -259,7 +265,11 @@
       "userLabel": "Persona",
       "userAll": "Tutti",
       "householdLabel": "Nucleo domestico",
-      "householdAll": "Tutti i nuclei domestici"
+      "householdAll": "Tutti i nuclei domestici",
+      "outcomeLabel": "Esito",
+      "outcomeAll": "Completate e saltate",
+      "outcomeCompleted": "Solo completate",
+      "outcomeSkipped": "Solo saltate"
     }
   },
   "statistics": {
@@ -284,11 +294,14 @@
       "overdue": "In ritardo ora",
       "onTimeRate": "Tasso di puntualità",
       "activeChores": "Faccende attive",
-      "noData": "—"
+      "noData": "—",
+      "completedHintSkipped_one": "negli ultimi {{days}} giorni · {{count}} saltata",
+      "completedHintSkipped_other": "negli ultimi {{days}} giorni · {{count}} saltate"
     },
     "overTime": {
       "title": "Completamenti nel tempo",
-      "completions": "Completamenti"
+      "done": "Completate",
+      "skipped": "Saltate"
     },
     "statusDonut": {
       "title": "Stato attuale",
@@ -297,10 +310,11 @@
       "soon": "In arrivo"
     },
     "punctuality": {
-      "title": "Puntuali vs in ritardo",
+      "title": "Puntuali, in ritardo o saltate",
       "onTime": "Puntuali",
       "late": "In ritardo",
-      "early": "In anticipo"
+      "early": "In anticipo",
+      "skipped": "Saltate"
     },
     "perPerson": {
       "title": "Completamenti per persona",

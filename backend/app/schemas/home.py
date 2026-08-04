@@ -78,15 +78,21 @@ class CompleteChoreRequest(BaseModel):
 
 
 class CompletionRead(BaseModel):
-    """The result of marking a chore done: the recorded completion plus the chore's
-    recomputed due state. Always populated, since completing a chore always reopens it
-    (an unscheduled chore reopens at the completion moment, so it reads as due today)."""
+    """The result of closing a chore's occurrence: the recorded closure plus the chore's
+    recomputed due state. Always populated, since closing a chore always reopens it
+    (an unscheduled chore reopens at the completion moment, so it reads as due today).
+
+    Shared by `POST /chores/{id}/complete` and `POST /chores/{id}/skip`, and `skipped` is
+    what tells them apart. It is echoed rather than inferred from the route so a non-browser
+    client can read what it created straight off the 201; `completed_by_user_id` is whoever
+    the closure is recorded against either way, which for a skip is always the caller."""
 
     id: int
     chore_id: int
     title: str
     scheduled_for: datetime
     completed_by_user_id: int | None
+    skipped: bool
     created_at: datetime
     next_due: datetime
     days_until_due: int

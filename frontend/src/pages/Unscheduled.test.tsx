@@ -392,4 +392,18 @@ describe('description dialog', () => {
     const dialog = within(await screen.findByRole('dialog'))
     expect(await dialog.findByText('This chore has no description.')).toBeInTheDocument()
   })
+  it('offers no Skip action: these chores are never due', async () => {
+    mockFetch([
+      { path: FILTERS, method: 'GET', body: SOLO_OPTIONS },
+      { path: LIST, method: 'GET', body: body([makeUnscheduledChore({ id: 5, title: 'Kettle' })]) },
+    ])
+    renderWithProviders(<Unscheduled />)
+
+    const row = (await screen.findByText('Kettle')).closest('li')!
+    // Counted, not queried by name: this page passes no `skipLabel` either, so a Skip button
+    // that slipped through the gate would render with no accessible name and a query for
+    // /Skip/ would come back empty whether the gate is there or not. The count does not.
+    expect(within(row).getAllByRole('button')).toHaveLength(1)
+    expect(within(row).getByRole('button', { name: 'Done: “Kettle”' })).toBeInTheDocument()
+  })
 })

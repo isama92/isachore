@@ -44,6 +44,7 @@ export const endpoints = {
     root: `${V1}/chores`,
     byId: (id: Id) => `${V1}/chores/${id}`,
     complete: (id: Id) => `${V1}/chores/${id}/complete`,
+    skip: (id: Id) => `${V1}/chores/${id}/skip`,
   },
 
   completions: {

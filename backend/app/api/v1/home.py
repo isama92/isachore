@@ -106,6 +106,12 @@ async def get_home(
 
     # Today's progress over the same scope: an occurrence completed today (whose slot
     # was due today or earlier) counts as done; overdue/due-today open ones are pending.
+    #
+    # This is one of the two queries that deliberately does NOT exclude skipped occurrences
+    # (see `ChoreOccurrence.skipped`). The bar answers "how much of today's list have you
+    # got through", and a skipped chore is off the list: it was dealt with, decided about,
+    # and is gone from the pending set either way. Statistics asks a different question -
+    # how much work was done - and does filter them out, so the two disagree by design.
     done_filters = [
         *scope,
         ChoreOccurrence.status == OccurrenceStatus.done,

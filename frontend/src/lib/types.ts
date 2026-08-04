@@ -136,17 +136,21 @@ export type Chore = {
 // the two cannot drift; anything wanting the description reads GET /chores/{id}.
 export type ChoreListRow = Omit<Chore, 'description'> & { has_description: boolean }
 
-// A completed-chore row for the History view: GET /api/v1/completions.
-// `title` is the snapshot taken at completion (survives a rename/soft-delete);
+// A closed-occurrence row for the History view: GET /api/v1/completions.
+// `title` is the snapshot taken at closing (survives a rename/soft-delete);
 // `completed_at` is when it was checked off and `scheduled_for` the occurrence's
 // due datetime, so `days_late` (>0 late, <=0 on time/early) is their date diff.
 // `completed_by` is null when the completer's account was hard-deleted, and
 // `days_late` is null for an unscheduled chore, which had no due date to miss.
+// `skipped` marks the closures where the work was not done: they belong in the list and
+// can be undone like any other, but must read as distinct from real completions. Their
+// `days_late` is null too - a real deadline, but no work to have been punctual about.
 export type HistoryEntry = {
   id: number
   title: string
   scheduled_for: string
   completed_at: string
+  skipped: boolean
   days_late: number | null
   completed_by: HouseholdMember | null
   household: { id: number; name: string }
@@ -166,28 +170,36 @@ export type StatsRange = '7d' | '30d' | '90d'
 
 // Aggregated statistics for the Statistics page: GET /api/v1/stats.
 // `range` echoes the request; `granularity` ('day' for 7d/30d, 'week' for 90d)
-// tells the time-series chart how to label its axis. KPIs: `completed_in_range`
-// and `on_time_rate` follow the range; `currently_overdue` and `active_chores`
-// are a live snapshot. `on_time_rate` (fraction not late) is null when none of
-// the range's completions had a due date. status_breakdown sums to active_chores.
+// tells the time-series chart how to label its axis. KPIs: `completed_in_range`,
+// `skipped_in_range` and `on_time_rate` follow the range; `currently_overdue` and
+// `active_chores` are a live snapshot. `on_time_rate` (fraction not late) is null when none
+// of the range's completions had a due date. status_breakdown sums to active_chores.
 // Unscheduled chores count in completed_in_range, completions_over_time and
 // per_person, but have no due date and so are excluded from currently_overdue,
 // active_chores, status_breakdown, punctuality and on_time_rate: punctuality
 // therefore does NOT sum to completed_in_range.
+// Skipped occurrences are closures that produced no work, so they are excluded from every
+// "work done" figure (completed_in_range, the buckets' `count`, per_person, on_time_rate)
+// and reported alongside instead: skipped_in_range, the buckets' `skipped`, and a fourth
+// punctuality bucket. Those four DO partition the scheduled occurrences closed in the range
+// (skipping an unscheduled chore is refused by the API), but they still do not add up to
+// on_time_rate's denominator, which is the first three only.
 export type StatsData = {
   range: StatsRange
   granularity: 'day' | 'week'
   kpis: {
     completed_in_range: number
+    skipped_in_range: number
     currently_overdue: number
     on_time_rate: number | null
     active_chores: number
   }
-  // One point per bucket; `bucket` is an ISO date (the day, or the week's Monday).
-  completions_over_time: { bucket: string; count: number }[]
+  // One point per bucket; `bucket` is an ISO date (the day, or the week's Monday). Two
+  // series over the same buckets, both seeded to 0, so the stacked bars line up.
+  completions_over_time: { bucket: string; count: number; skipped: number }[]
   status_breakdown: { overdue: number; today: number; soon: number }
-  punctuality: { on_time: number; late: number; early: number }
-  // Ranked most-completions-first; excludes completions with no known completer.
+  punctuality: { on_time: number; late: number; early: number; skipped: number }
+  // Ranked most-completions-first; excludes completions with no known completer, and skips.
   per_person: { user_id: number; first_name: string; last_name: string; count: number }[]
 }
 

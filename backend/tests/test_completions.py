@@ -810,3 +810,127 @@ async def test_occurrence_can_be_completed_again_after_undo(
     assert undo.status_code == 204
     again = await client.post(f"/api/v1/chores/{chore.id}/complete")
     assert again.status_code == 201
+
+
+async def test_history_marks_skips_and_suppresses_their_lateness(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    """A skip belongs in the list (something happened to that slot) but must be readable as
+    distinct from work. Its `days_late` is None like an unscheduled chore's: there was a real
+    deadline, but no work to have been punctual about, and "3 days late" would read as a
+    completion that ran over."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, with_occurrence=False)
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=DUE,
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=DUE + timedelta(days=3),
+        skipped=True,
+    )
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=DUE + timedelta(days=7),
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=DUE + timedelta(days=10),
+    )
+    client = await auth_client(user)
+
+    items = (await client.get("/api/v1/completions?sort_by=created_at&sort_dir=asc")).json()[
+        "items"
+    ]
+    assert [(i["skipped"], i["days_late"]) for i in items] == [(True, None), (False, 3)]
+
+
+async def test_history_outcome_filter(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, with_occurrence=False)
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=DUE,
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=DUE,
+        title="A skip",
+        skipped=True,
+    )
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=DUE + timedelta(days=7),
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=DUE + timedelta(days=7),
+        title="Real work",
+    )
+    client = await auth_client(user)
+
+    both = (await client.get("/api/v1/completions")).json()
+    assert both["total"] == 2
+    only_skipped = (await client.get("/api/v1/completions?outcome=skipped")).json()
+    assert only_skipped["total"] == 1
+    assert [i["title"] for i in only_skipped["items"]] == ["A skip"]
+    only_done = (await client.get("/api/v1/completions?outcome=completed")).json()
+    assert only_done["total"] == 1
+    assert [i["title"] for i in only_done["items"]] == ["Real work"]
+
+
+async def test_history_rejects_an_unknown_outcome(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    auth_client: AuthClient,
+) -> None:
+    user = await make_user()
+    await make_household(members=[user])
+    client = await auth_client(user)
+    resp = await client.get("/api/v1/completions?outcome=maybe")
+    assert resp.status_code == 422
+
+
+async def test_undoing_a_skip_clears_the_flag(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    """Reopening has to reset `skipped`, or the revived occurrence is completed for real later
+    and still lands in history as a skip - nothing downstream re-derives it."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    today = datetime.now(UTC).date()
+    chore = await make_chore(household=household, start_date=today, repeats=RepeatPeriod.daily)
+    client = await auth_client(user)
+
+    skip = await client.post(f"/api/v1/chores/{chore.id}/skip")
+    assert skip.status_code == 201
+    assert (await client.delete(f"/api/v1/completions/{skip.json()['id']}")).status_code == 204
+
+    reopened = (
+        await db_session.execute(
+            select(ChoreOccurrence).where(
+                ChoreOccurrence.chore_id == chore.id,
+                ChoreOccurrence.status == OccurrenceStatus.open,
+            )
+        )
+    ).scalar_one()
+    assert reopened.skipped is False
+
+    # And completing it for real now records real work, not a skip.
+    again = await client.post(f"/api/v1/chores/{chore.id}/complete")
+    assert again.status_code == 201
+    items = (await client.get("/api/v1/completions")).json()["items"]
+    assert [i["skipped"] for i in items] == [False]

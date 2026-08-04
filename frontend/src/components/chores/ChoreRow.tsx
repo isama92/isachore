@@ -1,10 +1,11 @@
-import { CheckIcon, FileTextIcon } from 'lucide-react'
+import { CheckIcon, FileTextIcon, SkipForwardIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
 // One chore card in a list view: a colour-coded dot + title + one line of detail, who it
 // is for ("who is this for"), an optional marker for chores that carry written instructions,
-// and a "Done" button. Shared by the two list pages, which
+// an optional Skip action, and a "Done" button. Shared by the two list pages, which
 // differ only in what they put in `detail` and how they react to a completion:
 //
 // - My Chores passes a due label and `exiting`, so the row plays an exit animation and
@@ -12,7 +13,7 @@ import { cn } from '@/lib/utils'
 // - Unscheduled Chores passes a recency label and `busy`, because the row stays put and
 //   simply re-reads "Last done today" once the refetch lands.
 //
-// Both disable the button while their respective flag is set, so a double click cannot
+// Both disable the buttons while their respective flag is set, so a double click cannot
 // submit twice.
 export default function ChoreRow({
   title,
@@ -25,7 +26,9 @@ export default function ChoreRow({
   doneText,
   doneLabel,
   descriptionLabel,
+  skipLabel,
   onShowDescription,
+  onSkip,
   onComplete,
 }: {
   title: string
@@ -44,7 +47,13 @@ export default function ChoreRow({
   // is only read when the handler is set - but it is the icon button's ONLY accessible name, so
   // a caller passing the handler without it ships an unnamed button.
   descriptionLabel?: string
+  // `onSkip` gates the Skip action the same way, and Unscheduled Chores is exactly why it is
+  // optional rather than a boolean: those chores are never due, so there is no deadline to
+  // move past (the API refuses one outright). Passing no handler is how that page opts out.
+  // `skipLabel` is likewise the icon-only button's only accessible name.
+  skipLabel?: string
   onShowDescription?: () => void
+  onSkip?: () => void
   onComplete: () => void
 }) {
   return (
@@ -104,6 +113,35 @@ export default function ChoreRow({
               </span>
             )}
           </div>
+          {/* Skip sits to the LEFT of Done so the primary action keeps the row's edge, and it
+              is grey (--muted-foreground, the same de-emphasis as the description marker)
+              rather than accented, because deciding not to do a chore is not the happy path.
+              It carries a tooltip where the marker does not: an unlabelled icon that moves a
+              chore's schedule needs to say so before it is pressed.
+              Its own TooltipProvider (delay 0, matching the app-wide one), nested inside
+              RequireAuth's exactly as RichTextToolbar does: Radix allows the nesting, and it
+              is what keeps the row renderable outside RequireAuth - including in the page
+              tests, where renderWithProviders supplies no provider at all. */}
+          {onSkip && (
+            <TooltipProvider delayDuration={0}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    disabled={exiting || busy}
+                    aria-label={skipLabel}
+                    onClick={onSkip}
+                    className="shrink-0 text-muted-foreground"
+                  >
+                    <SkipForwardIcon />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{skipLabel}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
           {/* Outline pill in the active accent (--primary) that fills on hover. */}
           <Button
             type="button"

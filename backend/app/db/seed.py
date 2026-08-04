@@ -421,12 +421,20 @@ def _seed_chore(
     occurrences = 0
     today = now.date()
 
-    # `done` is the 1-based running completion count (what should_reassign expects).
-    for done in range(1, spec.completions + 1):
+    # `closure` counts every closed occurrence; `completed` counts only the ones that were
+    # really done, which is what should_reassign expects (1-based).
+    completed = 0
+    for closure in range(1, spec.completions + 1):
         # Never complete an occurrence that isn't in the past: today's/future slots stay
         # open (the terminal row below).
         if scheduled.date() >= today:
             break
+        # Every fifth closure of a *scheduled* chore is a skip rather than a completion, so a
+        # freshly seeded stack actually exercises the new surfaces: History's badge and outcome
+        # filter, the grey series on the time chart, the fourth punctuality slice. Never an
+        # unscheduled chore, because the skip endpoint refuses those and stats' punctuality
+        # relies on every skipped row having had a real deadline.
+        was_skipped = spec.repeats != RepeatPeriod.manual and closure % 5 == 0
         completed_at = min(scheduled + timedelta(hours=8), now)
         session.add(
             ChoreOccurrence(
@@ -434,6 +442,7 @@ def _seed_chore(
                 scheduled_for=scheduled,
                 assignee_id=assignee.id if assignee is not None else None,
                 status=OccurrenceStatus.done,
+                skipped=was_skipped,
                 title=spec.title,
                 completed_by_user_id=assignee.id if assignee is not None else None,
                 completed_at=completed_at,
@@ -441,15 +450,20 @@ def _seed_chore(
             )
         )
         occurrences += 1
-        if assignee is not None:
-            counts[assignee.id] = counts.get(assignee.id, 0) + 1
         nxt = next_occurrence_after(scheduled, completed_at, rule)
-        if (
-            spec.assignment != AssignmentType.manual
-            and pool
-            and should_reassign(done, spec.turn_length)
-        ):
-            assignee = next_assignee(spec.assignment, pool, assignee, counts, rng=rng)
+        # A skip earns no rotation credit and spends none of the turn, exactly as
+        # `_close_occurrence` has it: it neither feeds the least_done tally nor advances the
+        # handoff, so whoever skipped is still up next.
+        if not was_skipped:
+            completed += 1
+            if assignee is not None:
+                counts[assignee.id] = counts.get(assignee.id, 0) + 1
+            if (
+                spec.assignment != AssignmentType.manual
+                and pool
+                and should_reassign(completed, spec.turn_length)
+            ):
+                assignee = next_assignee(spec.assignment, pool, assignee, counts, rng=rng)
         scheduled = nxt
 
     # The single terminal open occurrence. Every chore gets one, whatever its period: an

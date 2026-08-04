@@ -19,7 +19,12 @@ router = APIRouter()
 async def _last_completions(session: SessionDep, chore_ids: list[int]) -> dict[int, datetime]:
     """The most recent completion time per chore, for the chores given. One grouped query
     rather than one per row, the same batching `_attach_current_assignee` does for the
-    chores list. Chores never completed are simply absent from the mapping."""
+    chores list. Chores never completed are simply absent from the mapping.
+
+    Skipped occurrences are excluded, so "Last done" keeps meaning what it says. Reachable
+    even though this page offers no skip button: a chore can be skipped while it is on a
+    schedule and switched to unscheduled afterwards, and its most recent closure would then
+    be a skip."""
     if not chore_ids:
         return {}
     rows = await session.execute(
@@ -27,6 +32,7 @@ async def _last_completions(session: SessionDep, chore_ids: list[int]) -> dict[i
         .where(
             ChoreOccurrence.chore_id.in_(chore_ids),
             ChoreOccurrence.status == OccurrenceStatus.done,
+            ChoreOccurrence.skipped.is_(False),
         )
         .group_by(ChoreOccurrence.chore_id)
     )
