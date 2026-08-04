@@ -19,8 +19,9 @@ class HouseholdRole(StrEnum):
     only place that ordering is written down.
 
     organiser manages the household's chores and tags on top of everything a
-    deputy can do; deputy adds History and Statistics to what a helper can do;
-    helper can only tick chores off. Household *ownership* stays a separate fact
+    deputy can do; deputy adds Statistics, and the whole household's History
+    rather than only their own rows; helper ticks chores off and sees their own
+    closures on History. Household *ownership* stays a separate fact
     (`Household.admin_id`) and outranks all three: the owner is always an
     organiser, and only they rename or delete the household, remove members or
     transfer it. Setting roles and inviting are organiser-level, with one

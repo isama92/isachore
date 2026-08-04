@@ -10,13 +10,14 @@ import {
   Home,
   House,
   LogOut,
+  ScrollText,
   Settings,
   Shield,
   Tag as TagIcon,
   Users,
 } from 'lucide-react'
 import { useAuth } from '../auth/useAuth'
-import { hasRoleSomewhere } from '../lib/permissions'
+import { hasRoleSomewhere, ownsAnyHousehold } from '../lib/permissions'
 import { routes } from '../lib/routes'
 import { fullName, initials } from '../lib/user'
 import BrandMark from './brand/BrandMark'
@@ -47,31 +48,35 @@ export default function AppSidebar() {
   // Close the mobile drawer after a navigation; harmless on desktop.
   const closeMobile = () => setOpenMobile(false)
 
-  // History and Statistics need a deputy somewhere; the two management pages need an
-  // organiser. The first two ARE the same expression today - not a copy-paste slip: they are
-  // two independent policy questions that currently share an answer, so moving Statistics to
-  // its own rung is a one-line change here rather than an untangling.
-  const canSeeHistory = hasRoleSomewhere(memberships, 'deputy')
+  // Statistics needs a deputy somewhere; the two management pages need an organiser. History
+  // used to share the Statistics expression and no longer does: it is unconditional now,
+  // because the endpoint narrows per household (everybody's closures where you are a deputy,
+  // your own where you are a helper) rather than refusing.
   const canSeeStatistics = hasRoleSomewhere(memberships, 'deputy')
   const canManage = hasRoleSomewhere(memberships, 'organiser')
+  // Logs is gated on OWNERSHIP, which is not a rung on the ladder: an organiser who does not
+  // own the household manages its chores but does not get the record of that management.
+  const canSeeLogs = ownsAnyHousehold(memberships)
 
   // Household roles decide which of these a user sees at all: a page they cannot use is
   // hidden rather than shown and then refused. `show` is per item because the roles are per
   // household while this nav is global, so the rule is "reaches the role somewhere" - see
-  // hasRoleSomewhere. The four unconditional items are open to every role (completing chores
-  // is what a helper is for, and the household pages are read-only unless you own one).
-  // Whoever adds an item here must add the matching RequireRole route in App.tsx: hiding a
-  // link is not a permission check, and neither is the guard - the API is.
+  // hasRoleSomewhere. The five unconditional items are open to every role (completing chores
+  // is what a helper is for, History shows them their own closures, and the household pages
+  // are read-only unless you own one). Whoever adds an item here must add the matching
+  // RequireRole route in App.tsx: hiding a link is not a permission check, and neither is the
+  // guard - the API is.
   const items = [
     { to: routes.home, icon: Home, label: t('sidebar.home') },
     { to: routes.unscheduled, icon: CalendarOff, label: t('sidebar.unscheduled') },
-    { to: routes.history, icon: History, label: t('sidebar.history'), show: canSeeHistory },
+    { to: routes.history, icon: History, label: t('sidebar.history') },
     {
       to: routes.statistics,
       icon: ChartColumn,
       label: t('sidebar.statistics'),
       show: canSeeStatistics,
     },
+    { to: routes.logs, icon: ScrollText, label: t('sidebar.logs'), show: canSeeLogs },
     { to: routes.tags.list, icon: TagIcon, label: t('sidebar.tags'), show: canManage },
     { to: routes.chores.list, icon: ClipboardList, label: t('sidebar.chores'), show: canManage },
     { to: routes.households.list, icon: House, label: t('sidebar.households') },

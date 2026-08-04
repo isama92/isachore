@@ -16,10 +16,12 @@ export function roleAtLeast(role: HouseholdRole, min: HouseholdRole): boolean {
 /**
  * Whether the user reaches `min` in at least one household.
  *
- * This is the nav rule. Home, History, Statistics and the chores list all span every
- * household at once, so an item shows when *any* membership grants it and the endpoint
- * then returns only the households that do - an organiser in one house and a helper in
- * another sees Statistics, for the first house only.
+ * This is the nav rule. Home, Statistics and the chores list all span every household at
+ * once, so an item shows when *any* membership grants it and the endpoint then returns only
+ * the households that do - an organiser in one house and a helper in another sees
+ * Statistics, for the first house only. History is not on that list: it is unconditional,
+ * because its endpoint narrows *within* a household (your own closures where you are a
+ * helper) instead of dropping it, so there is no rung to gate the item on.
  *
  * No memberships means false, which is what gives a brand-new account (a normal, reachable
  * state - nothing provisions a household) the minimal sidebar until they create or join one.
@@ -46,6 +48,31 @@ export function hasRoleIn(
  */
 export function householdIdsWithRole(memberships: Membership[], min: HouseholdRole): Set<number> {
   return new Set(memberships.filter((m) => roleAtLeast(m.role, min)).map((m) => m.household_id))
+}
+
+/**
+ * Whether the user owns at least one household.
+ *
+ * The nav rule for Logs. Ownership is `households.admin_id`, NOT a rung on the role ladder:
+ * the owner is by definition an organiser, but an organiser is not an owner, and only the
+ * owner renames or deletes the household, removes members or transfers it. So this is a
+ * sibling of `hasRoleSomewhere` rather than a call to it.
+ *
+ * False for a member of none, and false for a membership that carries no ownership flag at
+ * all (an older API answering a cached shell). Both hide the item, which is the fail-closed
+ * direction: the alternative is offering a page the API will empty.
+ */
+export function ownsAnyHousehold(memberships: Membership[]): boolean {
+  return memberships.some((m) => m.owned)
+}
+
+/**
+ * The households the user owns, for narrowing a picker or filter list. The ownership
+ * counterpart of `householdIdsWithRole`, needed for the same reason: `/completions/filters` is
+ * not narrowed server-side, so Logs would otherwise offer a household its list has no rows for.
+ */
+export function ownedHouseholdIds(memberships: Membership[]): Set<number> {
+  return new Set(memberships.filter((m) => m.owned).map((m) => m.household_id))
 }
 
 /**

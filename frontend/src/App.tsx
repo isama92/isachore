@@ -5,6 +5,7 @@ import { routes } from './lib/routes'
 import { Spinner } from '@/components/ui/spinner'
 import RequireAdmin from './components/RequireAdmin'
 import RequireAuth from './components/RequireAuth'
+import RequireOwner from './components/RequireOwner'
 import RequireRole from './components/RequireRole'
 import AdminHouseholdCreate from './pages/admin/HouseholdCreate'
 import AdminHouseholdEdit from './pages/admin/HouseholdEdit'
@@ -21,6 +22,7 @@ import Home from './pages/Home'
 import HouseholdCreate from './pages/HouseholdCreate'
 import HouseholdEdit from './pages/HouseholdEdit'
 import Households from './pages/Households'
+import Logs from './pages/Logs'
 import Login from './pages/Login'
 import Profile from './pages/Profile'
 import TagCreate from './pages/TagCreate'
@@ -62,13 +64,15 @@ export default function App() {
         <Route path={routes.home} element={<Home />} />
         <Route path={routes.unscheduled} element={<Unscheduled />} />
         <Route path={routes.profile} element={<Profile />} />
-        {/* Home, Unscheduled, Profile and the household pages above/below are open to every
-            role: completing a chore is what a helper is for, and the household pages are
-            read-only for anyone who is not the owner. The two guards below mirror the
-            sidebar, which hides the same items - they catch a typed URL or a stale link,
-            and the API enforces the roles regardless. */}
+        {/* Home, Unscheduled, Profile, History and the household pages above/below are open
+            to every role: completing a chore is what a helper is for, History shows a helper
+            the chores they ticked off themselves (the endpoint narrows per household), and
+            the household pages are read-only for anyone who is not the owner. A member of no
+            household reaches History too and gets its empty state, which beats a bounce to
+            Home. The three guards below mirror the sidebar, which hides the same items - they
+            catch a typed URL or a stale link, and the API enforces the roles regardless. */}
+        <Route path={routes.history} element={<History />} />
         <Route element={<RequireRole min="deputy" />}>
-          <Route path={routes.history} element={<History />} />
           <Route
             path={routes.statistics}
             element={
@@ -77,6 +81,11 @@ export default function App() {
               </Suspense>
             }
           />
+        </Route>
+        {/* Ownership, not a rung: an organiser who does not own the household manages its
+            chores but does not get the record of that management. See RequireOwner. */}
+        <Route element={<RequireOwner />}>
+          <Route path={routes.logs} element={<Logs />} />
         </Route>
         <Route element={<RequireRole min="organiser" />}>
           <Route path={routes.chores.list} element={<Chores />} />

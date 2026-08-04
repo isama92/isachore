@@ -43,12 +43,16 @@ shown to them in the sidebar at all.
 | --------------------------------------------------- | :---: | :-------: | :----: | :----: |
 | Mark chores done, scheduled or unscheduled          |   ✓   |     ✓     |   ✓    |   ✓    |
 | My Chores, Unscheduled Chores, the household list   |   ✓   |     ✓     |   ✓    |   ✓    |
-| History and Statistics                              |   ✓   |     ✓     |   ✓    |        |
+| History of your own completions and skips           |   ✓   |     ✓     |   ✓    |   ✓    |
+| Undo your own completion or skip                    |   ✓   |     ✓     |   ✓    |   ✓    |
+| History of the whole household, and Statistics      |   ✓   |     ✓     |   ✓    |        |
+| Undo somebody else's completion or skip             |   ✓   |     ✓     |        |        |
 | Create, edit and delete chores, manage tags         |   ✓   |     ✓     |        |        |
 | Invite people, set deputy and helper roles          |   ✓   |     ✓     |        |        |
 | Grant or change the organiser role                  |   ✓   |           |        |        |
 | Rename or delete the household, remove members      |   ✓   |           |        |        |
 | Transfer the household to somebody else             |   ✓   |           |        |        |
+| Read the household's activity log (**Logs**)        |   ✓   |           |        |        |
 
 The owner is one per household and is not a fourth role: they are an organiser, and the extra
 rights come from owning the household. Their row shows as **Admin** in the members table, which
@@ -71,8 +75,29 @@ between them.
 
 Roles are per household, and the views that span several of them narrow rather than
 refuse: an organiser of one household who is a helper in another sees the second one's
-chores on My Chores and can tick them off, while its history, statistics and chores
-management stay out of reach.
+chores on My Chores and can tick them off, and finds those closures of their own on History,
+while the rest of that household's history, its statistics and its chores management stay out
+of reach.
+
+**Logs** is the household's activity log, and the one page the owner alone reaches: an organiser
+manages the chores, and this is the record of that management, so it answers to whoever the
+household belongs to. It lists who created, edited or deleted a chore and who undid somebody's
+completion or skip, newest first, filterable by action, person and household. An edit records
+*which* fields moved rather than their values, which keeps the log a record of activity rather
+than a second copy of every chore. Entries are kept for **90 days** and then deleted; the window
+is enforced by the read itself as well as by a nightly sweep, so nothing older shows even if the
+sweep has not run. Doing the chores is not logged, since History already lists every completion
+and skip.
+
+History is the one page that narrows within itself rather than being hidden. Everybody reaches
+it: where your role is deputy or above you see the whole household's completions and skips,
+and where you are a helper you see your own. With nothing but helper roles there is nothing
+left to slice, so the filters are not shown at all. Undoing follows the same split, since an
+undo of the most recent closure makes the chore due again and rolls a rotation back: your own
+entries are always yours to undo, and an organiser can undo anybody's in their household,
+which is what makes a housemate's mis-skip fixable. Somebody else's entry is marked in the
+warning colour and names them in the confirmation, because it is somebody's record of work
+done.
 
 ## Development
 
@@ -500,7 +525,16 @@ docker compose exec backend python -m app.cli clear-login-throttle 42     # one 
 
 # Expire stale household invitations now (the hourly job, run once)
 docker compose exec backend python -m app.cli expire-invitations
+
+# Delete household log entries past their 90-day retention window (the nightly job, run once)
+docker compose exec backend python -m app.cli prune-logs
 ```
+
+**Scheduled jobs.** The backend runs two of its own, in-process, started with the app: the
+invitation sweep hourly, and the household-log retention prune nightly at 03:30 UTC. Neither
+needs an external cron. The two commands above are the same jobs run once by hand, for a manual
+sweep or for an external scheduler. Note both assume a single web process, which is what the
+prod compose files run; behind several, gate them with a lock (Redis is already wired).
 
 **Clearing a lockout:** repeated failed logins lock out both the attempted email
 and the client IP for the window. `clear-login-throttle` with a user id clears
@@ -608,10 +642,4 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
 ### Todo
 
 - [ ] Live updates when a housemate completes a chore (websocket)
-- [ ] Chore change log (who changed what)
-- [ ] Let an organiser undo a housemate's completion or skip. Today `undo_completion` needs
-      both deputy scope and `completed_by_user_id == you`, so a helper's closure can be undone
-      by nobody at all: they cannot reach History, and everyone who can gets the 403. It bites
-      hardest on a mis-skip, which moves the chore's schedule rather than just logging a row
-      (the confirmation dialog on My Chores is the current mitigation, not a fix)
 - [ ] The due below the chore in the "my chores" page doesn't consider timezone but only utc, so at 1am it still doesn't show today's task but yesterday's

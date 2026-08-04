@@ -410,8 +410,8 @@ describe('AuthProvider', () => {
         body: makeMe({
           email: 'a@example.com',
           memberships: [
-            { household_id: 1, role: 'organiser' },
-            { household_id: 2, role: 'helper' },
+            { household_id: 1, role: 'organiser', owned: false },
+            { household_id: 2, role: 'helper', owned: false },
           ],
         }),
       },
@@ -439,7 +439,7 @@ describe('AuthProvider', () => {
           two_factor_required: false,
           user: makeMe({
             email: 'a@example.com',
-            memberships: [{ household_id: 3, role: 'deputy' }],
+            memberships: [{ household_id: 3, role: 'deputy', owned: false }],
           }),
         },
       },

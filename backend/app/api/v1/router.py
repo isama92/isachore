@@ -10,6 +10,7 @@ from app.api.v1 import (
     home,
     households,
     invitations,
+    logs,
     profile,
     server_settings,
     stats,
@@ -38,3 +39,4 @@ api_router.include_router(tags.router, prefix="/tags", tags=["tags"])
 api_router.include_router(chores.router, prefix="/chores", tags=["chores"])
 api_router.include_router(completions.router, prefix="/completions", tags=["completions"])
 api_router.include_router(stats.router, prefix="/stats", tags=["stats"])
+api_router.include_router(logs.router, prefix="/logs", tags=["logs"])

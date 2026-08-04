@@ -81,11 +81,17 @@ class UserRead(BaseModel):
 
 
 class MembershipRead(BaseModel):
-    """One of the caller's household memberships: which household, and what they may
-    do in it."""
+    """One of the caller's household memberships: which household, what they may do in it,
+    and whether they own *this* household (not whether they own any).
+
+    Ownership is `households.admin_id`, a separate fact from the role ladder rather than a
+    rung on it: the owner is always an organiser, but not every organiser owns. It rides here
+    because the sidebar has to decide whether to offer the Logs page before any household has
+    been fetched."""
 
     household_id: int
     role: HouseholdRole
+    owned: bool
 
 
 class MeRead(UserRead):

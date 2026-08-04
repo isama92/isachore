@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import record_event
 from app.core.config import is_dev_environment, settings
 from app.core.crypto import generate_key
+from app.core.household_log import run_prune_logs
 from app.core.invitations import run_expire_invitations
 from app.core.rate_limit import clear_login_throttle
 from app.core.security import hash_password
@@ -167,6 +168,13 @@ async def _expire_invitations_main() -> None:
     print(f"expired {count} invitation{'' if count == 1 else 's'}")
 
 
+async def _prune_logs_main() -> None:
+    """Run the household-log retention prune once (the same job the daily scheduler runs).
+    Handy for manual runs or an external cron."""
+    count = await run_prune_logs()
+    print(f"pruned {count} log entr{'y' if count == 1 else 'ies'}")
+
+
 async def _seed_main(fresh: bool) -> None:
     async with async_session_factory() as session:
         summary = await seed(session, fresh=fresh)
@@ -210,6 +218,14 @@ def main() -> None:
     )
 
     subparsers.add_parser(
+        "prune-logs",
+        help=(
+            "delete household log entries past the 90-day retention window (the daily job, "
+            "run once)"
+        ),
+    )
+
+    subparsers.add_parser(
         "generate-key",
         help="print a fresh Fernet key for APP_KEY (required outside a dev environment)",
     )
@@ -232,6 +248,8 @@ def main() -> None:
         asyncio.run(_clear_throttle_main(args.user_id))
     elif args.command == "expire-invitations":
         asyncio.run(_expire_invitations_main())
+    elif args.command == "prune-logs":
+        asyncio.run(_prune_logs_main())
     elif args.command == "generate-key":
         print(generate_key())
     elif args.command == "seed":

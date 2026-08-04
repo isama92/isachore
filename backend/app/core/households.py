@@ -1,3 +1,5 @@
+from typing import NamedTuple
+
 from fastapi import HTTPException, status
 from sqlalchemy import ColumnElement, Select, func, insert, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -100,8 +102,10 @@ def member_household_ids(user_id: int, min_role: HouseholdRole | None = None) ->
     `min_role` narrows it to the households where the user's role grants at least that
     much, which is how the role-gated read surfaces work: they return *less data* rather
     than a 403, because they all span every household at once. A deputy in one household
-    and a helper in another sees the first one's statistics and history and simply never
-    learns the second exists there."""
+    and a helper in another sees the first one's statistics and simply never learns the
+    second exists there. History is the one surface that combines two of these rather
+    than picking one (`or_` of the deputy scope and the plain scope restricted to the
+    caller's own closures), so it shows that second household - their own rows only."""
     return (
         select(household_members.c.household_id)
         .join(Household, Household.id == household_members.c.household_id)
@@ -113,6 +117,18 @@ def member_household_ids(user_id: int, min_role: HouseholdRole | None = None) ->
     )
 
 
+def owned_household_ids(user_id: int) -> Select[tuple[int]]:
+    """Subquery of the ids of the active households this user OWNS (`households.admin_id`).
+    The scope for the household log, which is an owner-level read surface.
+
+    Ownership, not a role: `member_household_ids(user_id, HouseholdRole.organiser)` is a
+    different and wider set, since a household can hold several organisers but exactly one
+    owner. Joins no membership row deliberately - `admin_id` always references a current
+    member (set_household_admin and remove_member both enforce it), so a join could only
+    change the answer where that invariant is already broken."""
+    return select(Household.id).where(Household.admin_id == user_id, Household.deleted_at.is_(None))
+
+
 def chore_scope(user_id: int, household_id: int | None) -> list[ColumnElement[bool]]:
     """Chore-level scope shared by the two occurrence views (`api/v1/home.py` and
     `api/v1/unscheduled.py`): live chores in the user's active households, optionally narrowed
@@ -121,8 +137,8 @@ def chore_scope(user_id: int, household_id: int | None) -> list[ColumnElement[bo
     left to them - which is the whole reason this is a list rather than a single clause.
 
     Deliberately takes no `min_role`: both views are open to every role, since completing a
-    chore is the one thing a helper is for. Do not add one - narrowing this is narrowing the
-    only page a helper has."""
+    chore is the one thing a helper is for. Do not add one - these two views are the work
+    itself, so narrowing this narrows what a helper is there to do."""
     scope = [
         Chore.deleted_at.is_(None),
         Chore.household_id.in_(member_household_ids(user_id)),
@@ -181,17 +197,39 @@ async def role_in_household(
     return None if role is None else HouseholdRole(role)
 
 
-async def memberships_for(session: AsyncSession, user_id: int) -> list[tuple[int, HouseholdRole]]:
-    """(household id, role) for every active household the user belongs to. Feeds
-    `/auth/me`, which is what lets the frontend hide a nav item without a second
-    request; the backend never trusts it, it re-checks on every call."""
+class Membership(NamedTuple):
+    """One of a user's household memberships: which household, what they may do in it, and
+    whether they own it. A NamedTuple rather than a third tuple slot so the one consumer
+    (`_me_read`) reads it by name."""
+
+    household_id: int
+    role: HouseholdRole
+    owned: bool
+
+
+async def memberships_for(session: AsyncSession, user_id: int) -> list[Membership]:
+    """Every active household the user belongs to, with their role and whether they own it.
+    Feeds `/auth/me`, which is what lets the frontend hide a nav item without a second
+    request; the backend never trusts it, it re-checks on every call.
+
+    `owned` costs nothing: `Household` is already joined for the `deleted_at` filter, so the
+    comparison rides along in the same row. It is a separate fact from the role ladder rather
+    than a rung on it - the owner is always an organiser, but not every organiser owns - and
+    it is what the Logs page is gated on."""
     rows = await session.execute(
-        select(household_members.c.household_id, household_members.c.role)
+        select(
+            household_members.c.household_id,
+            household_members.c.role,
+            (Household.admin_id == user_id).label("owned"),
+        )
         .join(Household, Household.id == household_members.c.household_id)
         .where(household_members.c.user_id == user_id, Household.deleted_at.is_(None))
         .order_by(household_members.c.household_id)
     )
-    return [(household_id, HouseholdRole(role)) for household_id, role in rows.all()]
+    return [
+        Membership(household_id, HouseholdRole(role), owned)
+        for household_id, role, owned in rows.all()
+    ]
 
 
 async def require_role(

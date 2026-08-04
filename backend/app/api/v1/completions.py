@@ -1,16 +1,18 @@
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps import CurrentUser, Impersonator, SessionDep
 from app.api.v1.households import SortDir
 from app.core.chores import days_late
-from app.core.households import member_household_ids
+from app.core.household_log import record_log_entry
+from app.core.households import member_household_ids, role_in_household, roles_at_least
 from app.models import (
     Chore,
     ChoreOccurrence,
     Household,
+    HouseholdLogAction,
     HouseholdRole,
     OccurrenceStatus,
     RepeatPeriod,
@@ -48,9 +50,11 @@ async def completion_filters(user: CurrentUser, session: SessionDep) -> HistoryF
     Deliberately NOT narrowed by role, unlike the history list right below it. This
     endpoint also feeds the filter bars on Home and Unscheduled (see
     `frontend/src/components/chores/useFilterOptions.ts`), which every role uses, so
-    restricting it to deputies would empty the household and member pickers for a helper
-    on the one page they do have. It exposes household names and member names, both of
-    which every member already sees on Home."""
+    restricting it to deputies would empty the household and member pickers there. Note
+    that makes it a superset of what History can show a helper (their own closures only),
+    which is why History hides its filter bar entirely rather than narrowing this. It
+    exposes household names and member names, both of which every member already sees on
+    Home."""
     households = (
         (
             await session.execute(
@@ -98,20 +102,36 @@ async def list_completions(
     household_id: Annotated[int | None, Query(ge=1)] = None,
     outcome: CompletionOutcome | None = None,
 ) -> Page[HistoryEntryRead]:
-    """Chore history across the active households where the caller is at least a
-    deputy (so housemates' completions show too). Reads the `done` occurrences of the merged
-    occurrences table, which is both real completions and skips: each entry carries `skipped`
-    so the list can tell them apart, and `outcome` narrows to one kind. Optional user_id /
-    household_id narrow the list too; a household the caller is only a helper in, one they do
-    not belong to, or a stranger's id all yield an empty page rather than a 403, since the
-    list spans every household at once. History of soft-deleted chores is kept (the title is
-    snapshotted for exactly this and the chore row still resolves the join)."""
+    """Chore history across every active household the caller belongs to, narrowed per
+    household by their role: where they are at least a deputy they see everybody's closures,
+    where they are only a helper they see their own and nothing else. Reads the `done`
+    occurrences of the merged occurrences table, which is both real completions and skips:
+    each entry carries `skipped` so the list can tell them apart, and `outcome` narrows to
+    one kind. Optional user_id / household_id narrow the list too; a household they do not
+    belong to, or a stranger's id in a household they are only a helper in, yields an empty
+    page rather than a 403, since the list spans every household at once. History of
+    soft-deleted chores is kept (the title is snapshotted for exactly this and the chore row
+    still resolves the join)."""
     # An occurrence has no household_id of its own, so scope by joining to the chore
     # and filtering on its household. No Chore.deleted_at filter: history outlives a
     # soft-deleted chore.
+    #
+    # The or_ lives in `filters`, which the count query below shares: applied to the page
+    # query alone it would narrow the rows while `total` still counted the household's whole
+    # history, and the pager would offer pages that come back empty.
     filters = [
         ChoreOccurrence.status == OccurrenceStatus.done,
-        Chore.household_id.in_(member_household_ids(user.id, HouseholdRole.deputy)),
+        or_(
+            # Deputy or better: everybody's closures, housemates' included.
+            Chore.household_id.in_(member_household_ids(user.id, HouseholdRole.deputy)),
+            # Any membership at all, own closures only. This is what a helper's History is:
+            # the chores they ticked off themselves. The overlap with the branch above is
+            # harmless, and the membership check is what keeps a stranger's household out.
+            and_(
+                Chore.household_id.in_(member_household_ids(user.id)),
+                ChoreOccurrence.completed_by_user_id == user.id,
+            ),
+        ),
     ]
     if household_id is not None:
         filters.append(Chore.household_id == household_id)
@@ -171,38 +191,65 @@ async def list_completions(
 
 
 @router.delete("/{completion_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def undo_completion(completion_id: int, user: CurrentUser, session: SessionDep) -> None:
-    """Undo a closure, completion or skip alike (identified by its done-occurrence id). Only
-    the user it is recorded against (completed_by) may undo it; the occurrence stores no
-    separate record of who submitted it, so someone who completes a chore on another
-    member's behalf cannot undo it themselves.
+async def undo_completion(
+    completion_id: int, user: CurrentUser, session: SessionDep, impersonator: Impersonator
+) -> None:
+    """Undo a closure, completion or skip alike (identified by its done-occurrence id).
+    Either the user it is recorded against (completed_by) or an organiser of that household
+    may undo it. Both halves matter: the occurrence stores no separate record of who
+    submitted it, so somebody who completes a chore on another member's behalf cannot undo
+    it themselves, and before the organiser half existed a helper's closure could be undone
+    by nobody at all.
     Undoing the chore's latest closure (the most recently *closed* one, see below)
     reopens that occurrence (deleting the successor open occurrence first) so the chore is
     available again with its original assignee; undoing an older one just removes that
     history row. A skip counts as a closure for "latest" here, because it really did close
-    its slot and its successor really is the open row."""
-    # Scope to the households where the caller is at least a deputy (same scope as the
-    # list): a done occurrence outside it, or a missing id, is a 404. That is also what
-    # stops a helper undoing anything, their own completions included - History does not
-    # exist for them, so "not found" is the honest answer rather than a role complaint.
-    occ = (
+    its slot and its successor really is the open row. Note that reopening rolls a rotating
+    chore's turn back, so an organiser undoing a housemate's closure can move work between
+    people - deliberately, since fixing a mis-skip is the point."""
+    # Scope to the households the caller belongs to at all, whatever their role: a done
+    # occurrence outside it, or a missing id, is a 404. Plain membership rather than the
+    # deputy scope because a helper reaches History for their own closures now, so a 404 on
+    # a row they can see would be the lie the "reads narrow, writes 403" rule warns about.
+    # The household id rides along for the role check below rather than costing a query.
+    row = (
         await session.execute(
-            select(ChoreOccurrence)
+            select(ChoreOccurrence, Chore.household_id)
             .join(Chore, Chore.id == ChoreOccurrence.chore_id)
             .where(
                 ChoreOccurrence.id == completion_id,
                 ChoreOccurrence.status == OccurrenceStatus.done,
-                Chore.household_id.in_(member_household_ids(user.id, HouseholdRole.deputy)),
+                Chore.household_id.in_(member_household_ids(user.id)),
             )
         )
-    ).scalar_one_or_none()
-    if occ is None:
+    ).first()
+    if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Completion not found")
+    occ, household_id = row
     if occ.completed_by_user_id != user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only undo your own completions",
-        )
+        # Asked only once the self-rule has failed, so the common path stays one query.
+        # Hand-raised rather than `require_role`, whose "Only household organisers can do
+        # this" would be a lie: the deputy who recorded this closure can undo it. The rule is
+        # a disjunction, so the message has to name both halves. The owner passes here on
+        # their membership row, which a transfer always promotes to organiser - not on
+        # admin_id, which this deliberately never reads.
+        role = await role_in_household(session, household_id, user.id)
+        if role is None or role not in roles_at_least(HouseholdRole.organiser):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only undo your own entries unless you are a household organiser",
+            )
+
+    # Everything the household log needs, read NOW and never off `occ` again: both branches
+    # below destroy it. Reopening nulls the title, the completer and the completion time and
+    # clears `skipped`; an older closure is deleted outright. Which is also why the log holds
+    # no reference to the occurrence itself - there is no `ondelete` that survives both paths.
+    logged_chore_id = occ.chore_id
+    logged_title = occ.title
+    logged_target_id = occ.completed_by_user_id
+    logged_action = (
+        HouseholdLogAction.skip_undone if occ.skipped else HouseholdLogAction.completion_undone
+    )
 
     # Is this the chore's most recent completion? Ordered by `completed_at`, NOT by
     # `scheduled_for`: slots only run in completion order while they come off a recurrence
@@ -243,4 +290,14 @@ async def undo_completion(completion_id: int, user: CurrentUser, session: Sessio
     else:
         # An older completion: a history edit, the current open occurrence stands.
         await session.delete(occ)
+    await record_log_entry(
+        session,
+        action=logged_action,
+        household_id=household_id,
+        actor_id=user.id,
+        chore_id=logged_chore_id,
+        chore_title=logged_title,
+        target_id=logged_target_id,
+        impersonator_id=impersonator.id if impersonator else None,
+    )
     await session.commit()

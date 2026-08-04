@@ -8,6 +8,7 @@ from app.models.chore_occurrence import ChoreOccurrence, OccurrenceStatus
 from app.models.confirmation_token import ConfirmationToken
 from app.models.household import Household, HouseholdRole, household_members
 from app.models.household_invitation import HouseholdInvitation, HouseholdInvitationStatus
+from app.models.household_log_entry import HouseholdLogAction, HouseholdLogEntry
 from app.models.tag import Tag
 from app.models.two_factor_challenge import TwoFactorChallenge
 from app.models.two_factor_recovery_code import TwoFactorRecoveryCode
@@ -25,6 +26,8 @@ __all__ = [
     "Household",
     "HouseholdInvitation",
     "HouseholdInvitationStatus",
+    "HouseholdLogAction",
+    "HouseholdLogEntry",
     "HouseholdRole",
     "OccurrenceStatus",
     "RepeatPeriod",

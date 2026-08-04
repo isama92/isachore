@@ -294,6 +294,32 @@ describe('HouseholdEdit', () => {
     })
   })
 
+  it('re-reads the session after transferring, so the sidebar stops offering Logs', async () => {
+    // Handing the household on drops the caller's own ownership, and the Logs item is gated on
+    // exactly that. Without the re-read an ex-owner keeps the item and reaches a page the API
+    // empties, with nothing on screen at fault. The fifth of the pinned refresh() cases.
+    const fetchMock = stubFetch({
+      household: makeHousehold({ id: 5, name: 'Flat 3B', admin_id: 1 }),
+      members: [
+        makeHouseholdMemberWithRole({ id: 1, first_name: 'Alex', last_name: 'Kim' }),
+        makeHouseholdMemberWithRole({ id: 2, first_name: 'Jo', last_name: 'Ng' }),
+      ],
+      mutate: () => jsonBody(makeHousehold({ id: 5, name: 'Flat 3B', admin_id: 2 })),
+    })
+    const { value } = renderEdit(fetchMock)
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    await screen.findByText('Jo Ng')
+    await user.click(screen.getByRole('combobox', { name: 'Household admin' }))
+    await user.click(await screen.findByRole('option', { name: 'Jo Ng' }))
+    const group = within(screen.getByRole('group', { name: 'Household admin' }))
+    await user.click(await group.findByRole('button', { name: 'Save' }))
+    const dialog = within(await screen.findByRole('alertdialog'))
+    await user.click(dialog.getByRole('button', { name: 'Transfer' }))
+
+    await waitFor(() => expect(value.refresh).toHaveBeenCalled())
+  })
+
   it('patches the name and navigates back', async () => {
     let patched: string | null = null
     const fetchMock = stubFetch({

@@ -3,7 +3,7 @@ import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactElement } from 'react'
 import AppSidebar from './AppSidebar'
-import { membershipsFor, renderWithProviders } from '../test/utils'
+import { membershipsFor, ownedMemberships, renderWithProviders } from '../test/utils'
 import { makeUser } from '../test/fixtures'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -70,7 +70,7 @@ describe('AppSidebar', () => {
   })
 
   it('renders the core nav items in order', () => {
-    // The default auth value is an organiser, i.e. every item.
+    // The default auth value owns household 1 and organises it, i.e. every item.
     renderSidebar({ user: makeUser() })
     const nav = screen.getByRole('navigation', { name: 'Main navigation' })
     const labels = screen.getAllByRole('link').filter((el) => nav.contains(el))
@@ -79,6 +79,7 @@ describe('AppSidebar', () => {
       'Unscheduled Chores',
       'History',
       'Statistics',
+      'Logs',
       'Tags',
       'Chores Management',
       'Households',
@@ -96,12 +97,23 @@ describe('AppSidebar', () => {
       .map((el) => el.textContent)
   }
 
-  it('shows a helper only the pages they can use', () => {
+  it('shows a helper only the pages they can use, History included', () => {
+    // History is unconditional: the endpoint narrows per household (their own closures in a
+    // household they only help in) rather than refusing, so hiding the item would hide the
+    // one place they can undo a mis-skip of their own.
     renderSidebar({ user: makeUser(), memberships: membershipsFor('helper', 1) })
-    expect(navLabels()).toEqual(['My Chores', 'Unscheduled Chores', 'Households', 'Profile'])
+    expect(navLabels()).toEqual([
+      'My Chores',
+      'Unscheduled Chores',
+      'History',
+      'Households',
+      'Profile',
+    ])
   })
 
-  it('adds History and Statistics for a deputy, but not the management pages', () => {
+  it('adds Statistics for a deputy, but not the management pages', () => {
+    // History used to appear at this rung and is now above it; Statistics is what the deputy
+    // role still buys.
     renderSidebar({ user: makeUser(), memberships: membershipsFor('deputy', 1) })
     expect(navLabels()).toEqual([
       'My Chores',
@@ -115,9 +127,30 @@ describe('AppSidebar', () => {
 
   it('shows a member of no household the minimal nav', () => {
     // Every fresh account starts here (nothing provisions a household). They create one,
-    // become its organiser, and the rest appears.
+    // become its organiser, and the rest appears. History is in the minimal set because it
+    // is unconditional; for them it renders its empty state.
     renderSidebar({ user: makeUser(), memberships: [] })
-    expect(navLabels()).toEqual(['My Chores', 'Unscheduled Chores', 'Households', 'Profile'])
+    expect(navLabels()).toEqual([
+      'My Chores',
+      'Unscheduled Chores',
+      'History',
+      'Households',
+      'Profile',
+    ])
+  })
+
+  it('hides Logs from an organiser who owns nothing', () => {
+    // Ownership is not a rung on the ladder: this user manages the household's chores and
+    // still does not get the record of that management. Tags proves the organiser role landed,
+    // so the missing Logs is about `owned` rather than about the role being ignored.
+    renderSidebar({ user: makeUser(), memberships: membershipsFor('organiser', 1) })
+    expect(navLabels()).toContain('Tags')
+    expect(navLabels()).not.toContain('Logs')
+  })
+
+  it('shows Logs to an owner', () => {
+    renderSidebar({ user: makeUser(), memberships: ownedMemberships(1) })
+    expect(navLabels()).toContain('Logs')
   })
 
   it('shows a mixed-role user everything one household grants', () => {
@@ -126,8 +159,8 @@ describe('AppSidebar', () => {
     renderSidebar({
       user: makeUser(),
       memberships: [
-        { household_id: 1, role: 'helper' },
-        { household_id: 2, role: 'organiser' },
+        { household_id: 1, role: 'helper', owned: false },
+        { household_id: 2, role: 'organiser', owned: false },
       ],
     })
     expect(navLabels()).toContain('Chores Management')

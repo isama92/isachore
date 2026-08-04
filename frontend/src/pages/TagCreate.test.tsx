@@ -148,8 +148,8 @@ describe('TagCreate', () => {
         authValue: {
           user: me,
           memberships: [
-            { household_id: 1, role: 'organiser' },
-            { household_id: 2, role: 'deputy' },
+            { household_id: 1, role: 'organiser', owned: false },
+            { household_id: 2, role: 'deputy', owned: false },
           ],
         },
         route: '/tags/new',

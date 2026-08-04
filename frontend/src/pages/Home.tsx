@@ -53,8 +53,9 @@ export default function Home() {
   const [descriptionFor, setDescriptionFor] = useState<DueChore | null>(null)
   // The chore awaiting a "really skip this?" confirmation (null = closed), same open-on-
   // non-null shape. Skipping always confirms, unlike completing: it moves the chore's
-  // schedule on, and undo lives in History, which helpers cannot reach at all - so for them
-  // an unconfirmed mis-click would be unrecoverable.
+  // schedule on, so a mis-click has consequences a Done does not. Undoing it means finding
+  // the row on History, which every role now reaches for their own closures - a recovery
+  // path rather than a reason to skip the dialog.
   const [skipFor, setSkipFor] = useState<DueChore | null>(null)
 
   const options = useFilterOptions()

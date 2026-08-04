@@ -44,7 +44,8 @@ type FetchMock = ReturnType<typeof vi.fn>
 
 function renderEdit(fetchMock: FetchMock) {
   vi.stubGlobal('fetch', fetchMock)
-  renderWithProviders(
+  // Returns the render result so a test can assert on the auth context's `refresh`.
+  return renderWithProviders(
     <Routes>
       <Route path="/admin/households/:id/edit" element={<AdminHouseholdEdit />} />
       <Route path="/admin/households" element={<div>admin-households-list</div>} />
@@ -161,6 +162,33 @@ describe('AdminHouseholdEdit', () => {
       expect(patch).toBeTruthy()
       expect(JSON.parse(String(patch![1]?.body))).toEqual({ admin_id: 2 })
     })
+  })
+
+  it('re-reads the session after transferring, in case the operator owned it', async () => {
+    // The admin twin of the user-surface case. An operator can be transferring a household they
+    // own themselves, and their own `owned` - which is all the Logs item is gated on - moves
+    // with it. A no-op for the far commoner case where they own nothing here, and what makes
+    // CLAUDE.md's "each of the five is pinned" true rather than four-fifths true.
+    const fetchMock = stubFetch({
+      household: makeHousehold({ id: 5, name: 'HQ', admin_id: 1 }),
+      members: [
+        makeHouseholdMemberWithRole({ id: 1, first_name: 'Site', last_name: 'Admin' }),
+        makeHouseholdMemberWithRole({ id: 2, first_name: 'Jo', last_name: 'Ng' }),
+      ],
+      mutate: () => jsonBody(makeHousehold({ id: 5, name: 'HQ', admin_id: 2 })),
+    })
+    const { value } = renderEdit(fetchMock)
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    await screen.findByText('Jo Ng')
+    await user.click(screen.getByRole('combobox', { name: 'Household admin' }))
+    await user.click(await screen.findByRole('option', { name: 'Jo Ng' }))
+    const group = within(screen.getByRole('group', { name: 'Household admin' }))
+    await user.click(await group.findByRole('button', { name: 'Save' }))
+    const dialog = within(await screen.findByRole('alertdialog'))
+    await user.click(dialog.getByRole('button', { name: 'Transfer' }))
+
+    await waitFor(() => expect(value.refresh).toHaveBeenCalled())
   })
 
   it('patches the name and navigates back', async () => {

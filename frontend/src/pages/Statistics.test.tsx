@@ -201,8 +201,8 @@ describe('Statistics', () => {
     renderWithProviders(<Statistics />, {
       authValue: {
         memberships: [
-          { household_id: 1, role: 'deputy' },
-          { household_id: 2, role: 'helper' },
+          { household_id: 1, role: 'deputy', owned: false },
+          { household_id: 2, role: 'helper', owned: false },
         ],
       },
     })

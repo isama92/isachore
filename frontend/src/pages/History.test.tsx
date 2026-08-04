@@ -225,19 +225,128 @@ describe('History', () => {
     expect(await screen.findByText('Failed to load history')).toBeInTheDocument()
   })
 
-  it('shows an undo button only on the current user’s own completions', async () => {
-    stubFetch({
-      entries: [
-        makeHistoryEntry({ id: 7, title: 'Mine', completed_by: makeHouseholdMember({ id: 1 }) }),
-        makeHistoryEntry({ id: 8, title: 'Theirs', completed_by: makeHouseholdMember({ id: 2 }) }),
-      ],
+  // The two rows every undo case below needs: one recorded against the signed-in user, one
+  // against a housemate, both in household 1 (which is where the auth fixtures put them).
+  const jo = makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })
+  const twoRows = [
+    makeHistoryEntry({ id: 7, title: 'Mine', completed_by: makeHouseholdMember({ id: 1 }) }),
+    makeHistoryEntry({ id: 8, title: 'Theirs', completed_by: jo }),
+  ]
+
+  it('shows a deputy undo on their own closure only', async () => {
+    // Reading the whole household's history does not carry undoing it: that is
+    // organiser-level, and a deputy is one rung below. Their own row keeps the button, which
+    // is what makes the missing one about the role rather than about the column.
+    stubFetch({ entries: twoRows })
+    renderWithProviders(<History />, {
+      authValue: { user: authUser, memberships: membershipsFor('deputy', 1) },
     })
-    renderWithProviders(<History />, { authValue: { user: authUser } })
 
     const mineRow = (await screen.findByText('Mine')).closest('tr')!
     const theirsRow = (await screen.findByText('Theirs')).closest('tr')!
     expect(within(mineRow).getByRole('button', { name: 'Undo' })).toBeInTheDocument()
-    expect(within(theirsRow).queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument()
+    expect(within(theirsRow).queryByRole('button', { name: /Undo/ })).not.toBeInTheDocument()
+  })
+
+  it('lets an organiser undo a housemate’s closure, in the warning colour', async () => {
+    // Default memberships make the caller an organiser of household 1, which is where both
+    // rows live. Their own row stays plain: the colour marks the difference, so asserting
+    // both halves is what pins it to whose closure it is.
+    stubFetch({ entries: twoRows })
+    renderWithProviders(<History />, { authValue: { user: authUser } })
+
+    const mineRow = (await screen.findByText('Mine')).closest('tr')!
+    const theirsRow = (await screen.findByText('Theirs')).closest('tr')!
+    expect(within(mineRow).getByRole('button', { name: 'Undo' })).not.toHaveClass('text-warning')
+    // The hover half is asserted too: the ghost variant carries hover:text-foreground, so
+    // without it the colour is lost on the one row the colour is the whole point of.
+    expect(within(theirsRow).getByRole('button', { name: "Undo Jo Ng's entry" })).toHaveClass(
+      'text-warning',
+      'hover:text-warning',
+    )
+  })
+
+  it('names the person in the confirmation, and undoes their closure', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    const fetchMock = stubFetch({ entries: twoRows })
+    renderWithProviders(<History />, { authValue: { user: authUser } })
+
+    const theirsRow = (await screen.findByText('Theirs')).closest('tr')!
+    await user.click(within(theirsRow).getByRole('button', { name: "Undo Jo Ng's entry" }))
+    const dialog = within(await screen.findByRole('alertdialog'))
+    expect(dialog.getByText(/This entry was recorded by Jo Ng\./)).toBeInTheDocument()
+    await user.click(dialog.getByRole('button', { name: 'Undo entry' }))
+
+    await waitFor(() =>
+      expect(deleteCalls(fetchMock).some((u) => u.includes('/api/v1/completions/8'))).toBe(true),
+    )
+  })
+
+  it('treats a closure with no known completer as somebody else’s', async () => {
+    // `completed_by: null` is a hard-deleted account. It used to render no undo at all; now an
+    // organiser gets one, and it has to come out as somebody else's - warning colour and its
+    // own copy, since there is no name to put in the usual sentence.
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    stubFetch({
+      entries: [makeHistoryEntry({ id: 9, title: 'Orphaned', completed_by: null })],
+    })
+    renderWithProviders(<History />, { authValue: { user: authUser } })
+
+    const row = (await screen.findByText('Orphaned')).closest('tr')!
+    const button = within(row).getByRole('button', { name: "Undo somebody else's entry" })
+    expect(button).toHaveClass('text-warning')
+    await user.click(button)
+    expect(
+      within(await screen.findByRole('alertdialog')).getByText(/account no longer exists/),
+    ).toBeInTheDocument()
+  })
+
+  it('offers a helper no undo on a housemate’s closure', async () => {
+    // A helper's own rows are all they see, but the guard is on the row rather than on the
+    // list, so a housemate's row reaching them must still refuse.
+    stubFetch({ entries: twoRows })
+    renderWithProviders(<History />, {
+      authValue: { user: authUser, memberships: membershipsFor('helper', 1) },
+    })
+
+    const mineRow = (await screen.findByText('Mine')).closest('tr')!
+    const theirsRow = (await screen.findByText('Theirs')).closest('tr')!
+    expect(within(mineRow).getByRole('button', { name: 'Undo' })).toBeInTheDocument()
+    expect(within(theirsRow).queryByRole('button', { name: /Undo/ })).not.toBeInTheDocument()
+  })
+
+  it('does not offer undo in a household the caller only helps in', async () => {
+    // The organiser rule is per household, not "organiser anywhere": household 2's row must
+    // not inherit the reach household 1 grants.
+    stubFetch({
+      entries: [
+        makeHistoryEntry({
+          id: 8,
+          title: 'Theirs',
+          completed_by: jo,
+          household: { id: 2, name: 'Beach House' },
+        }),
+      ],
+      options: {
+        households: [
+          { id: 1, name: 'Test Household' },
+          { id: 2, name: 'Beach House' },
+        ],
+        members: [me, jo],
+      },
+    })
+    renderWithProviders(<History />, {
+      authValue: {
+        user: authUser,
+        memberships: [
+          { household_id: 1, role: 'organiser', owned: false },
+          { household_id: 2, role: 'helper', owned: false },
+        ],
+      },
+    })
+
+    const row = (await screen.findByText('Theirs')).closest('tr')!
+    expect(within(row).queryByRole('button', { name: /Undo/ })).not.toBeInTheDocument()
   })
 
   it('undoes a completion after confirming, calling DELETE and reloading', async () => {
@@ -282,11 +391,12 @@ describe('History', () => {
     expect(deleteCalls(fetchMock)).toHaveLength(0)
   })
 
-  it('offers only the households the user is at least a deputy in', async () => {
-    // /completions/filters is deliberately un-narrowed (it also feeds Home and Unscheduled),
-    // so this page narrows its own household picker. A helper household there would be a dead
-    // option: the list is already scoped to deputy+, so choosing it returns nothing.
-    const fetchMock = stubFetch({
+  it('offers every household the filter payload lists, helper households included', async () => {
+    // The picker is deliberately NOT narrowed by role. It used to be, back when the list was
+    // scoped to deputy+ and a helper household was a dead option; now such a household yields
+    // the caller's own closures, so it is a live one.
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    stubFetch({
       entries: [makeHistoryEntry({ id: 1, title: 'Scrub the tub' })],
       options: {
         households: [
@@ -300,19 +410,101 @@ describe('History', () => {
       authValue: {
         user: authUser,
         memberships: [
-          { household_id: 1, role: 'deputy' },
-          { household_id: 2, role: 'helper' },
+          { household_id: 1, role: 'deputy', owned: false },
+          { household_id: 2, role: 'helper', owned: false },
         ],
       },
     })
 
     await screen.findByText('Scrub the tub')
+    await user.click(await screen.findByRole('combobox', { name: 'Household' }))
+    expect(await screen.findByRole('option', { name: 'Beach House' })).toBeInTheDocument()
+  })
+
+  it('renders no filter bar at all for a helper everywhere', async () => {
+    // Their own closures are the whole list, so there is nothing to slice: every Select would
+    // be one option over a list already as narrow as it goes.
+    stubFetch({
+      entries: [makeHistoryEntry({ id: 1, title: 'Scrub the tub' })],
+      options: {
+        households: [
+          { id: 1, name: 'Flat 3B' },
+          { id: 2, name: 'Beach House' },
+        ],
+        members: [me, makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })],
+      },
+    })
+    renderWithProviders(<History />, {
+      authValue: { user: authUser, memberships: membershipsFor('helper', 1, 2) },
+    })
+
+    // The row is the positive half: the page works, it is the bar that is gone. Both option
+    // lists have two entries, so each Select would render if it were not for the role.
+    await screen.findByText('Scrub the tub')
+    expect(screen.queryByRole('combobox', { name: 'Outcome' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'Person' })).not.toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: 'Household' })).not.toBeInTheDocument()
-    // The positive half: the options really loaded, so the missing Select is the narrowing
-    // rather than a fixture that never answered.
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/completions/filters'))).toBe(
-      true,
+  })
+
+  it('clears remembered filters with a hidden bar even when the options fail to load', async () => {
+    // The prune reads no payload, so it must not ride on that request: a 5xx there would
+    // otherwise leave a helper with filters applied, no Select to clear them, and no error
+    // text, since the hook only forgets stored settings on a 400/422.
+    localStorage.setItem(
+      'isachore-table-history',
+      JSON.stringify({
+        pageSize: 10,
+        sortBy: 'created_at',
+        sortDir: 'desc',
+        filters: { user_id: '2', household_id: '1', outcome: 'skipped' },
+      }),
     )
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).split('?')[0]
+      if (path.endsWith('/api/v1/completions/filters')) return jsonBody({ detail: 'boom' }, 500)
+      if ((init?.method ?? 'GET').toUpperCase() === 'GET') {
+        return jsonBody({ items: [], total: 0, page: 1, page_size: 10 })
+      }
+      return jsonBody(undefined, 204)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderWithProviders(<History />, {
+      authValue: { user: authUser, memberships: membershipsFor('helper', 1) },
+    })
+
+    await waitFor(() => {
+      const query = lastCompletionsGet(fetchMock)
+      expect(query).not.toContain('user_id')
+      expect(query).not.toContain('household_id')
+      expect(query).not.toContain('outcome')
+    })
+  })
+
+  it('clears every remembered filter when the bar is hidden', async () => {
+    // A demotion to helper-everywhere leaves stored filters with nothing on screen able to
+    // clear them: the hook only forgets storage on a 400/422, and these merely return less.
+    localStorage.setItem(
+      'isachore-table-history',
+      JSON.stringify({
+        pageSize: 10,
+        sortBy: 'created_at',
+        sortDir: 'desc',
+        filters: { user_id: '2', household_id: '1', outcome: 'skipped' },
+      }),
+    )
+    const fetchMock = stubFetch({
+      entries: [makeHistoryEntry({ id: 1, title: 'Scrub the tub' })],
+    })
+    renderWithProviders(<History />, {
+      authValue: { user: authUser, memberships: membershipsFor('helper', 1) },
+    })
+
+    await waitFor(() => {
+      const query = lastCompletionsGet(fetchMock)
+      expect(query).not.toContain('user_id')
+      expect(query).not.toContain('household_id')
+      expect(query).not.toContain('outcome')
+    })
   })
   it('badges the skipped rows and only those', async () => {
     stubFetch({

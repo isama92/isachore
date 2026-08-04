@@ -4,15 +4,25 @@ import {
   hasRoleIn,
   hasRoleSomewhere,
   householdIdsWithRole,
+  ownedHouseholdIds,
+  ownsAnyHousehold,
   roleAtLeast,
 } from './permissions'
 import type { Membership } from './types'
 
 // Organiser of "The Flat" (1), helper in "Mum's place" (2): the cross-household case the
-// whole permission model exists to get right.
+// whole permission model exists to get right. Neither is owned, which is the point of the
+// ownership tests at the bottom - the strongest role is still not ownership.
 const MIXED: Membership[] = [
-  { household_id: 1, role: 'organiser' },
-  { household_id: 2, role: 'helper' },
+  { household_id: 1, role: 'organiser', owned: false },
+  { household_id: 2, role: 'helper', owned: false },
+]
+
+// Owner of 2, merely an organiser of 1. The owner is by definition an organiser, so the roles
+// here are identical and only `owned` separates them.
+const OWNER: Membership[] = [
+  { household_id: 1, role: 'organiser', owned: false },
+  { household_id: 2, role: 'organiser', owned: true },
 ]
 
 describe('roleAtLeast', () => {
@@ -39,8 +49,8 @@ describe('hasRoleSomewhere', () => {
 
   it('is false when no household grants it', () => {
     const helpers: Membership[] = [
-      { household_id: 1, role: 'helper' },
-      { household_id: 2, role: 'helper' },
+      { household_id: 1, role: 'helper', owned: false },
+      { household_id: 2, role: 'helper', owned: false },
     ]
     expect(hasRoleSomewhere(helpers, 'deputy')).toBe(false)
     expect(hasRoleSomewhere(helpers, 'helper')).toBe(true)
@@ -143,5 +153,39 @@ describe('assignableRoles', () => {
         }),
       ).toEqual([])
     }
+  })
+})
+
+describe('ownsAnyHousehold', () => {
+  it('is true when a membership is owned', () => {
+    expect(ownsAnyHousehold(OWNER)).toBe(true)
+  })
+
+  it('is false for an organiser who owns nothing', () => {
+    // The whole reason this is not `hasRoleSomewhere(m, 'organiser')`: MIXED holds the
+    // strongest role there is and still owns nothing.
+    expect(ownsAnyHousehold(MIXED)).toBe(false)
+  })
+
+  it('is false for a member of no household', () => {
+    expect(ownsAnyHousehold([])).toBe(false)
+  })
+
+  it('treats a membership with no ownership flag as not owned', () => {
+    // A cached shell talking to an older API. Fail-closed: hide the item rather than offer a
+    // page the server will empty.
+    const legacy = [{ household_id: 1, role: 'organiser' }] as unknown as Membership[]
+    expect(ownsAnyHousehold(legacy)).toBe(false)
+  })
+})
+
+describe('ownedHouseholdIds', () => {
+  it('returns only the owned households', () => {
+    expect(ownedHouseholdIds(OWNER)).toEqual(new Set([2]))
+  })
+
+  it('is empty when nothing is owned', () => {
+    expect(ownedHouseholdIds(MIXED)).toEqual(new Set())
+    expect(ownedHouseholdIds([])).toEqual(new Set())
   })
 })

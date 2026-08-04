@@ -96,6 +96,7 @@
     "chores": "Chores Management",
     "history": "History",
     "statistics": "Statistics",
+    "logs": "Logs",
     "tags": "Tags",
     "profile": "Profile",
     "admin": "Admin",
@@ -250,8 +251,12 @@
     "undo": "Undo",
     "undone": "Entry undone",
     "undoError": "Undo failed",
+    "undoOther": "Undo {{name}}'s entry",
+    "undoUnknown": "Undo somebody else's entry",
     "undoConfirm": "Undo this entry?",
     "undoConfirmBody": "The entry will be removed and the chore may become due again.",
+    "undoOtherConfirmBody": "This entry was recorded by {{name}}. It will be removed and the chore may become due again.",
+    "undoUnknownConfirmBody": "This entry was recorded by somebody whose account no longer exists. It will be removed and the chore may become due again.",
     "undoConfirmAction": "Undo entry",
     "headers": {
       "title": "Chore",
@@ -319,6 +324,51 @@
     "perPerson": {
       "title": "Completions per person",
       "completions": "Completions"
+    }
+  },
+  "logs": {
+    "title": "Logs",
+    "empty": "Nothing logged yet.",
+    "loadError": "Failed to load the log",
+    "unknownActor": "Unknown",
+    "recordedBy": "recorded by {{name}}",
+    "byAdmin": "(via admin)",
+    "noChanges": "—",
+    "noChore": "—",
+    "headers": {
+      "when": "When",
+      "household": "Household",
+      "actor": "Who",
+      "action": "What",
+      "chore": "Chore",
+      "changes": "Changed"
+    },
+    "actions": {
+      "chore_created": "Chore created",
+      "chore_updated": "Chore updated",
+      "chore_deleted": "Chore deleted",
+      "completion_undone": "Completion undone",
+      "skip_undone": "Skip undone"
+    },
+    "fields": {
+      "title": "Title",
+      "description": "Description",
+      "start_date": "Start date",
+      "repeats": "Repeats",
+      "assignment_type": "Assignment",
+      "turn_length": "Turn length",
+      "repeat_interval": "Repeat every",
+      "weekdays": "On these days",
+      "assignees": "Assignees",
+      "tags": "Tags"
+    },
+    "filters": {
+      "actionLabel": "Action",
+      "actionAll": "All actions",
+      "userLabel": "Changed by",
+      "userAll": "Everyone",
+      "householdLabel": "Household",
+      "householdAll": "All households"
     }
   },
   "choreCreate": {
