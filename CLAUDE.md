@@ -668,6 +668,19 @@ pre-commit run --all-files                           # what the git hook runs
   Monday-first Calendar): keep using them rather than raw HTML, and when one needs
   brand radius/sizing, edit the component itself rather than fighting it with
   per-call classes (see Gotchas).
+
+  **`chart.tsx` is modified too, and for reasons that are not cosmetic**, so it does
+  not belong on that list and needs its own note. Two local extensions, neither
+  upstream: `ChartStyle`'s `safeId` / `CSS_IDENT` / `SAFE_COLOR` are the sanitiser
+  around its `dangerouslySetInnerHTML` (the reason the CSP keeps
+  `style-src 'unsafe-inline'`), and `ChartTooltipContent`'s opt-in `hideZero` drops
+  zero-valued series from the rows, which a stacked chart needs because recharts
+  sends one payload entry per series whatever the value. Losing the first is a
+  security regression, so treat re-pulling this file as the higher-risk case, not
+  the lower one. Both are pinned by `ui/chart.test.tsx`, and `hideZero` also fails
+  `tsc` through its `Statistics.tsx` call site, so a stock overwrite cannot reach
+  `main` - but it lands as a CI failure whose cause is several steps from the
+  command that caused it, which is exactly why the Gotcha below names it.
 - **Theme / dark mode**: `ThemeProvider` + `useTheme()` in `frontend/src/theme/`
   (context/provider/hook split, same rule as `src/auth/`). Light mode is the teal
   brand; dark is derived. The picker is the Profile page's **Appearance** section
@@ -838,12 +851,19 @@ the negative paths (401/403/400/404/409), not just the happy one.
 - react-refresh `only-export-components` + `--max-warnings=0`: keep React context,
   provider component, and hook in separate files (see `src/auth/` and
   `src/theme/`). shadcn `ui/**` files co-export a component plus its cva variants;
-  an eslint override for `src/components/ui/**` permits that, so leave those files
-  in their canonical shape.
-- Adding a shadcn component re-pulls its registry deps and offers to overwrite the
-  brand-customised `button.tsx`: always decline (`printf 'n\n' | npx shadcn@latest
-  add <name>`), then double-install if `package.json` changed (host +
-  `docker compose exec frontend npm install`). The radix-nova style ships
+  an eslint override for `src/components/ui/**` permits that, so leave their *export*
+  shape alone (this is about what a file exports, not a ban on editing `ui/**` - see
+  UI components above for the primitives that are deliberately modified).
+- Adding a shadcn component re-pulls its registry deps and offers to overwrite files
+  it thinks it owns, `button.tsx` and `chart.tsx` among them: always decline
+  (`printf 'n\n' | npx shadcn@latest add <name>`), then double-install if
+  `package.json` changed (host + `docker compose exec frontend npm install`). The
+  two decline for different reasons and `chart.tsx` is the one to be careful about:
+  `button.tsx` holds brand styling, while `chart.tsx` holds the CSS sanitiser around
+  its `dangerouslySetInnerHTML` plus the `hideZero` tooltip behaviour (see UI
+  components above). `ui/chart.test.tsx` and `tsc` both fail if either is dropped,
+  so it cannot merge, but the failure reads nothing like "you accepted an overwrite":
+  reflexively hitting `y` here costs an afternoon. The radix-nova style ships
   `@import 'shadcn/tailwind.css'` (the `shadcn` runtime dep supplies the
   `data-open`/`data-checked`/... variants), plus the unified `radix-ui` package
   and `tw-animate-css`: don't remove them.
