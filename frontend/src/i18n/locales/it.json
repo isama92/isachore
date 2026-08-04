@@ -331,8 +331,10 @@
     "empty": "Ancora nessuna attività registrata.",
     "loadError": "Impossibile caricare il registro",
     "unknownActor": "Sconosciuto",
+    "recordedBy": "registrato da {{name}}",
     "byAdmin": "(tramite admin)",
     "noChanges": "—",
+    "noChore": "—",
     "headers": {
       "when": "Quando",
       "household": "Nucleo domestico",
@@ -363,7 +365,7 @@
     "filters": {
       "actionLabel": "Azione",
       "actionAll": "Tutte le azioni",
-      "userLabel": "Persona",
+      "userLabel": "Modificato da",
       "userAll": "Tutti",
       "householdLabel": "Nucleo domestico",
       "householdAll": "Tutti i nuclei domestici"

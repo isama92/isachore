@@ -591,6 +591,40 @@ async def test_the_owner_reads_their_households_log_newest_first(
     assert entry["by_admin"] is False
 
 
+async def test_the_read_reports_whose_closure_was_undone(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    # The `target` half of the payload, end to end through the endpoint rather than only in the
+    # table: it is what tells the owner whose work an undo erased, and it is a second aliased
+    # join, so a wrong foreign key here would silently report the actor twice.
+    owner = await make_user(email="owner@example.com")
+    helper = await make_user(email="helper@example.com")
+    household = await make_household(
+        members=[owner, helper], roles={helper.id: HouseholdRole.helper}
+    )
+    chore = await make_chore(household=household, title="Bins", with_occurrence=False)
+    occ = await make_occurrence(
+        chore=chore,
+        scheduled_for=DUE,
+        status=OccurrenceStatus.done,
+        completed_by=helper,
+        completed_at=DUE,
+    )
+    client = await auth_client(owner)
+    assert (await client.delete(f"/api/v1/completions/{occ.id}")).status_code == 204
+
+    entry = (await client.get("/api/v1/logs")).json()["items"][0]
+    assert entry["action"] == "completion_undone"
+    assert entry["actor"]["id"] == owner.id
+    assert entry["target"]["id"] == helper.id
+    # Data-minimised on both sides, like every other household-peer payload.
+    assert "email" not in entry["target"]
+
+
 async def test_a_non_owner_organiser_gets_an_empty_log(
     make_user: MakeUser,
     make_household: MakeHousehold,

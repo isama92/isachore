@@ -331,8 +331,10 @@
     "empty": "Nothing logged yet.",
     "loadError": "Failed to load the log",
     "unknownActor": "Unknown",
+    "recordedBy": "recorded by {{name}}",
     "byAdmin": "(via admin)",
     "noChanges": "—",
+    "noChore": "—",
     "headers": {
       "when": "When",
       "household": "Household",
@@ -363,7 +365,7 @@
     "filters": {
       "actionLabel": "Action",
       "actionAll": "All actions",
-      "userLabel": "Person",
+      "userLabel": "Changed by",
       "userAll": "Everyone",
       "householdLabel": "Household",
       "householdAll": "All households"

@@ -201,13 +201,14 @@ export type LogField = (typeof LOG_FIELDS)[number]
 // closure was undone and is null for the three chore actions. `by_admin` says the action came
 // through an impersonated session - a boolean, never the operator's identity.
 //
-// `changed_fields` is populated for `chore_updated` alone and is deliberately string[] rather
-// than LogField[]: the wire may name a field this release has never heard of, and the renderer
-// degrades instead of the type lying.
+// `action` and `changed_fields` are both deliberately `string`, not `LogAction`/`LogField[]`:
+// the wire may name an action or a field this release has never heard of - the API sends them as
+// plain strings for exactly that reason - and the renderer degrades instead of the type lying.
+// `LOG_ACTIONS` is still the filter's option list, and `isLogAction` is the narrowing guard.
 export type LogEntry = {
   id: number
   created_at: string
-  action: LogAction
+  action: string
   household: { id: number; name: string }
   actor: HouseholdMember | null
   target: HouseholdMember | null

@@ -71,6 +71,42 @@ describe('Logs', () => {
     expect(within(row).getByText('Chore deleted')).toBeInTheDocument()
   })
 
+  it('names whose closure an undo erased', async () => {
+    // Without this the row reads "Alex Kim / Completion undone / Bins" and never says whose
+    // work went, which is the fact the log exists to record - and the reason
+    // completion_undone and skip_undone are two actions rather than one flagged one.
+    stubFetch({
+      entries: [
+        makeLogEntry({
+          action: 'completion_undone',
+          chore_title: 'Bins',
+          actor: me,
+          target: jo,
+        }),
+      ],
+    })
+    renderWithProviders(<Logs />, asOwner)
+
+    const row = (await screen.findByText('Bins')).closest('tr')!
+    expect(within(row).getByText('Completion undone')).toBeInTheDocument()
+    expect(within(row).getByText('recorded by Jo Ng')).toBeInTheDocument()
+    // The actor is still the person who pressed undo, not the person named in the suffix.
+    expect(within(row).getByText('Alex Kim')).toBeInTheDocument()
+  })
+
+  it('adds no such suffix to an action that has no target', async () => {
+    // Three of the five actions carry no target, which is why this is a suffix and not a
+    // column - and the assertion that keeps the suffix from rendering an empty phrase.
+    stubFetch({
+      entries: [makeLogEntry({ action: 'chore_deleted', chore_title: 'Bins', target: null })],
+    })
+    renderWithProviders(<Logs />, asOwner)
+
+    const row = (await screen.findByText('Bins')).closest('tr')!
+    expect(within(row).getByText('Chore deleted')).toBeInTheDocument()
+    expect(within(row).queryByText(/recorded by/)).not.toBeInTheDocument()
+  })
+
   it('names the changed fields of an update', async () => {
     stubFetch({
       entries: [
@@ -109,11 +145,7 @@ describe('Logs', () => {
     // Reachable for real: the API sends `action` as a plain string precisely so a row written
     // by a newer release cannot break the read, so this is the shape that arrives - not a
     // hypothetical. Coercing it back through the enum server-side would 500 the whole page.
-    stubFetch({
-      entries: [
-        makeLogEntry({ action: 'chore_archived' as LogEntry['action'], chore_title: 'Bins' }),
-      ],
-    })
+    stubFetch({ entries: [makeLogEntry({ action: 'chore_archived', chore_title: 'Bins' })] })
     renderWithProviders(<Logs />, asOwner)
 
     const row = (await screen.findByText('Bins')).closest('tr')!
@@ -182,7 +214,7 @@ describe('Logs', () => {
     await waitFor(() => expect(lastLogsGet(fetchMock)).toContain('action=chore_deleted'))
   })
 
-  it('filters by person and pushes the choice into the query', async () => {
+  it('filters by the person who acted and pushes the choice into the query', async () => {
     const fetchMock = stubFetch({
       entries: [makeLogEntry({ chore_title: 'Bins' })],
       options: { households: [{ id: 1, name: 'Test Household' }], members: [me, jo] },
@@ -191,7 +223,7 @@ describe('Logs', () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
 
     await screen.findByText('Bins')
-    await user.click(await screen.findByRole('combobox', { name: 'Person' }))
+    await user.click(await screen.findByRole('combobox', { name: 'Changed by' }))
     await user.click(await screen.findByRole('option', { name: 'Jo Ng' }))
 
     await waitFor(() => expect(lastLogsGet(fetchMock)).toContain('user_id=2'))
@@ -256,7 +288,7 @@ describe('Logs', () => {
     renderWithProviders(<Logs />, asOwner)
 
     await screen.findByText('Bins')
-    expect(screen.queryByRole('combobox', { name: 'Person' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'Changed by' })).not.toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: 'Household' })).not.toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: 'Action' })).toBeInTheDocument()
   })

@@ -430,7 +430,12 @@ pre-commit run --all-files                           # what the git hook runs
     is right.
   - **Undoing a completion and undoing a skip are two actions, not one with a flag.** They
     read completely differently to whoever is looking, and nothing downstream re-derives which
-    it was - the flag is cleared by the reopen itself.
+    it was - the flag is cleared by the reopen itself. **`target_user_id` is the other half of
+    that**, and `Logs.tsx` renders it as a muted suffix on the action cell ("Completion undone -
+    recorded by Jo Ng"): without it a row says somebody undid something and never whose work
+    went, which is the entire reason an undo is logged separately from the closure it erased. A
+    suffix rather than a column because only those two of five actions carry a target. The
+    filter beside it is the **actor**, hence "Changed by" rather than "Person".
   - **The log holds no reference to the occurrence, and cannot.** `undo_completion` has two
     branches and each defeats a different `ondelete`: reopening nulls the row's title,
     completer and completion time in place, so a surviving FK points at something that no
@@ -452,7 +457,11 @@ pre-commit run --all-files                           # what the git hook runs
     `[]` collapses to `None` so a normalised legacy row reports no phantom change.
     `description` compares the stored strings as they are: both sides are already
     `SanitisedHtml` output, and re-sanitising the older side would hide a real allowlist
-    tightening instead of reporting it. **The open occurrence's assignee is deliberately
+    tightening instead of reporting it. A rename records the title the chore **ends** with, so
+    its row names something that did not exist a moment earlier while older rows keep the old
+    name; the `title` entry in the Changed column is what explains the discontinuity to a reader
+    scanning by name. Accepted deliberately - carrying the old title too would be a value, and
+    this log records names of fields, never their contents. **The open occurrence's assignee is deliberately
     absent** - it is derived and `_reconcile_open_occurrence` recomputes it on most edits - so
     a PATCH that only moves `current_assignee_id`, or only sets `clear_current_assignee`,
     writes no entry at all. Both are pinned; so is the no-op edit, which writes nothing.

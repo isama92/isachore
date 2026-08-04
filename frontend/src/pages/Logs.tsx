@@ -146,8 +146,23 @@ export default function Logs() {
       id: 'action',
       header: t('logs.headers.action'),
       enableSorting: false,
+      // The undone closure's owner rides along as a muted suffix, the same shape `by_admin`
+      // uses on the actor cell, and for a stronger reason: without it "Sam / Completion undone
+      // / Bins" does not say whose work went, which is the whole point of recording an undo
+      // separately from the completion it erased - and the reason `completion_undone` and
+      // `skip_undone` are two actions rather than one flagged one. A suffix rather than a
+      // column of its own because only those two actions carry a target, so a column would be
+      // empty on three rows in five. The wording matches History's confirmation copy ("This
+      // entry was recorded by ..."), which is where the owner will have met the idea already.
       cell: ({ row }) => (
-        <span className="font-medium">{logActionLabel(t, row.original.action)}</span>
+        <span className="flex flex-wrap items-center gap-x-1.5">
+          <span className="font-medium">{logActionLabel(t, row.original.action)}</span>
+          {row.original.target && (
+            <span className="text-[13px] text-muted-foreground">
+              {t('logs.recordedBy', { name: fullName(row.original.target) })}
+            </span>
+          )}
+        </span>
       ),
     },
     {
@@ -155,12 +170,16 @@ export default function Logs() {
       header: t('logs.headers.chore'),
       enableSorting: false,
       // The snapshot the entry was written with, so a rename or a delete does not rewrite it.
+      // Note a rename records the title the chore ENDS with, so its row names something that
+      // did not exist a moment earlier while older rows keep the old name - unavoidable with a
+      // name snapshot, and the `title` entry in the Changed column is what explains it.
+      //
       // Nullable on the wire (an undone closure copies the occurrence's title, which is
       // nullable), and no current write path leaves it empty - but a bare null would render as
-      // a blank cell rather than as an absence, so it gets the same placeholder as the rest.
+      // a blank cell rather than as an absence, so it gets its own placeholder.
       cell: ({ row }) => (
         <span className={row.original.chore_title ? 'font-semibold' : 'text-muted-foreground'}>
-          {row.original.chore_title ?? t('logs.noChanges')}
+          {row.original.chore_title ?? t('logs.noChore')}
         </span>
       ),
     },
