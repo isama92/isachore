@@ -246,6 +246,11 @@ async def _free_slot_from(
     been completed for is not a slot it can be due for again. The rule always has an interval
     to step, since a candidate only exists when there is a start date (never `manual`), and it
     terminates because every step strictly advances while the done set is finite.
+
+    Note this is one of the two queries that deliberately does NOT filter out skipped rows
+    (see `ChoreOccurrence.skipped`). The question here is which slots are *occupied*, not
+    which produced work, and a skipped slot is every bit as occupied: excluding them would
+    put the unclearable 409 above straight back.
     """
     taken = set(
         (
@@ -268,12 +273,16 @@ async def _free_slot_from(
 
 async def _completion_counts(session: SessionDep, chore_id: int) -> dict[int, int]:
     """Completions of this chore per crediting member (done occurrences grouped by
-    completed_by_user_id). Used only by the `least_done` strategy."""
+    completed_by_user_id). Used only by the `least_done` strategy.
+
+    Skipped occurrences are excluded: this is a fairness tally, so counting them would make
+    skipping a chore a way to climb the ranking without doing it."""
     rows = await session.execute(
         select(ChoreOccurrence.completed_by_user_id, func.count())
         .where(
             ChoreOccurrence.chore_id == chore_id,
             ChoreOccurrence.status == OccurrenceStatus.done,
+            ChoreOccurrence.skipped.is_(False),
         )
         .group_by(ChoreOccurrence.completed_by_user_id)
     )
@@ -286,7 +295,11 @@ async def _successor_assignee(
     """Who is on the hook for the occurrence that follows a completion. Holds the
     current assignee mid-turn; on a turn boundary the strategy picks the next person.
     Counts are read after the completion is flushed, so they include it (the
-    post-completion snapshot least_done needs to actually rotate)."""
+    post-completion snapshot least_done needs to actually rotate).
+
+    Skipped occurrences do not count towards the turn, because a skip does not hand the
+    chore on (see `_retained_assignee`): counting them would spend someone's turn on work
+    nobody did, so a `turn_length` of 3 could hand over after one real completion."""
     if not pool:
         return None
     current = next((u for u in pool if u.id == current_assignee_id), None)
@@ -297,6 +310,7 @@ async def _successor_assignee(
             .where(
                 ChoreOccurrence.chore_id == chore.id,
                 ChoreOccurrence.status == OccurrenceStatus.done,
+                ChoreOccurrence.skipped.is_(False),
             )
         )
         or 0
@@ -309,6 +323,31 @@ async def _successor_assignee(
         else {}
     )
     return next_assignee(chore.assignment_type, pool, current, counts)
+
+
+def _retained_assignee(
+    chore: Chore, current_assignee_id: int | None, pool: list[User]
+) -> User | None:
+    """Who is on the hook for the occurrence that follows a SKIP: the same person, because
+    skipping does not hand the chore on. Whoever chose not to do it this time is still up
+    next, whatever the strategy says - which is what stops a skip being the cheap way to
+    move work onto a housemate.
+
+    **An unassigned occurrence stays unassigned**, which is the same rule applied honestly:
+    NULL here means the chore is the household's and nobody in particular is up (see
+    `clear_current_assignee`), so there is no turn to keep, and deriving somebody from the
+    strategy would both invent a turn and silently undo a deliberate hand-back. This is where
+    skipping parts company with completing: `_successor_assignee` re-derives on a turn
+    boundary, so a clear survives only "until the next completion" - a skip is not one.
+
+    The strategy fallback is for the other case only, where the row names somebody the pool no
+    longer contains: standing still would leave the chore on a person who cannot do it. Same
+    keep-if-still-valid shape as `_reconcile_open_occurrence`, rather than a second rule.
+    Needs no session, since unlike a handoff it counts nothing."""
+    if not pool or current_assignee_id is None:
+        return None
+    current = next((u for u in pool if u.id == current_assignee_id), None)
+    return current if current is not None else initial_assignee(chore.assignment_type, pool)
 
 
 async def _reconcile_open_occurrence(
@@ -337,6 +376,10 @@ async def _reconcile_open_occurrence(
     """
     rule = _rule(chore)
     occ = await _open_occurrence(session, chore.id)
+    # Structural, so skipped rows count here (see `ChoreOccurrence.skipped`): this asks where
+    # the chain has got to, not what was achieved. Filtering them would pick an earlier closure
+    # and, on the revive path below, seed a slot a skipped row already holds - and that path
+    # inserts directly rather than going through `_free_slot_from`, so nothing would catch it.
     latest_done = (
         await session.execute(
             select(ChoreOccurrence)
@@ -582,6 +625,77 @@ async def delete_chore(chore_id: int, user: CurrentUser, session: SessionDep) ->
     await session.commit()
 
 
+async def _close_occurrence(
+    session: SessionDep,
+    chore: Chore,
+    occ: ChoreOccurrence,
+    *,
+    closed_by_id: int,
+    skipped: bool,
+    conflict_detail: str,
+) -> CompletionRead:
+    """Close a chore's open occurrence and materialise its successor. Shared by completing
+    and skipping, which differ only in `skipped` and in who ends up on the hook next, so the
+    ordering below and the IntegrityError mapping are written once rather than twice.
+
+    The successor's assignee is the one real behavioural fork: a completion hands the chore
+    on when the turn ends (`_successor_assignee`), a skip keeps it where it is
+    (`_retained_assignee`)."""
+    now = datetime.now(UTC)
+    scheduled_for = occ.scheduled_for
+    # Flip the current occurrence to done FIRST (it becomes the history row and frees
+    # the one-open-per-chore slot), then materialise the successor - never the reverse,
+    # or the two momentarily-open rows would trip the partial unique index.
+    occ.status = OccurrenceStatus.done
+    occ.skipped = skipped
+    occ.title = chore.title
+    occ.completed_by_user_id = closed_by_id
+    occ.completed_at = now
+    await session.flush()
+
+    # Anchor the successor to the occurrence just cleared (skip-missed applied), so its
+    # due date advances one interval on the grid rather than from the completion time.
+    # An unscheduled chore has no grid and reopens at `now` instead.
+    upcoming = next_occurrence_after(scheduled_for, now, _rule(chore))
+    pool = list(chore.assignees)
+    next_person = (
+        _retained_assignee(chore, occ.assignee_id, pool)
+        if skipped
+        else await _successor_assignee(session, chore, occ.assignee_id, pool)
+    )
+    session.add(
+        ChoreOccurrence(
+            chore_id=chore.id,
+            scheduled_for=upcoming,
+            assignee_id=next_person.id if next_person is not None else None,
+            status=OccurrenceStatus.open,
+        )
+    )
+    completion_id = occ.id
+    completion_title = occ.title
+    try:
+        await session.commit()
+    except IntegrityError:
+        # A concurrent double-submit races to create the same successor occurrence (or
+        # re-close the same slot); the unique guards turn that into a 409, not a 500.
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=conflict_detail) from None
+
+    days = days_until_due(upcoming, now)
+    return CompletionRead(
+        id=completion_id,
+        chore_id=chore.id,
+        title=completion_title,
+        scheduled_for=scheduled_for,
+        completed_by_user_id=closed_by_id,
+        skipped=skipped,
+        created_at=now,
+        next_due=upcoming,
+        days_until_due=days,
+        status=due_status(days),
+    )
+
+
 @router.post(
     "/{chore_id}/complete", response_model=CompletionRead, status_code=status.HTTP_201_CREATED
 )
@@ -605,7 +719,7 @@ async def complete_chore(
     occ = await _open_occurrence(session, chore.id)
     if occ is None:
         # Nothing open to complete. Not reachable by simply completing twice (the successor
-        # below is unconditional), but a concurrent undo can clear the slot mid-request, and
+        # is unconditional), but a concurrent undo can clear the slot mid-request, and
         # a chore predating the unscheduled migration could still be sitting terminated.
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -622,52 +736,46 @@ async def complete_chore(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="A completion can only be credited to the current user or an assignee",
             )
-    now = datetime.now(UTC)
-    scheduled_for = occ.scheduled_for
-    # Flip the current occurrence to done FIRST (it becomes the history row and frees
-    # the one-open-per-chore slot), then materialise the successor - never the reverse,
-    # or the two momentarily-open rows would trip the partial unique index.
-    occ.status = OccurrenceStatus.done
-    occ.title = chore.title
-    occ.completed_by_user_id = completed_by_id
-    occ.completed_at = now
-    await session.flush()
-
-    # Anchor the successor to the occurrence just cleared (skip-missed applied), so its
-    # due date advances one interval on the grid rather than from the completion time.
-    # An unscheduled chore has no grid and reopens at `now` instead.
-    upcoming = next_occurrence_after(scheduled_for, now, _rule(chore))
-    next_person = await _successor_assignee(session, chore, occ.assignee_id, list(chore.assignees))
-    session.add(
-        ChoreOccurrence(
-            chore_id=chore.id,
-            scheduled_for=upcoming,
-            assignee_id=next_person.id if next_person is not None else None,
-            status=OccurrenceStatus.open,
-        )
+    return await _close_occurrence(
+        session,
+        chore,
+        occ,
+        closed_by_id=completed_by_id,
+        skipped=False,
+        conflict_detail="This chore has already been completed",
     )
-    completion_id = occ.id
-    completion_title = occ.title
-    try:
-        await session.commit()
-    except IntegrityError:
-        # A concurrent double-submit races to create the same successor occurrence (or
-        # re-complete the same slot); the unique guards turn that into a 409, not a 500.
-        await session.rollback()
+
+
+@router.post("/{chore_id}/skip", response_model=CompletionRead, status_code=status.HTTP_201_CREATED)
+async def skip_chore(chore_id: int, user: CurrentUser, session: SessionDep) -> CompletionRead:
+    """Skip a chore's current occurrence: close it and move the chore on to its next slot
+    without recording any work. Ungated like completing, since every role that can complete a
+    chore can decide not to do one.
+
+    Two things it deliberately is not. It takes no `completed_by_user_id`, because there is no
+    credit to hand out - a skip is always recorded against whoever pressed the button. And it
+    refuses an unscheduled chore (400): those are never due, so there is no deadline to move
+    past and nothing to skip. That refusal is also what keeps "every skipped row belongs to a
+    scheduled chore" true at the data layer rather than only in the UI, which is what lets the
+    punctuality breakdown in stats.py host a skipped slice alongside its three due-date ones.
+    """
+    chore = await _get_user_chore_or_404(session, user, chore_id)
+    if chore.repeats == RepeatPeriod.manual:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="An unscheduled chore is never due, so there is nothing to skip",
+        )
+    occ = await _open_occurrence(session, chore.id)
+    if occ is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="This chore has already been completed",
-        ) from None
-
-    days = days_until_due(upcoming, now)
-    return CompletionRead(
-        id=completion_id,
-        chore_id=chore_id,
-        title=completion_title,
-        scheduled_for=scheduled_for,
-        completed_by_user_id=completed_by_id,
-        created_at=now,
-        next_due=upcoming,
-        days_until_due=days,
-        status=due_status(days),
+            detail="This chore has no open occurrence to skip",
+        )
+    return await _close_occurrence(
+        session,
+        chore,
+        occ,
+        closed_by_id=user.id,
+        skipped=True,
+        conflict_detail="This chore has no open occurrence to skip",
     )

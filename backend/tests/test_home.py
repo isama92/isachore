@@ -445,3 +445,34 @@ async def test_home_flags_which_chores_carry_a_description(
     assert flags == {"With": True, "Without": False}
     # The HTML itself stays off this payload.
     assert all("description" not in i for i in items)
+
+
+async def test_home_progress_counts_a_skip_as_dealt_with(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    """One of the two places skipped occurrences deliberately still count (see
+    `ChoreOccurrence.skipped`). This bar answers "how much of today's list have you got
+    through", and a skipped chore is off the list either way: it was decided about, and its
+    successor has moved out of the due window. Statistics asks how much *work* was done and
+    excludes them, so the two disagree by design."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    today = datetime.now(UTC).date()
+    chore = await make_chore(
+        household=household, title="Bins", start_date=today, repeats=RepeatPeriod.daily
+    )
+    client = await auth_client(user)
+
+    before = await client.get("/api/v1/home")
+    assert before.json()["progress"] == {"done_today": 0, "total_today": 1}
+
+    assert (await client.post(f"/api/v1/chores/{chore.id}/skip")).status_code == 201
+
+    after = await client.get("/api/v1/home")
+    assert after.json()["progress"] == {"done_today": 1, "total_today": 1}
+    # The chore is still listed (tomorrow is inside the 7-day window) but is no longer
+    # part of today's tally, which is what makes the bar read 1 of 1 rather than 1 of 2.
+    assert [i["days_until_due"] for i in after.json()["items"]] == [1]

@@ -130,7 +130,7 @@ describe('History', () => {
     stubFetch({ entries: [] })
     renderWithProviders(<History />)
 
-    expect(await screen.findByText('No completed chores yet.')).toBeInTheDocument()
+    expect(await screen.findByText('Nothing recorded yet.')).toBeInTheDocument()
   })
 
   it('filters by person and pushes the choice into the query', async () => {
@@ -254,14 +254,14 @@ describe('History', () => {
     await user.click(within(row).getByRole('button', { name: 'Undo' }))
     await user.click(
       within(await screen.findByRole('alertdialog')).getByRole('button', {
-        name: 'Undo completion',
+        name: 'Undo entry',
       }),
     )
 
     await waitFor(() =>
       expect(deleteCalls(fetchMock).some((u) => u.includes('/api/v1/completions/7'))).toBe(true),
     )
-    expect(toastSpy).toHaveBeenCalledWith('Completion undone')
+    expect(toastSpy).toHaveBeenCalledWith('Entry undone')
   })
 
   it('does not undo when the dialog is cancelled', async () => {
@@ -313,5 +313,39 @@ describe('History', () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/completions/filters'))).toBe(
       true,
     )
+  })
+  it('badges the skipped rows and only those', async () => {
+    stubFetch({
+      entries: [
+        makeHistoryEntry({ id: 7, title: 'Scrub the tub', skipped: true, days_late: null }),
+        makeHistoryEntry({ id: 8, title: 'Take the bins out', skipped: false, days_late: 2 }),
+      ],
+    })
+    renderWithProviders(<History />, { authValue: { user: authUser } })
+
+    const skippedRow = (await screen.findByText('Scrub the tub')).closest('tr')!
+    expect(within(skippedRow).getByText('Skipped')).toBeInTheDocument()
+    // The lateness column already says nothing for it, since days_late comes back null.
+    expect(within(skippedRow).getByText('—')).toBeInTheDocument()
+
+    const completedRow = screen.getByText('Take the bins out').closest('tr')!
+    expect(within(completedRow).queryByText('Skipped')).not.toBeInTheDocument()
+    expect(within(completedRow).getByText('2 days late')).toBeInTheDocument()
+  })
+
+  it('filters by outcome and pushes the choice into the query', async () => {
+    const fetchMock = stubFetch({
+      entries: [makeHistoryEntry({ id: 7, title: 'Scrub the tub' })],
+    })
+    renderWithProviders(<History />, { authValue: { user: authUser } })
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    await screen.findByText('Scrub the tub')
+    // Offered even here, with a single member and a single household: the payload says
+    // nothing about whether any skips exist, so there is nothing to hide it on.
+    await user.click(await screen.findByRole('combobox', { name: 'Outcome' }))
+    await user.click(await screen.findByRole('option', { name: 'Skipped only' }))
+
+    await waitFor(() => expect(lastCompletionsGet(fetchMock)).toContain('outcome=skipped'))
   })
 })

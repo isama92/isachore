@@ -375,8 +375,11 @@ def make_occurrence(db_session: AsyncSession) -> Callable[..., Awaitable[ChoreOc
         completed_by: User | None = None,
         completed_at: datetime | None = None,
         title: str | None = None,
+        skipped: bool = False,
     ) -> ChoreOccurrence:
         # A done occurrence snapshots its title; an open one reads the live chore title.
+        # `skipped=True` builds the other kind of closure, for tests that need one in place
+        # rather than going through the endpoint (history, stats, "last done").
         occurrence = ChoreOccurrence(
             chore_id=chore.id,
             scheduled_for=scheduled_for,
@@ -387,6 +390,7 @@ def make_occurrence(db_session: AsyncSession) -> Callable[..., Awaitable[ChoreOc
             else None,
             completed_by_user_id=completed_by.id if completed_by is not None else None,
             completed_at=completed_at,
+            skipped=skipped,
         )
         db_session.add(occurrence)
         await db_session.commit()

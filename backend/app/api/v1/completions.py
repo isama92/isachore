@@ -35,6 +35,10 @@ COMPLETION_SORT_COLUMNS = {
     "title": (ChoreOccurrence.title,),
 }
 
+# Which kind of closure to list. Omitted means both, matching the empty-means-unset
+# convention the frontend's table hook already uses for its other filters.
+CompletionOutcome = Literal["completed", "skipped"]
+
 
 @router.get("/filters", response_model=HistoryFilterOptions)
 async def completion_filters(user: CurrentUser, session: SessionDep) -> HistoryFilterOptions:
@@ -92,14 +96,16 @@ async def list_completions(
     sort_dir: SortDir = "desc",
     user_id: Annotated[int | None, Query(ge=1)] = None,
     household_id: Annotated[int | None, Query(ge=1)] = None,
+    outcome: CompletionOutcome | None = None,
 ) -> Page[HistoryEntryRead]:
-    """Completed-chore history across the active households where the caller is at least a
+    """Chore history across the active households where the caller is at least a
     deputy (so housemates' completions show too). Reads the `done` occurrences of the merged
-    occurrences table. Optional user_id / household_id narrow the list; a household the
-    caller is only a helper in, one they do not belong to, or a stranger's id all yield an
-    empty page rather than a 403, since the list spans every household at once. History of
-    soft-deleted chores is kept (the title is snapshotted for exactly this and the chore row
-    still resolves the join)."""
+    occurrences table, which is both real completions and skips: each entry carries `skipped`
+    so the list can tell them apart, and `outcome` narrows to one kind. Optional user_id /
+    household_id narrow the list too; a household the caller is only a helper in, one they do
+    not belong to, or a stranger's id all yield an empty page rather than a 403, since the
+    list spans every household at once. History of soft-deleted chores is kept (the title is
+    snapshotted for exactly this and the chore row still resolves the join)."""
     # An occurrence has no household_id of its own, so scope by joining to the chore
     # and filtering on its household. No Chore.deleted_at filter: history outlives a
     # soft-deleted chore.
@@ -111,6 +117,8 @@ async def list_completions(
         filters.append(Chore.household_id == household_id)
     if user_id is not None:
         filters.append(ChoreOccurrence.completed_by_user_id == user_id)
+    if outcome is not None:
+        filters.append(ChoreOccurrence.skipped.is_(outcome == "skipped"))
 
     total = (
         await session.scalar(
@@ -144,10 +152,14 @@ async def list_completions(
             title=occ.title,
             scheduled_for=occ.scheduled_for,
             completed_at=occ.completed_at,
+            skipped=occ.skipped,
             # An unscheduled chore has no deadline, so it can be neither late nor on time.
+            # Nor can a skip: it had a deadline, but nothing was done to be punctual about,
+            # and reporting "3 days late" against work that never happened would read as a
+            # completion. Both land on the same `history.notDue` placeholder in the table.
             days_late=(
                 None
-                if repeats == RepeatPeriod.manual
+                if repeats == RepeatPeriod.manual or occ.skipped
                 else days_late(occ.scheduled_for, occ.completed_at)
             ),
             completed_by=HouseholdMemberRead.model_validate(completer) if completer else None,
@@ -160,14 +172,15 @@ async def list_completions(
 
 @router.delete("/{completion_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def undo_completion(completion_id: int, user: CurrentUser, session: SessionDep) -> None:
-    """Undo a completion (identified by its done-occurrence id). Only the user the
-    completion is credited to (completed_by) may undo it; the occurrence stores no
+    """Undo a closure, completion or skip alike (identified by its done-occurrence id). Only
+    the user it is recorded against (completed_by) may undo it; the occurrence stores no
     separate record of who submitted it, so someone who completes a chore on another
     member's behalf cannot undo it themselves.
-    Undoing the chore's latest completion (the most recently *completed* one, see below)
+    Undoing the chore's latest closure (the most recently *closed* one, see below)
     reopens that occurrence (deleting the successor open occurrence first) so the chore is
     available again with its original assignee; undoing an older one just removes that
-    history row."""
+    history row. A skip counts as a closure for "latest" here, because it really did close
+    its slot and its successor really is the open row."""
     # Scope to the households where the caller is at least a deputy (same scope as the
     # list): a done occurrence outside it, or a missing id, is a 404. That is also what
     # stops a helper undoing anything, their own completions included - History does not
@@ -223,6 +236,10 @@ async def undo_completion(completion_id: int, user: CurrentUser, session: Sessio
         occ.completed_by_user_id = None
         occ.completed_at = None
         occ.title = None
+        # Clearing `skipped` matters as much as the rest: an open row that kept the flag
+        # would be completed for real later and still land in history as a skip, since
+        # nothing downstream re-derives it.
+        occ.skipped = False
     else:
         # An older completion: a history edit, the current open occurrence stands.
         await session.delete(occ)

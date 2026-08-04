@@ -66,7 +66,13 @@ describe('Statistics', () => {
   it('renders a dash for the on-time rate when nothing was completed', async () => {
     stubFetch({
       stats: makeStats({
-        kpis: { completed_in_range: 0, currently_overdue: 0, on_time_rate: null, active_chores: 0 },
+        kpis: {
+          completed_in_range: 0,
+          skipped_in_range: 0,
+          currently_overdue: 0,
+          on_time_rate: null,
+          active_chores: 0,
+        },
       }),
     })
     renderWithProviders(<Statistics />)
@@ -89,7 +95,7 @@ describe('Statistics', () => {
     stubFetch({})
     renderWithProviders(<Statistics />)
 
-    expect(await screen.findByText('On time vs late')).toBeInTheDocument()
+    expect(await screen.findByText('On time, late or skipped')).toBeInTheDocument()
     const lateItem = (await screen.findByText('Late')).closest('li')!
     expect(within(lateItem).getByText('3')).toBeInTheDocument()
   })
@@ -108,10 +114,16 @@ describe('Statistics', () => {
   it('shows empty messages when there is no data in range', async () => {
     stubFetch({
       stats: makeStats({
-        kpis: { completed_in_range: 0, currently_overdue: 0, on_time_rate: null, active_chores: 0 },
+        kpis: {
+          completed_in_range: 0,
+          skipped_in_range: 0,
+          currently_overdue: 0,
+          on_time_rate: null,
+          active_chores: 0,
+        },
         completions_over_time: [],
         status_breakdown: { overdue: 0, today: 0, soon: 0 },
-        punctuality: { on_time: 0, late: 0, early: 0 },
+        punctuality: { on_time: 0, late: 0, early: 0, skipped: 0 },
         per_person: [],
       }),
     })
@@ -202,5 +214,49 @@ describe('Statistics', () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/completions/filters'))).toBe(
       true,
     )
+  })
+  it('carries the skip count in the Completed tile hint', async () => {
+    stubFetch({})
+    renderWithProviders(<Statistics />)
+
+    // makeStats: 12 completed, 4 skipped, 30d range.
+    expect(await screen.findByText('in the last 30 days · 4 skipped')).toBeInTheDocument()
+  })
+
+  it('keeps the plain hint when nothing was skipped', async () => {
+    stubFetch({ stats: makeStats({ kpis: { ...makeStats().kpis, skipped_in_range: 0 } }) })
+    renderWithProviders(<Statistics />)
+
+    expect(await screen.findByText('in the last 30 days')).toBeInTheDocument()
+  })
+
+  it('gives skipped chores a slice of the punctuality donut', async () => {
+    stubFetch({})
+    renderWithProviders(<Statistics />)
+
+    expect(await screen.findByText('On time, late or skipped')).toBeInTheDocument()
+    const skippedItem = (await screen.findByText('Skipped')).closest('li')!
+    expect(within(skippedItem).getByText('4')).toBeInTheDocument()
+  })
+
+  it('draws the time chart for a range that holds nothing but skips', async () => {
+    stubFetch({
+      stats: makeStats({
+        kpis: { ...makeStats().kpis, completed_in_range: 0, skipped_in_range: 3 },
+        completions_over_time: [
+          { bucket: '2026-07-01', count: 0, skipped: 1 },
+          { bucket: '2026-07-02', count: 0, skipped: 2 },
+        ],
+      }),
+    })
+    renderWithProviders(<Statistics />)
+
+    // The chart's own empty state counts both series, so a skips-only range still plots
+    // rather than claiming there is no data.
+    expect(await screen.findByText('Completions over time')).toBeInTheDocument()
+    const chartCard = screen
+      .getByText('Completions over time')
+      .closest<HTMLElement>('div.rounded-xl')!
+    expect(within(chartCard).queryByText('Not enough data yet.')).not.toBeInTheDocument()
   })
 })

@@ -276,3 +276,43 @@ async def test_unscheduled_flags_which_chores_carry_a_description(
     flags = {i["title"]: i["has_description"] for i in items}
     assert flags == {"With": True, "Without": False}
     assert all("description" not in i for i in items)
+
+
+async def test_unscheduled_last_done_ignores_a_skip(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    """ "Last done" has to mean done. This page offers no skip button, but the state is
+    reachable anyway: a chore can be skipped while it is on a schedule and switched to
+    unscheduled afterwards, leaving a skip as its most recent closure."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    now = datetime.now(UTC)
+    chore = await make_chore(
+        household=household, repeats=RepeatPeriod.manual, with_occurrence=False
+    )
+    # Really done a fortnight ago...
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=now - timedelta(days=14),
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=now - timedelta(days=14),
+    )
+    # ...and skipped yesterday, which must not read as having been done.
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=now - timedelta(days=1),
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=now - timedelta(days=1),
+        skipped=True,
+    )
+    await make_occurrence(chore=chore, scheduled_for=now, status=OccurrenceStatus.open)
+    client = await auth_client(user)
+
+    items = (await client.get("/api/v1/unscheduled")).json()["items"]
+    assert [i["days_since_last_completion"] for i in items] == [14]

@@ -9,6 +9,16 @@ import { dueDotClass, groupByDue, relativeDueLabel } from '../lib/home'
 import type { DueChore, HomeData } from '../lib/types'
 import ChoreFilters from '@/components/chores/ChoreFilters'
 import ChoreRow from '@/components/chores/ChoreRow'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import CreditDialog from '@/components/chores/CreditDialog'
 import DescriptionDialog from '@/components/chores/DescriptionDialog'
 import { useFilterOptions } from '@/components/chores/useFilterOptions'
@@ -41,6 +51,11 @@ export default function Home() {
   const [creditFor, setCreditFor] = useState<DueChore | null>(null)
   // Which chore's instructions are on screen; non-null opens the dialog, as with creditFor.
   const [descriptionFor, setDescriptionFor] = useState<DueChore | null>(null)
+  // The chore awaiting a "really skip this?" confirmation (null = closed), same open-on-
+  // non-null shape. Skipping always confirms, unlike completing: it moves the chore's
+  // schedule on, and undo lives in History, which helpers cannot reach at all - so for them
+  // an unconfirmed mis-click would be unrecoverable.
+  const [skipFor, setSkipFor] = useState<DueChore | null>(null)
 
   const options = useFilterOptions()
   const [householdId, setHouseholdId] = useState('')
@@ -90,7 +105,11 @@ export default function Home() {
     }
   }, [fetchHome, t])
 
-  function completeChore(chore: DueChore, completedByUserId?: number) {
+  // Completing and skipping both close the occurrence server-side, so they share every bit
+  // of this: the exit animation, the double-click lock, the monotonic request guard and the
+  // refetch. Only the request and the fallback error copy differ, and keeping them in one
+  // function is what stops the animation timing and the guard drifting apart between them.
+  function closeChore(chore: DueChore, request: () => Promise<unknown>, fallbackError: string) {
     if (exiting.has(chore.id)) return // ignore repeat clicks while a row animates out
     setError(null)
     // Play the exit animation for responsiveness, then reconcile the whole view
@@ -108,13 +127,8 @@ export default function Home() {
       window.setTimeout(resolve, prefersReducedMotion() ? 0 : EXIT_MS)
     })
 
-    // Only send a body when crediting someone other than the current user; the
-    // default (no body) credits the caller.
-    const body =
-      completedByUserId === undefined ? undefined : { completed_by_user_id: completedByUserId }
     let req = 0
-    api
-      .post(endpoints.chores.complete(chore.id), body)
+    request()
       .then(() => {
         req = ++reqRef.current
         return Promise.all([fetchHomeRef.current(), animated])
@@ -123,9 +137,27 @@ export default function Home() {
         if (req === reqRef.current) setData(home)
       })
       .catch((err: unknown) => {
-        setError(err instanceof ApiError ? err.message : t('home.completeError'))
+        setError(err instanceof ApiError ? err.message : fallbackError)
       })
       .finally(stopExiting)
+  }
+
+  function completeChore(chore: DueChore, completedByUserId?: number) {
+    // Only send a body when crediting someone other than the current user; the
+    // default (no body) credits the caller.
+    const body =
+      completedByUserId === undefined ? undefined : { completed_by_user_id: completedByUserId }
+    closeChore(
+      chore,
+      () => api.post(endpoints.chores.complete(chore.id), body),
+      t('home.completeError'),
+    )
+  }
+
+  // No credit question for a skip: there is no work to attribute, so it is always recorded
+  // against whoever confirmed it and the endpoint takes no body.
+  function skipChore(chore: DueChore) {
+    closeChore(chore, () => api.post(endpoints.chores.skip(chore.id)), t('home.skipError'))
   }
 
   // Clicking Done: an unassigned chore, or one I'm already an assignee of,
@@ -144,6 +176,12 @@ export default function Home() {
     const chore = creditFor
     setCreditFor(null)
     if (chore) completeChore(chore, completedByUserId)
+  }
+
+  function confirmSkip() {
+    const chore = skipFor
+    setSkipFor(null)
+    if (chore) skipChore(chore)
   }
 
   const left = data ? data.progress.total_today - data.progress.done_today : 0
@@ -243,9 +281,11 @@ export default function Home() {
                         doneText={t('home.done')}
                         doneLabel={t('home.markDone', { title: chore.title })}
                         descriptionLabel={t('home.showDescription', { title: chore.title })}
+                        skipLabel={t('home.skip', { title: chore.title })}
                         onShowDescription={
                           chore.has_description ? () => setDescriptionFor(chore) : undefined
                         }
+                        onSkip={() => setSkipFor(chore)}
                         onComplete={() => requestComplete(chore)}
                       />
                     ))}
@@ -270,6 +310,25 @@ export default function Home() {
         onClose={() => setCreditFor(null)}
         onConfirm={creditAndComplete}
       />
+
+      {/* Inline rather than its own component, unlike CreditDialog: only this page skips, and
+          one caller does not earn the indirection. Controlled the same way, on skipFor. */}
+      <AlertDialog open={skipFor !== null} onOpenChange={(open) => !open && setSkipFor(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t('home.skipConfirm', { title: skipFor?.title ?? '' })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>{t('home.skipConfirmBody')}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmSkip}>
+              {t('home.skipConfirmAction')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <DescriptionDialog chore={descriptionFor} onClose={() => setDescriptionFor(null)} />
     </main>

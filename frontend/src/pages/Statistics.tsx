@@ -11,6 +11,8 @@ import type { HistoryFilterOptions, StatsData, StatsRange } from '../lib/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
   ChartTooltip,
   ChartTooltipContent,
   type ChartConfig,
@@ -175,9 +177,15 @@ export default function Statistics() {
 
   const overTimeConfig = {
     count: {
-      label: t('statistics.overTime.completions'),
+      label: t('statistics.overTime.done'),
       // The theme's main colour (tracks the user's chosen accent).
       color: 'var(--color-primary)',
+    },
+    skipped: {
+      label: t('statistics.overTime.skipped'),
+      // Grey, not a second accent: this series is the absence of work, and it matches the
+      // Skip button that produces it. Also what keeps it legible stacked on any --primary.
+      color: 'var(--color-stat-skipped)',
     },
   } satisfies ChartConfig
 
@@ -227,10 +235,22 @@ export default function Statistics() {
           value: data.punctuality.early,
           color: 'var(--color-stat-early)',
         },
+        // A skip had a real deadline (the API refuses to skip an unscheduled chore) but no
+        // work to be punctual about, so it belongs here as its own outcome rather than being
+        // folded into one of the three above. With it the four slices really do partition the
+        // scheduled occurrences that closed in the range.
+        {
+          key: 'skipped',
+          label: t('statistics.punctuality.skipped'),
+          value: data.punctuality.skipped,
+          color: 'var(--color-stat-skipped)',
+        },
       ]
     : []
 
-  const overTimeTotal = data?.completions_over_time.reduce((sum, b) => sum + b.count, 0) ?? 0
+  // Both series, or a range containing nothing but skips would render the empty state.
+  const overTimeTotal =
+    data?.completions_over_time.reduce((sum, b) => sum + b.count + b.skipped, 0) ?? 0
   const perPersonMax = Math.max(1, ...(data?.per_person.map((p) => p.count) ?? [1]))
 
   return (
@@ -313,10 +333,23 @@ export default function Statistics() {
       {data && (
         <div className="flex flex-col gap-6">
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {/* The skip count rides in the hint rather than taking a fifth tile, which would
+                leave an orphan in both the 2- and 4-column layouts. Two keys rather than a
+                conditional inside one, per the i18n convention, and the plain hint stays for
+                the common case of nothing skipped. */}
             <KpiCard
               label={t('statistics.kpis.completed')}
               value={String(data.kpis.completed_in_range)}
-              hint={t('statistics.kpis.completedHint', { days: RANGE_DAYS[range] })}
+              hint={
+                data.kpis.skipped_in_range > 0
+                  ? // `count`, not `skipped`: i18next only pluralises on that name, and
+                    // Italian needs "1 saltata" against "2 saltate".
+                    t('statistics.kpis.completedHintSkipped', {
+                      days: RANGE_DAYS[range],
+                      count: data.kpis.skipped_in_range,
+                    })
+                  : t('statistics.kpis.completedHint', { days: RANGE_DAYS[range] })
+              }
             />
             <KpiCard
               label={t('statistics.kpis.overdue')}
@@ -359,10 +392,24 @@ export default function Statistics() {
                         <ChartTooltipContent labelFormatter={(v) => formatBucket(String(v))} />
                       }
                     />
+                    <ChartLegend content={<ChartLegendContent />} />
+                    {/* Stacked, so each bar is the day's whole activity and the grey part
+                        reads as the share that was skipped. The rounding is split across the
+                        two so only the top of the stack is curved; a bucket with no skips
+                        keeps square top corners, which is a cosmetic wrinkle we accept
+                        rather than measuring each bar to decide. */}
                     <Bar
                       dataKey="count"
+                      stackId="activity"
                       fill="var(--color-count)"
-                      radius={4}
+                      radius={[0, 0, 4, 4]}
+                      isAnimationActive={false}
+                    />
+                    <Bar
+                      dataKey="skipped"
+                      stackId="activity"
+                      fill="var(--color-skipped)"
+                      radius={[4, 4, 0, 0]}
                       isAnimationActive={false}
                     />
                   </BarChart>

@@ -12,6 +12,7 @@ import { fullName } from '../lib/user'
 import type { HistoryEntry, HistoryFilterOptions } from '../lib/types'
 import { DataTable } from '@/components/data-table/DataTable'
 import { useServerTable } from '@/components/data-table/useServerTable'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   AlertDialog,
@@ -33,7 +34,7 @@ import {
 } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 
-type HistoryFilters = { user_id: string; household_id: string }
+type HistoryFilters = { user_id: string; household_id: string; outcome: string }
 
 // Radix Selects can't hold an empty value, so the "all" option uses a sentinel
 // that maps back to an omitted filter.
@@ -52,7 +53,9 @@ export default function History() {
       sortBy: 'created_at',
       sortDir: 'desc',
       pageSize: 10,
-      filters: { user_id: '', household_id: '' },
+      // `outcome` gets its URL param, its remembered value and its request serialisation
+      // free, since the hook derives its filter keys from this object. Empty = both kinds.
+      filters: { user_id: '', household_id: '', outcome: '' },
     },
   })
 
@@ -155,7 +158,20 @@ export default function History() {
     {
       accessorKey: 'title',
       header: t('history.headers.title'),
-      cell: ({ row }) => <span className="font-semibold">{row.original.title}</span>,
+      // A skip is a closure that produced no work, and without this the row is
+      // indistinguishable from real work being logged. Greyed like the Skip button that
+      // created it, and beside the title rather than in the lateness column, which is
+      // already the `notDue` placeholder for these (the server sends days_late: null).
+      cell: ({ row }) => (
+        <span className="flex items-center gap-2">
+          <span className="font-semibold">{row.original.title}</span>
+          {row.original.skipped && (
+            <Badge variant="secondary" className="shrink-0 text-muted-foreground">
+              {t('history.skipped')}
+            </Badge>
+          )}
+        </span>
+      ),
     },
     {
       id: 'household',
@@ -227,46 +243,60 @@ export default function History() {
           </p>
         )}
 
-        {(options.members.length > 1 || options.households.length > 1) && (
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-            {options.members.length > 1 && (
-              <Select
-                value={table.filters.user_id || ALL}
-                onValueChange={(v) => table.setFilter('user_id', v === ALL ? '' : v)}
-              >
-                <SelectTrigger className="sm:w-56" aria-label={t('history.filters.userLabel')}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL}>{t('history.filters.userAll')}</SelectItem>
-                  {options.members.map((m) => (
-                    <SelectItem key={m.id} value={String(m.id)}>
-                      {fullName(m)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-            {options.households.length > 1 && (
-              <Select
-                value={table.filters.household_id || ALL}
-                onValueChange={(v) => table.setFilter('household_id', v === ALL ? '' : v)}
-              >
-                <SelectTrigger className="sm:w-56" aria-label={t('history.filters.householdLabel')}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL}>{t('history.filters.householdAll')}</SelectItem>
-                  {options.households.map((h) => (
-                    <SelectItem key={h.id} value={String(h.id)}>
-                      {h.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-        )}
+        {/* The outcome filter is always available, so the bar renders unconditionally now:
+            unlike the two option lists, the server does not tell us whether any skips exist,
+            so there is nothing to hide it on. */}
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+          <Select
+            value={table.filters.outcome || ALL}
+            onValueChange={(v) => table.setFilter('outcome', v === ALL ? '' : v)}
+          >
+            <SelectTrigger className="sm:w-56" aria-label={t('history.filters.outcomeLabel')}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>{t('history.filters.outcomeAll')}</SelectItem>
+              <SelectItem value="completed">{t('history.filters.outcomeCompleted')}</SelectItem>
+              <SelectItem value="skipped">{t('history.filters.outcomeSkipped')}</SelectItem>
+            </SelectContent>
+          </Select>
+          {options.members.length > 1 && (
+            <Select
+              value={table.filters.user_id || ALL}
+              onValueChange={(v) => table.setFilter('user_id', v === ALL ? '' : v)}
+            >
+              <SelectTrigger className="sm:w-56" aria-label={t('history.filters.userLabel')}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>{t('history.filters.userAll')}</SelectItem>
+                {options.members.map((m) => (
+                  <SelectItem key={m.id} value={String(m.id)}>
+                    {fullName(m)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          {options.households.length > 1 && (
+            <Select
+              value={table.filters.household_id || ALL}
+              onValueChange={(v) => table.setFilter('household_id', v === ALL ? '' : v)}
+            >
+              <SelectTrigger className="sm:w-56" aria-label={t('history.filters.householdLabel')}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>{t('history.filters.householdAll')}</SelectItem>
+                {options.households.map((h) => (
+                  <SelectItem key={h.id} value={String(h.id)}>
+                    {h.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
 
         <DataTable
           columns={columns}

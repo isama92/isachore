@@ -2,7 +2,7 @@ from pydantic import BaseModel
 
 
 class StatsKpis(BaseModel):
-    """The headline numbers shown as stat tiles. `completed_in_range` and
+    """The headline numbers shown as stat tiles. `completed_in_range`, `skipped_in_range` and
     `on_time_rate` follow the selected range; `currently_overdue` and
     `active_chores` are a live snapshot (range-independent). `on_time_rate` is the
     fraction of in-range completions that were not late (on time or early), or None
@@ -10,9 +10,14 @@ class StatsKpis(BaseModel):
 
     Unscheduled chores count in `completed_in_range` but in none of the other three, which
     all need a due date to mean anything: `on_time_rate`'s denominator is the *scheduled*
-    completions only, so it can be None even when `completed_in_range` is not."""
+    completions only, so it can be None even when `completed_in_range` is not.
+
+    Skipped occurrences are counted apart, in `skipped_in_range`, and are in none of the
+    others: `completed_in_range` is work done, and `on_time_rate` measures the punctuality of
+    that work, so a run of skips leaves the rate untouched rather than dragging it down."""
 
     completed_in_range: int
+    skipped_in_range: int
     currently_overdue: int
     on_time_rate: float | None
     active_chores: int
@@ -20,10 +25,15 @@ class StatsKpis(BaseModel):
 
 class CompletionBucket(BaseModel):
     """One point on the completions-over-time chart. `bucket` is an ISO date: the day
-    itself when granularity is `day`, or the week's Monday when granularity is `week`."""
+    itself when granularity is `day`, or the week's Monday when granularity is `week`.
+
+    Two series over the same buckets: `count` is the work completed, `skipped` the
+    occurrences closed without being done. Every bucket in the range is present with both
+    at 0 if need be, so the stacked bars keep a continuous axis."""
 
     bucket: str
     count: int
+    skipped: int
 
 
 class StatusBreakdown(BaseModel):
@@ -37,20 +47,25 @@ class StatusBreakdown(BaseModel):
 
 
 class Punctuality(BaseModel):
-    """In-range completions bucketed by lateness: `late` (>0 days late), `on_time`
-    (same UTC day), `early` (completed before the due day).
+    """What became of the in-range occurrences of *scheduled* chores: `late` (>0 days late),
+    `on_time` (same UTC day), `early` (completed before the due day), or `skipped` (closed
+    with the work not done).
 
-    Counts only completions of scheduled chores, so the three do NOT sum to
-    `completed_in_range`: an unscheduled chore has no deadline to be measured against."""
+    Unscheduled chores are absent, having no deadline to be measured against, so the four do
+    NOT sum to `completed_in_range`. They do partition the scheduled occurrences closed in the
+    range, since skipping an unscheduled chore is refused outright. Note they do not sum to
+    `on_time_rate`'s denominator either, which is the first three only."""
 
     on_time: int
     late: int
     early: int
+    skipped: int
 
 
 class PersonStat(BaseModel):
     """One bar of the per-person chart: how many in-range completions this person was
-    credited with. Names only (data-minimised, like HouseholdMemberRead)."""
+    credited with, skips excluded (it ranks work done). Names only (data-minimised, like
+    HouseholdMemberRead)."""
 
     user_id: int
     first_name: str

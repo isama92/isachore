@@ -9,6 +9,10 @@ import type { DueChore, HistoryFilterOptions } from '../lib/types'
 const HOME = /\/api\/v1\/home/
 const FILTERS = '/api/v1/completions/filters'
 const COMPLETE = /\/api\/v1\/chores\/\d+\/complete/
+const SKIP = /\/api\/v1\/chores\/\d+\/skip/
+
+// Every row carries two buttons naming its chore now (Skip and Done), so a query by title
+// alone is ambiguous: these anchor on the action prefix from the locale string.
 
 function homeBody(done: number, total: number, items: DueChore[]) {
   return { progress: { done_today: done, total_today: total }, items }
@@ -189,7 +193,7 @@ describe('Home', () => {
       authValue: { user: makeUser({ id: 1 }) },
     })
 
-    const done = await screen.findByRole('button', { name: /Plants/ })
+    const done = await screen.findByRole('button', { name: /^Done: .*Plants/ })
     const rules = () => [...container.querySelectorAll('li[aria-hidden]')]
     expect(rules().map((r) => r.hasAttribute('data-exiting'))).toEqual([false, false])
 
@@ -221,7 +225,7 @@ describe('Home', () => {
 
     // One of two chores due today: the section survives, so the rule must stay
     // put. This is what makes the guard `every` rather than `some`.
-    await user.click(await screen.findByRole('button', { name: /Bins/ }))
+    await user.click(await screen.findByRole('button', { name: /^Done: .*Bins/ }))
     expect(container.querySelector('li[aria-hidden]')).not.toHaveAttribute('data-exiting')
   })
 
@@ -276,7 +280,7 @@ describe('Home', () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
 
-    await user.click(await screen.findByRole('button', { name: /Do the dishes/ }))
+    await user.click(await screen.findByRole('button', { name: /^Done: .*Do the dishes/ }))
 
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     const post = fetchMock.mock.calls.find(
@@ -323,7 +327,7 @@ describe('Home', () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
 
-    await user.click(await screen.findByRole('button', { name: /Do the dishes/ }))
+    await user.click(await screen.findByRole('button', { name: /^Done: .*Do the dishes/ }))
 
     await waitFor(() => {
       const row = screen.getByText('Do the dishes').closest('li')!
@@ -362,7 +366,7 @@ describe('Home', () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
 
-    await user.click(await screen.findByRole('button', { name: /Water the plants/ }))
+    await user.click(await screen.findByRole('button', { name: /^Done: .*Water the plants/ }))
 
     await waitFor(() => expect(screen.queryByText('Water the plants')).not.toBeInTheDocument())
     expect(screen.getByText('2 of 3 done today')).toBeInTheDocument()
@@ -383,7 +387,7 @@ describe('Home', () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
 
-    await user.click(await screen.findByRole('button', { name: /Do the dishes/ }))
+    await user.click(await screen.findByRole('button', { name: /^Done: .*Do the dishes/ }))
 
     expect(await screen.findByText('server exploded')).toBeInTheDocument()
     expect(screen.getByText('Do the dishes')).toBeInTheDocument()
@@ -411,7 +415,7 @@ describe('Home', () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
 
-    const doneButton = await screen.findByRole('button', { name: /Do the dishes/ })
+    const doneButton = await screen.findByRole('button', { name: /^Done: .*Do the dishes/ })
     const row = doneButton.closest('li')!
     await user.click(doneButton)
 
@@ -494,7 +498,7 @@ describe('Home', () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
 
-    await user.click(await screen.findByRole('button', { name: /Water plants/ }))
+    await user.click(await screen.findByRole('button', { name: /^Done: .*Water plants/ }))
     const dialog = await screen.findByRole('alertdialog')
     expect(within(dialog).getByText('Complete “Water plants”?')).toBeInTheDocument()
 
@@ -528,7 +532,7 @@ describe('Home', () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
 
-    await user.click(await screen.findByRole('button', { name: /Vacuum/ }))
+    await user.click(await screen.findByRole('button', { name: /^Done: .*Vacuum/ }))
     const dialog = await screen.findByRole('alertdialog')
     await user.click(within(dialog).getByRole('button', { name: 'Done as me' }))
 
@@ -675,5 +679,97 @@ describe('description dialog', () => {
       await within(await screen.findByRole('dialog')).findByText('version 2'),
     ).toBeInTheDocument()
     expect(fetchMock.mock.calls.filter(([url]) => String(url) === CHORE_12)).toHaveLength(2)
+  })
+  describe('skipping a chore', () => {
+    const CHORE = () =>
+      makeDueChore({ id: 7, title: 'Do the dishes', status: 'today', days_until_due: 0 })
+
+    function stub(skipResponse: { status: number; body: unknown }) {
+      let homeCalls = 0
+      return mockFetch([
+        { path: FILTERS, method: 'GET', body: SOLO_OPTIONS },
+        {
+          path: HOME,
+          method: 'GET',
+          body: () => {
+            homeCalls += 1
+            return homeCalls === 1 ? homeBody(0, 1, [CHORE()]) : homeBody(1, 1, [])
+          },
+        },
+        { path: SKIP, method: 'POST', ...skipResponse },
+      ])
+    }
+
+    it('confirms first, then posts (no body) and refetches', async () => {
+      const fetchMock = stub({ status: 201, body: {} })
+      const user = userEvent.setup({ pointerEventsCheck: 0 })
+      renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+      await user.click(await screen.findByRole('button', { name: /^Skip: .*Do the dishes/ }))
+
+      // Nothing is sent until the confirmation is accepted: unlike Done, a mis-click here
+      // would be unrecoverable for a helper, who cannot reach History to undo it.
+      const dialog = await screen.findByRole('alertdialog')
+      expect(within(dialog).getByText('Skip “Do the dishes”?')).toBeInTheDocument()
+      expect(fetchMock.mock.calls.some(([url]) => SKIP.test(String(url)))).toBe(false)
+
+      await user.click(within(dialog).getByRole('button', { name: 'Skip it' }))
+
+      const post = await waitFor(() =>
+        fetchMock.mock.calls.find(
+          ([url, init]) => String(url).includes('/api/v1/chores/7/skip') && init?.method === 'POST',
+        )!,
+      )
+      expect(post[1]?.body).toBeUndefined() // no credit to assign, so no body
+      await waitFor(() => expect(screen.queryByText('Do the dishes')).not.toBeInTheDocument())
+      expect(homeGets(fetchMock).length).toBe(2) // load + post-skip refetch
+    })
+
+    it('sends nothing when the confirmation is cancelled', async () => {
+      const fetchMock = stub({ status: 201, body: {} })
+      const user = userEvent.setup({ pointerEventsCheck: 0 })
+      renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+      await user.click(await screen.findByRole('button', { name: /^Skip: .*Do the dishes/ }))
+      const dialog = await screen.findByRole('alertdialog')
+      await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+      expect(fetchMock.mock.calls.some(([url]) => SKIP.test(String(url)))).toBe(false)
+      expect(screen.getByText('Do the dishes')).toBeInTheDocument()
+      expect(homeGets(fetchMock).length).toBe(1)
+    })
+
+    it('shows the error and keeps the row (no refetch) when the skip fails', async () => {
+      const fetchMock = stub({ status: 400, body: { detail: 'nothing to skip' } })
+      const user = userEvent.setup({ pointerEventsCheck: 0 })
+      renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+      await user.click(await screen.findByRole('button', { name: /^Skip: .*Do the dishes/ }))
+      const dialog = await screen.findByRole('alertdialog')
+      await user.click(within(dialog).getByRole('button', { name: 'Skip it' }))
+
+      expect(await screen.findByText('nothing to skip')).toBeInTheDocument()
+      expect(screen.getByText('Do the dishes')).toBeInTheDocument()
+      expect(homeGets(fetchMock).length).toBe(1)
+    })
+
+    it('disables both row actions while the row animates out', async () => {
+      stub({ status: 201, body: {} })
+      const user = userEvent.setup({ pointerEventsCheck: 0 })
+      renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+      const skipButton = await screen.findByRole('button', { name: /^Skip: .*Do the dishes/ })
+      const doneButton = screen.getByRole('button', { name: /^Done: .*Do the dishes/ })
+      const row = skipButton.closest('li')!
+      await user.click(skipButton)
+      await user.click(
+        within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Skip it' }),
+      )
+
+      expect(row).toHaveAttribute('data-exiting')
+      expect(skipButton).toBeDisabled()
+      expect(doneButton).toBeDisabled()
+      await waitFor(() => expect(screen.queryByText('Do the dishes')).not.toBeInTheDocument())
+    })
   })
 })

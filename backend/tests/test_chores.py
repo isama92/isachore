@@ -1651,6 +1651,40 @@ async def test_update_chore_snap_skips_a_slot_already_completed(
     assert await _open_slot(db_session, chore.id) == datetime(2026, 8, 4, tzinfo=UTC)
 
 
+async def test_update_chore_snap_skips_a_slot_that_was_skipped(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    """The same slot conflict, but the occupying row is a SKIP rather than a completion.
+
+    `_free_slot_from` is one of the two queries that deliberately does not filter skipped rows
+    out (see `ChoreOccurrence.skipped`): the question is which slots are taken, and a skipped
+    slot is taken. Without this the previous test passes either way, since its occupying row is
+    an ordinary completion - so adding `skipped.is_(False)` there would look free while
+    reintroducing a 409 that retrying can never clear.
+    """
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, with_occurrence=False)
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=datetime(2026, 7, 28, tzinfo=UTC),
+        status=OccurrenceStatus.done,
+        completed_at=datetime(2026, 7, 28, 9, 0, tzinfo=UTC),
+        skipped=True,
+    )
+    await make_occurrence(chore=chore, scheduled_for=datetime(2026, 7, 22, tzinfo=UTC))
+    client = await auth_client(user)
+
+    resp = await client.patch(f"/api/v1/chores/{chore.id}", json=_payload(weekdays=[TUE]))
+    assert resp.status_code == 200
+    assert await _open_slot(db_session, chore.id) == datetime(2026, 8, 4, tzinfo=UTC)
+
+
 # --- delete (soft) ---
 
 

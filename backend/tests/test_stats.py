@@ -23,6 +23,10 @@ def _buckets(body: dict) -> dict[str, int]:
     return {b["bucket"]: b["count"] for b in body["completions_over_time"]}
 
 
+def _skipped_buckets(body: dict) -> dict[str, int]:
+    return {b["bucket"]: b["skipped"] for b in body["completions_over_time"]}
+
+
 async def test_stats_requires_auth(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/stats")
     assert resp.status_code == 401
@@ -56,16 +60,17 @@ async def test_stats_empty(
     assert body["granularity"] == "day"
     assert body["kpis"] == {
         "completed_in_range": 0,
+        "skipped_in_range": 0,
         "currently_overdue": 0,
         "on_time_rate": None,  # no completions -> no rate (not 0.0)
         "active_chores": 0,
     }
     assert body["status_breakdown"] == {"overdue": 0, "today": 0, "soon": 0}
-    assert body["punctuality"] == {"on_time": 0, "late": 0, "early": 0}
+    assert body["punctuality"] == {"on_time": 0, "late": 0, "early": 0, "skipped": 0}
     assert body["per_person"] == []
-    # A continuous 30-day axis of zero-count buckets.
+    # A continuous 30-day axis of zero-count buckets, both series seeded.
     assert len(body["completions_over_time"]) == 30
-    assert all(b["count"] == 0 for b in body["completions_over_time"])
+    assert all(b["count"] == 0 and b["skipped"] == 0 for b in body["completions_over_time"])
 
 
 async def test_stats_completions_over_time_daily_buckets(
@@ -223,7 +228,7 @@ async def test_stats_punctuality_and_on_time_rate(
     resp = await client.get("/api/v1/stats")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["punctuality"] == {"on_time": 1, "late": 1, "early": 1}
+    assert body["punctuality"] == {"on_time": 1, "late": 1, "early": 1, "skipped": 0}
     # Not-late fraction = (on_time + early) / total = 2/3.
     assert body["kpis"]["on_time_rate"] == pytest.approx(2 / 3)
 
@@ -407,7 +412,7 @@ async def test_stats_null_completer_counts_in_totals_but_not_per_person(
     assert resp.status_code == 200
     body = resp.json()
     assert body["kpis"]["completed_in_range"] == 1
-    assert body["punctuality"] == {"on_time": 1, "late": 0, "early": 0}
+    assert body["punctuality"] == {"on_time": 1, "late": 0, "early": 0, "skipped": 0}
     assert body["per_person"] == []
 
 
@@ -478,7 +483,7 @@ async def test_stats_unscheduled_completion_counts_but_is_not_punctual(
     assert [(p["user_id"], p["count"]) for p in body["per_person"]] == [(user.id, 1)]
     # Nothing punctual to report, so the rate is None rather than 0.0 or 1.0 - and
     # punctuality deliberately does NOT sum to completed_in_range.
-    assert body["punctuality"] == {"on_time": 0, "late": 0, "early": 0}
+    assert body["punctuality"] == {"on_time": 0, "late": 0, "early": 0, "skipped": 0}
     assert body["kpis"]["on_time_rate"] is None
 
 
@@ -510,5 +515,113 @@ async def test_stats_on_time_rate_ignores_unscheduled_completions(
 
     body = (await client.get("/api/v1/stats")).json()
     assert body["kpis"]["completed_in_range"] == 2
-    assert body["punctuality"] == {"on_time": 1, "late": 0, "early": 0}
+    assert body["punctuality"] == {"on_time": 1, "late": 0, "early": 0, "skipped": 0}
     assert body["kpis"]["on_time_rate"] == 1.0
+
+
+async def test_stats_skip_is_counted_apart_from_work_done(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    """A skip closed a slot but produced nothing, so it stays out of every "work done"
+    reading and is reported on its own instead."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, with_occurrence=False)
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=TODAY_START,
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=NOW,
+    )
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=TODAY_START - timedelta(days=1),
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=NOW,
+        skipped=True,
+    )
+    client = await auth_client(user)
+
+    body = (await client.get("/api/v1/stats")).json()
+    today = NOW.date().isoformat()
+    assert body["kpis"]["completed_in_range"] == 1
+    assert body["kpis"]["skipped_in_range"] == 1
+    # Two series over the same buckets, each carrying only its own kind.
+    assert _buckets(body)[today] == 1
+    assert _skipped_buckets(body)[today] == 1
+    # The ranking is of work done, so the skip earns no bar height.
+    assert [(p["user_id"], p["count"]) for p in body["per_person"]] == [(user.id, 1)]
+
+
+async def test_stats_punctuality_gains_a_skipped_bucket(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    """The four buckets partition the *scheduled* occurrences closed in the range: a skip had
+    a real deadline (skipping an unscheduled chore is refused outright), it just has no
+    punctuality. The rate is deliberately not dragged down by it: it measures the work that
+    was done, so one on-time completion beside two skips is still 100%."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, with_occurrence=False)
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=TODAY_START,
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=TODAY_START + timedelta(hours=6),
+    )
+    for offset in (1, 2):
+        await make_occurrence(
+            chore=chore,
+            scheduled_for=TODAY_START - timedelta(days=offset),
+            status=OccurrenceStatus.done,
+            completed_by=user,
+            completed_at=NOW,
+            skipped=True,
+        )
+    client = await auth_client(user)
+
+    body = (await client.get("/api/v1/stats")).json()
+    assert body["punctuality"] == {"on_time": 1, "late": 0, "early": 0, "skipped": 2}
+    assert sum(body["punctuality"].values()) == 3  # every scheduled closure in the range
+    assert body["kpis"]["on_time_rate"] == 1.0
+
+
+async def test_stats_range_of_only_skips_reports_no_rate(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    """Skips are not in the rate's denominator, so a range with nothing but skips has no
+    punctuality to report at all - None rather than 0.0, which would read as "always late"."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, with_occurrence=False)
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=TODAY_START,
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=NOW,
+        skipped=True,
+    )
+    client = await auth_client(user)
+
+    body = (await client.get("/api/v1/stats")).json()
+    assert body["kpis"]["completed_in_range"] == 0
+    assert body["kpis"]["skipped_in_range"] == 1
+    assert body["kpis"]["on_time_rate"] is None
+    assert body["punctuality"] == {"on_time": 0, "late": 0, "early": 0, "skipped": 1}
+    assert body["per_person"] == []
