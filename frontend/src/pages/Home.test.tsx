@@ -707,8 +707,8 @@ describe('description dialog', () => {
 
       await user.click(await screen.findByRole('button', { name: /^Skip: .*Do the dishes/ }))
 
-      // Nothing is sent until the confirmation is accepted: unlike Done, a mis-click here
-      // would be unrecoverable for a helper, who cannot reach History to undo it.
+      // Nothing is sent until the confirmation is accepted: unlike Done, a skip moves the
+      // chore's schedule on, so undoing a mis-click means going and finding it on History.
       const dialog = await screen.findByRole('alertdialog')
       expect(within(dialog).getByText('Skip “Do the dishes”?')).toBeInTheDocument()
       expect(fetchMock.mock.calls.some(([url]) => SKIP.test(String(url)))).toBe(false)

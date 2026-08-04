@@ -11,7 +11,7 @@ import type { Membership } from '../lib/types'
 const tree = (
   <Routes>
     <Route element={<RequireRole min="deputy" />}>
-      <Route path="/history" element={<div>history-content</div>} />
+      <Route path="/statistics" element={<div>statistics-content</div>} />
     </Route>
     <Route element={<RequireRole min="organiser" />}>
       <Route path="/chores" element={<div>chores-content</div>} />
@@ -26,13 +26,13 @@ function at(route: string, memberships: Membership[]) {
 
 describe('RequireRole', () => {
   it('lets an organiser through both gates', () => {
-    at('/history', membershipsFor('organiser', 1))
-    expect(screen.getByText('history-content')).toBeInTheDocument()
+    at('/statistics', membershipsFor('organiser', 1))
+    expect(screen.getByText('statistics-content')).toBeInTheDocument()
   })
 
-  it('lets a deputy into History but not the management pages', () => {
-    at('/history', membershipsFor('deputy', 1))
-    expect(screen.getByText('history-content')).toBeInTheDocument()
+  it('lets a deputy into Statistics but not the management pages', () => {
+    at('/statistics', membershipsFor('deputy', 1))
+    expect(screen.getByText('statistics-content')).toBeInTheDocument()
   })
 
   it('redirects a deputy away from the management pages', () => {
@@ -41,24 +41,24 @@ describe('RequireRole', () => {
   })
 
   it('redirects a helper away from both', () => {
-    at('/history', membershipsFor('helper', 1))
+    at('/statistics', membershipsFor('helper', 1))
     expect(screen.getByText('home-marker')).toBeInTheDocument()
   })
 
   it('lets a mixed-role user in on the strength of one household', () => {
-    // Deputy in household 2 is enough for History even though household 1 is not: the pages
+    // Deputy in household 2 is enough for Statistics even though household 1 is not: the pages
     // behind the guard span every household, and the API returns only the ones that qualify.
-    at('/history', [
+    at('/statistics', [
       { household_id: 1, role: 'helper' },
       { household_id: 2, role: 'deputy' },
     ])
-    expect(screen.getByText('history-content')).toBeInTheDocument()
+    expect(screen.getByText('statistics-content')).toBeInTheDocument()
   })
 
   it('redirects a member of no household', () => {
     // A fresh account, which is a normal state: they create a household first (becoming its
     // organiser), and the pages appear then.
-    at('/history', [])
+    at('/statistics', [])
     expect(screen.getByText('home-marker')).toBeInTheDocument()
   })
 })

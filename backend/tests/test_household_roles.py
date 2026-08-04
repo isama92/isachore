@@ -897,7 +897,7 @@ async def test_tags_are_organiser_only(
     assert resp.json()["detail"] == "You are not a household organiser anywhere"
 
 
-async def test_history_and_stats_need_a_deputy(
+async def test_history_narrows_for_a_helper_and_stats_still_needs_a_deputy(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
@@ -911,38 +911,169 @@ async def test_history_and_stats_need_a_deputy(
         members=[owner, deputy, helper],
         roles={deputy.id: HouseholdRole.deputy, helper.id: HouseholdRole.helper},
     )
-    chore = await make_chore(household=household, with_occurrence=False)
+    for completer, title in ((helper, "Helper's own"), (owner, "Somebody else's")):
+        chore = await make_chore(household=household, title=title, with_occurrence=False)
+        await make_occurrence(
+            chore=chore,
+            scheduled_for=datetime(2026, 7, 20, tzinfo=UTC),
+            status=OccurrenceStatus.done,
+            completed_by=completer,
+            completed_at=datetime(2026, 7, 20, 9, tzinfo=UTC),
+        )
+    client = await auth_client(helper)
+
+    # History narrows rather than refusing: their own closure, and only that one. The
+    # housemate's row is what makes this about the narrowing rather than about an empty
+    # database, and `total` has to agree or the pager offers a page that comes back empty.
+    resp = await client.get("/api/v1/completions")
+    assert resp.status_code == 200
+    assert [e["title"] for e in resp.json()["items"]] == ["Helper's own"]
+    assert resp.json()["total"] == 1
+
+    # Statistics is still closed to them, which is the rung History left.
+    resp = await client.get("/api/v1/stats")
+    assert resp.status_code == 200
+    assert resp.json()["kpis"]["completed_in_range"] == 0
+
+    # A deputy in the same household sees both rows and both numbers. `auth_client` hands
+    # back the same client with the cookie swapped, hence the reassignment.
+    client = await auth_client(deputy)
+    assert len((await client.get("/api/v1/completions")).json()["items"]) == 2
+    assert (await client.get("/api/v1/stats")).json()["kpis"]["completed_in_range"] == 2
+
+
+async def test_a_helper_sees_their_own_skips_in_history_too(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    # The narrowing is on who the closure is recorded against, NOT on what kind it is: a
+    # helper who skipped a chore has to be able to find that row, since a mis-skip moves the
+    # schedule and undoing it is the whole point of them reaching History.
+    owner = await make_user(email="owner@example.com")
+    helper = await make_user(email="helper@example.com")
+    household = await make_household(
+        members=[owner, helper], roles={helper.id: HouseholdRole.helper}
+    )
+    chore = await make_chore(household=household, title="Bins", with_occurrence=False)
     await make_occurrence(
         chore=chore,
         scheduled_for=datetime(2026, 7, 20, tzinfo=UTC),
         status=OccurrenceStatus.done,
         completed_by=helper,
         completed_at=datetime(2026, 7, 20, 9, tzinfo=UTC),
+        skipped=True,
     )
     client = await auth_client(helper)
 
-    # Their own completion, and they still cannot see it: the whole surface is closed.
     resp = await client.get("/api/v1/completions")
     assert resp.status_code == 200
-    assert resp.json()["items"] == []
+    assert [(e["title"], e["skipped"]) for e in resp.json()["items"]] == [("Bins", True)]
 
-    resp = await client.get("/api/v1/stats")
+
+async def test_a_helper_filtering_by_a_housemate_gets_an_empty_page(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    # Not a 403: the list spans every household at once, so it narrows rather than refusing,
+    # and a helper asking for somebody else's rows simply has none.
+    owner = await make_user(email="owner@example.com")
+    helper = await make_user(email="helper@example.com")
+    household = await make_household(
+        members=[owner, helper], roles={helper.id: HouseholdRole.helper}
+    )
+    chore = await make_chore(household=household, with_occurrence=False)
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=datetime(2026, 7, 20, tzinfo=UTC),
+        status=OccurrenceStatus.done,
+        completed_by=owner,
+        completed_at=datetime(2026, 7, 20, 9, tzinfo=UTC),
+    )
+    client = await auth_client(helper)
+
+    resp = await client.get(f"/api/v1/completions?user_id={owner.id}")
     assert resp.status_code == 200
-    assert resp.json()["kpis"]["completed_in_range"] == 0
+    assert resp.json() == {"items": [], "total": 0, "page": 1, "page_size": 20}
 
-    # A deputy in the same household sees both, which is what makes the two assertions
-    # above about the *role* rather than about an empty database. `auth_client` hands back
-    # the same client with the cookie swapped, hence the reassignment.
-    client = await auth_client(deputy)
-    assert len((await client.get("/api/v1/completions")).json()["items"]) == 1
-    assert (await client.get("/api/v1/stats")).json()["kpis"]["completed_in_range"] == 1
+    # Their own id in the same household does return their own row, which is what makes the
+    # assertion above about the narrowing rather than about the filter being broken.
+    resp = await client.get(f"/api/v1/completions?user_id={helper.id}")
+    assert resp.json()["total"] == 0
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=datetime(2026, 7, 21, tzinfo=UTC),
+        status=OccurrenceStatus.done,
+        completed_by=helper,
+        completed_at=datetime(2026, 7, 21, 9, tzinfo=UTC),
+    )
+    resp = await client.get(f"/api/v1/completions?user_id={helper.id}")
+    assert resp.json()["total"] == 1
+
+
+async def test_history_drops_own_closures_from_a_household_you_left(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    # The membership clause inside the own-rows branch, tested head-on: a closure of the
+    # caller's OWN in a household they are no longer in must not come back. Without that
+    # clause the completed_by match alone would carry it, which is the one way the narrowing
+    # could turn into a widening.
+    user = await make_user()
+    other = await make_user(email="other@example.com")
+    household = await make_household(members=[other, user], roles={user.id: HouseholdRole.helper})
+    chore = await make_chore(household=household, title="Left behind", with_occurrence=False)
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=datetime(2026, 7, 20, tzinfo=UTC),
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=datetime(2026, 7, 20, 9, tzinfo=UTC),
+    )
+    client = await auth_client(user)
+    assert [e["title"] for e in (await client.get("/api/v1/completions")).json()["items"]] == [
+        "Left behind"
+    ]
+
+    await db_session.execute(
+        household_members.delete().where(
+            household_members.c.household_id == household.id,
+            household_members.c.user_id == user.id,
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.get("/api/v1/completions")
+    assert resp.status_code == 200
+    assert resp.json() == {"items": [], "total": 0, "page": 1, "page_size": 20}
+
+
+async def test_history_is_empty_for_a_member_of_no_household(
+    make_user: MakeUser, auth_client: AuthClient
+) -> None:
+    # Zero households is a normal, reachable state (it is where every new account starts),
+    # and History is unconditional now - so this must be an empty page rather than an error.
+    client = await auth_client(await make_user())
+
+    resp = await client.get("/api/v1/completions")
+    assert resp.status_code == 200
+    assert resp.json() == {"items": [], "total": 0, "page": 1, "page_size": 20}
 
 
 async def test_filter_options_stay_open_to_a_helper(
     make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
 ) -> None:
     # /completions/filters also feeds the Home and Unscheduled filter bars, so narrowing
-    # it by role would empty the pickers on the one page a helper does have.
+    # it by role would empty the pickers there.
     owner = await make_user(email="owner@example.com")
     helper = await make_user(email="helper@example.com")
     household = await make_household(
@@ -956,13 +1087,17 @@ async def test_filter_options_stay_open_to_a_helper(
     assert {m["id"] for m in resp.json()["members"]} == {owner.id, helper.id}
 
 
-async def test_a_helper_cannot_undo_even_their_own_completion(
+async def test_a_helper_undoes_their_own_closure(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
     make_occurrence: MakeOccurrence,
     auth_client: AuthClient,
+    db_session: AsyncSession,
 ) -> None:
+    # Undoing your own closure needs no role at all. It used to 404 on the deputy scope,
+    # which left a helper's mis-skip undoable by nobody: they could not reach History, and
+    # everybody who could got the self-only 403.
     owner = await make_user(email="owner@example.com")
     helper = await make_user(email="helper@example.com")
     household = await make_household(
@@ -979,9 +1114,41 @@ async def test_a_helper_cannot_undo_even_their_own_completion(
     client = await auth_client(helper)
 
     resp = await client.delete(f"/api/v1/completions/{occ.id}")
-    # 404, not 403: the history scope is what excludes it, and History does not exist for
-    # a helper at all, so there is nothing for them to be forbidden from.
-    assert resp.status_code == 404
+    assert resp.status_code == 204
+    # The effect, not just the status: its only closure, so the row reopens rather than
+    # being deleted, and the chore is available again.
+    await db_session.refresh(occ)
+    assert occ.status == OccurrenceStatus.open
+    assert occ.completed_by_user_id is None
+
+
+async def test_a_helper_cannot_undo_a_housemates_closure(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    # 403 rather than 404 now: they are a member and they can see the row on History (they
+    # cannot, in fact - the list hides other people's from them - but the resource is inside
+    # their household, so a role complaint is the honest answer).
+    owner = await make_user(email="owner@example.com")
+    helper = await make_user(email="helper@example.com")
+    household = await make_household(
+        members=[owner, helper], roles={helper.id: HouseholdRole.helper}
+    )
+    chore = await make_chore(household=household, with_occurrence=False)
+    occ = await make_occurrence(
+        chore=chore,
+        scheduled_for=datetime(2026, 7, 20, tzinfo=UTC),
+        status=OccurrenceStatus.done,
+        completed_by=owner,
+        completed_at=datetime(2026, 7, 20, 9, tzinfo=UTC),
+    )
+    client = await auth_client(helper)
+
+    resp = await client.delete(f"/api/v1/completions/{occ.id}")
+    assert resp.status_code == 403
 
 
 async def test_undo_is_still_self_only_for_a_deputy(
@@ -991,8 +1158,8 @@ async def test_undo_is_still_self_only_for_a_deputy(
     make_occurrence: MakeOccurrence,
     auth_client: AuthClient,
 ) -> None:
-    # Seeing history does not mean editing someone else's: the pre-existing self-only rule
-    # is untouched by roles, and this pins that the deputy scope did not widen it.
+    # Seeing the whole household's history does not mean editing it: undoing somebody else's
+    # closure is organiser-level, and a deputy is one rung below.
     owner = await make_user(email="owner@example.com")
     deputy = await make_user(email="deputy@example.com")
     household = await make_household(
@@ -1010,7 +1177,164 @@ async def test_undo_is_still_self_only_for_a_deputy(
 
     resp = await client.delete(f"/api/v1/completions/{occ.id}")
     assert resp.status_code == 403
-    assert resp.json()["detail"] == "You can only undo your own completions"
+    assert (
+        resp.json()["detail"]
+        == "You can only undo your own entries unless you are a household organiser"
+    )
+
+
+async def test_an_organiser_undoes_a_housemates_closure(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    # The organiser half of the rule, held by somebody who does NOT own the household: the
+    # check reads their membership row, so ownership is not what grants this.
+    owner = await make_user(email="owner@example.com")
+    organiser = await make_user(email="organiser@example.com")
+    helper = await make_user(email="helper@example.com")
+    household = await make_household(
+        members=[owner, organiser, helper],
+        roles={organiser.id: HouseholdRole.organiser, helper.id: HouseholdRole.helper},
+    )
+    assert household.admin_id == owner.id
+    chore = await make_chore(household=household, with_occurrence=False)
+    occ = await make_occurrence(
+        chore=chore,
+        scheduled_for=datetime(2026, 7, 20, tzinfo=UTC),
+        assignee=helper,
+        status=OccurrenceStatus.done,
+        completed_by=helper,
+        completed_at=datetime(2026, 7, 20, 9, tzinfo=UTC),
+    )
+    client = await auth_client(organiser)
+
+    resp = await client.delete(f"/api/v1/completions/{occ.id}")
+    assert resp.status_code == 204
+    # Reopened with the ORIGINAL assignee, not handed to whoever pressed undo.
+    await db_session.refresh(occ)
+    assert occ.status == OccurrenceStatus.open
+    assert occ.assignee_id == helper.id
+
+
+async def test_the_owner_undoes_a_housemates_closure(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    # The owner passes on their membership row, which is always an organiser - the endpoint
+    # never reads admin_id, which is the tempting wrong implementation.
+    owner = await make_user(email="owner@example.com")
+    helper = await make_user(email="helper@example.com")
+    household = await make_household(
+        members=[owner, helper], roles={helper.id: HouseholdRole.helper}
+    )
+    chore = await make_chore(household=household, with_occurrence=False)
+    occ = await make_occurrence(
+        chore=chore,
+        scheduled_for=datetime(2026, 7, 20, tzinfo=UTC),
+        status=OccurrenceStatus.done,
+        completed_by=helper,
+        completed_at=datetime(2026, 7, 20, 9, tzinfo=UTC),
+    )
+    client = await auth_client(owner)
+
+    resp = await client.delete(f"/api/v1/completions/{occ.id}")
+    assert resp.status_code == 204
+
+
+async def test_an_organiser_of_one_household_cannot_undo_in_another(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    # The rule is per household, not "organiser anywhere". Organiser of A, helper in B, and
+    # the closure is a housemate's in B.
+    user = await make_user()
+    other = await make_user(email="other@example.com")
+    await make_household(name="A", members=[user])
+    b = await make_household(name="B", members=[other, user], roles={user.id: HouseholdRole.helper})
+    chore = await make_chore(household=b, with_occurrence=False)
+    occ = await make_occurrence(
+        chore=chore,
+        scheduled_for=datetime(2026, 7, 20, tzinfo=UTC),
+        status=OccurrenceStatus.done,
+        completed_by=other,
+        completed_at=datetime(2026, 7, 20, 9, tzinfo=UTC),
+    )
+    client = await auth_client(user)
+
+    resp = await client.delete(f"/api/v1/completions/{occ.id}")
+    assert resp.status_code == 403
+
+
+async def test_an_organiser_undoes_a_housemates_skip(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    # The case the widening exists for: a mis-skip moves the chore's schedule rather than
+    # just logging a row, and the person who made it may not be able to fix it.
+    owner = await make_user(email="owner@example.com")
+    helper = await make_user(email="helper@example.com")
+    household = await make_household(
+        members=[owner, helper], roles={helper.id: HouseholdRole.helper}
+    )
+    chore = await make_chore(household=household, with_occurrence=False)
+    occ = await make_occurrence(
+        chore=chore,
+        scheduled_for=datetime(2026, 7, 20, tzinfo=UTC),
+        status=OccurrenceStatus.done,
+        completed_by=helper,
+        completed_at=datetime(2026, 7, 20, 9, tzinfo=UTC),
+        skipped=True,
+    )
+    client = await auth_client(owner)
+
+    resp = await client.delete(f"/api/v1/completions/{occ.id}")
+    assert resp.status_code == 204
+    # The flag has to be cleared with the rest, or completing the slot for real later would
+    # still land in history as a skip.
+    await db_session.refresh(occ)
+    assert occ.status == OccurrenceStatus.open
+    assert occ.skipped is False
+
+
+async def test_undo_in_a_household_you_do_not_belong_to_is_a_404(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    # Membership is what makes the row exist for you at all, so a stranger's household is
+    # still a 404 rather than the new 403. The caller is a site admin, which buys nothing
+    # here: the user surface reads memberships, and Admin > Households is the other door.
+    outsider = await make_user(is_admin=True)
+    other = await make_user(email="other@example.com")
+    household = await make_household(members=[other])
+    chore = await make_chore(household=household, with_occurrence=False)
+    occ = await make_occurrence(
+        chore=chore,
+        scheduled_for=datetime(2026, 7, 20, tzinfo=UTC),
+        status=OccurrenceStatus.done,
+        completed_by=other,
+        completed_at=datetime(2026, 7, 20, 9, tzinfo=UTC),
+    )
+    client = await auth_client(outsider)
+
+    resp = await client.delete(f"/api/v1/completions/{occ.id}")
+    assert resp.status_code == 404
 
 
 async def test_a_deputy_undoes_their_own_completion(
@@ -1039,7 +1363,7 @@ async def test_a_deputy_undoes_their_own_completion(
     assert resp.status_code == 204
 
 
-async def test_helper_household_is_absent_from_a_users_own_numbers(
+async def test_mixed_roles_narrow_history_per_household_but_stats_by_role(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
@@ -1047,25 +1371,33 @@ async def test_helper_household_is_absent_from_a_users_own_numbers(
     auth_client: AuthClient,
 ) -> None:
     # The cross-household case the "union for nav, scope the data" rule exists for:
-    # organiser in one household, helper in another, and only the first one's history and
-    # statistics come back.
+    # organiser in one household, helper in another. History narrows per household -
+    # everything from the first, own rows only from the second - while statistics still
+    # counts the first household alone, since it needs a deputy outright.
     user = await make_user()
     other = await make_user(email="other@example.com")
     mine = await make_household(name="Mine", members=[user])
     theirs = await make_household(
         name="Theirs", members=[other, user], roles={user.id: HouseholdRole.helper}
     )
-    for household, title in ((mine, "Mine done"), (theirs, "Theirs done")):
+    for household, title, completer in (
+        (mine, "Mine done", user),
+        (theirs, "Theirs, mine", user),
+        (theirs, "Theirs, not mine", other),
+    ):
         chore = await make_chore(household=household, title=title, with_occurrence=False)
         await make_occurrence(
             chore=chore,
             scheduled_for=datetime(2026, 7, 20, tzinfo=UTC),
             status=OccurrenceStatus.done,
-            completed_by=user,
+            completed_by=completer,
             completed_at=datetime(2026, 7, 20, 9, tzinfo=UTC),
         )
     client = await auth_client(user)
 
+    # A set, not a list: all three share `completed_at`, so the order is decided by the
+    # occurrence-id tiebreaker rather than by anything this test is about.
     resp = await client.get("/api/v1/completions")
-    assert [e["title"] for e in resp.json()["items"]] == ["Mine done"]
+    assert {e["title"] for e in resp.json()["items"]} == {"Mine done", "Theirs, mine"}
+    assert resp.json()["total"] == 2
     assert (await client.get("/api/v1/stats")).json()["kpis"]["completed_in_range"] == 1

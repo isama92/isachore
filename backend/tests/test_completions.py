@@ -10,6 +10,7 @@ from app.models import (
     Chore,
     ChoreOccurrence,
     Household,
+    HouseholdRole,
     OccurrenceStatus,
     RepeatPeriod,
     User,
@@ -694,9 +695,12 @@ async def test_undo_another_members_completion_403(
     make_occurrence: MakeOccurrence,
     auth_client: AuthClient,
 ) -> None:
+    # The caller is pinned to deputy on purpose: `make_household` defaults every member to
+    # organiser, and an organiser may now undo anybody's closure in their own household (see
+    # test_household_roles.py for that half). Deputy is the strongest role still self-only.
     me = await make_user(email="me@example.com")
     other = await make_user(email="other@example.com")
-    household = await make_household(members=[me, other])
+    household = await make_household(members=[me, other], roles={me.id: HouseholdRole.deputy})
     chore = await make_chore(household=household, with_occurrence=False)
     occ = await make_occurrence(
         chore=chore,

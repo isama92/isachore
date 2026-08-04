@@ -16,10 +16,12 @@ export function roleAtLeast(role: HouseholdRole, min: HouseholdRole): boolean {
 /**
  * Whether the user reaches `min` in at least one household.
  *
- * This is the nav rule. Home, History, Statistics and the chores list all span every
- * household at once, so an item shows when *any* membership grants it and the endpoint
- * then returns only the households that do - an organiser in one house and a helper in
- * another sees Statistics, for the first house only.
+ * This is the nav rule. Home, Statistics and the chores list all span every household at
+ * once, so an item shows when *any* membership grants it and the endpoint then returns only
+ * the households that do - an organiser in one house and a helper in another sees
+ * Statistics, for the first house only. History is not on that list: it is unconditional,
+ * because its endpoint narrows *within* a household (your own closures where you are a
+ * helper) instead of dropping it, so there is no rung to gate the item on.
  *
  * No memberships means false, which is what gives a brand-new account (a normal, reachable
  * state - nothing provisions a household) the minimal sidebar until they create or join one.

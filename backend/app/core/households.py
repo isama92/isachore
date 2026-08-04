@@ -100,8 +100,10 @@ def member_household_ids(user_id: int, min_role: HouseholdRole | None = None) ->
     `min_role` narrows it to the households where the user's role grants at least that
     much, which is how the role-gated read surfaces work: they return *less data* rather
     than a 403, because they all span every household at once. A deputy in one household
-    and a helper in another sees the first one's statistics and history and simply never
-    learns the second exists there."""
+    and a helper in another sees the first one's statistics and simply never learns the
+    second exists there. History is the one surface that combines two of these rather
+    than picking one (`or_` of the deputy scope and the plain scope restricted to the
+    caller's own closures), so it shows that second household - their own rows only."""
     return (
         select(household_members.c.household_id)
         .join(Household, Household.id == household_members.c.household_id)
@@ -121,8 +123,8 @@ def chore_scope(user_id: int, household_id: int | None) -> list[ColumnElement[bo
     left to them - which is the whole reason this is a list rather than a single clause.
 
     Deliberately takes no `min_role`: both views are open to every role, since completing a
-    chore is the one thing a helper is for. Do not add one - narrowing this is narrowing the
-    only page a helper has."""
+    chore is the one thing a helper is for. Do not add one - these two views are the work
+    itself, so narrowing this narrows what a helper is there to do."""
     scope = [
         Chore.deleted_at.is_(None),
         Chore.household_id.in_(member_household_ids(user_id)),

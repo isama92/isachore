@@ -250,8 +250,12 @@
     "undo": "Undo",
     "undone": "Entry undone",
     "undoError": "Undo failed",
+    "undoOther": "Undo {{name}}'s entry",
+    "undoUnknown": "Undo somebody else's entry",
     "undoConfirm": "Undo this entry?",
     "undoConfirmBody": "The entry will be removed and the chore may become due again.",
+    "undoOtherConfirmBody": "This entry was recorded by {{name}}. It will be removed and the chore may become due again.",
+    "undoUnknownConfirmBody": "This entry was recorded by somebody whose account no longer exists. It will be removed and the chore may become due again.",
     "undoConfirmAction": "Undo entry",
     "headers": {
       "title": "Chore",

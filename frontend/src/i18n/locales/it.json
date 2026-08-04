@@ -250,8 +250,12 @@
     "undo": "Annulla",
     "undone": "Voce annullata",
     "undoError": "Annullamento non riuscito",
+    "undoOther": "Annulla la voce di {{name}}",
+    "undoUnknown": "Annulla la voce di un'altra persona",
     "undoConfirm": "Annullare questa voce?",
     "undoConfirmBody": "La voce verrà rimossa e la faccenda potrebbe tornare da fare.",
+    "undoOtherConfirmBody": "Questa voce è stata registrata da {{name}}. Verrà rimossa e la faccenda potrebbe tornare da fare.",
+    "undoUnknownConfirmBody": "Questa voce è stata registrata da una persona il cui account non esiste più. Verrà rimossa e la faccenda potrebbe tornare da fare.",
     "undoConfirmAction": "Annulla voce",
     "headers": {
       "title": "Faccenda",

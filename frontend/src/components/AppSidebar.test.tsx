@@ -96,12 +96,23 @@ describe('AppSidebar', () => {
       .map((el) => el.textContent)
   }
 
-  it('shows a helper only the pages they can use', () => {
+  it('shows a helper only the pages they can use, History included', () => {
+    // History is unconditional: the endpoint narrows per household (their own closures in a
+    // household they only help in) rather than refusing, so hiding the item would hide the
+    // one place they can undo a mis-skip of their own.
     renderSidebar({ user: makeUser(), memberships: membershipsFor('helper', 1) })
-    expect(navLabels()).toEqual(['My Chores', 'Unscheduled Chores', 'Households', 'Profile'])
+    expect(navLabels()).toEqual([
+      'My Chores',
+      'Unscheduled Chores',
+      'History',
+      'Households',
+      'Profile',
+    ])
   })
 
-  it('adds History and Statistics for a deputy, but not the management pages', () => {
+  it('adds Statistics for a deputy, but not the management pages', () => {
+    // History used to appear at this rung and is now above it; Statistics is what the deputy
+    // role still buys.
     renderSidebar({ user: makeUser(), memberships: membershipsFor('deputy', 1) })
     expect(navLabels()).toEqual([
       'My Chores',
@@ -115,9 +126,16 @@ describe('AppSidebar', () => {
 
   it('shows a member of no household the minimal nav', () => {
     // Every fresh account starts here (nothing provisions a household). They create one,
-    // become its organiser, and the rest appears.
+    // become its organiser, and the rest appears. History is in the minimal set because it
+    // is unconditional; for them it renders its empty state.
     renderSidebar({ user: makeUser(), memberships: [] })
-    expect(navLabels()).toEqual(['My Chores', 'Unscheduled Chores', 'Households', 'Profile'])
+    expect(navLabels()).toEqual([
+      'My Chores',
+      'Unscheduled Chores',
+      'History',
+      'Households',
+      'Profile',
+    ])
   })
 
   it('shows a mixed-role user everything one household grants', () => {
