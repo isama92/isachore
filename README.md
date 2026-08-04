@@ -642,4 +642,3 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
 ### Todo
 
 - [ ] Live updates when a housemate completes a chore (websocket)
-- [ ] The due below the chore in the "my chores" page doesn't consider timezone but only utc, so at 1am it still doesn't show today's task but yesterday's
