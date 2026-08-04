@@ -20,6 +20,7 @@ export const routes = {
   profile: '/profile',
   history: '/history',
   statistics: '/statistics',
+  logs: '/logs',
 
   chores: {
     list: '/chores',

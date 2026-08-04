@@ -34,8 +34,10 @@ export const HOUSEHOLD_ROLES = ['organiser', 'deputy', 'helper'] as const
 export type HouseholdRole = (typeof HOUSEHOLD_ROLES)[number]
 
 // One of the signed-in user's household memberships. Carried on `Me` so the sidebar can
-// decide what to show before any household has been fetched.
-export type Membership = { household_id: number; role: HouseholdRole }
+// decide what to show before any household has been fetched. `owned` is whether they own
+// THIS household - a separate fact from the role rather than a rung on the ladder, and what
+// the Logs page is gated on.
+export type Membership = { household_id: number; role: HouseholdRole; owned: boolean }
 
 export type Me = User & { impersonating: boolean; memberships: Membership[] }
 
@@ -156,10 +158,63 @@ export type HistoryEntry = {
   household: { id: number; name: string }
 }
 
-// Option lists for the History filters: GET /api/v1/completions/filters.
+// Option lists for the History filters: GET /api/v1/completions/filters. Also reused by
+// Statistics and by Logs, each narrowing the household list client-side.
 export type HistoryFilterOptions = {
   households: { id: number; name: string }[]
   members: HouseholdMember[]
+}
+
+// The household log's closed action set, mirroring the backend HouseholdLogAction. Also the
+// action filter's options, which is why that filter needs no options call: unlike households
+// and members, this list is ours, so no request can teach us a new one.
+export const LOG_ACTIONS = [
+  'chore_created',
+  'chore_updated',
+  'chore_deleted',
+  'completion_undone',
+  'skip_undone',
+] as const
+export type LogAction = (typeof LOG_ACTIONS)[number]
+
+// The chore fields an update can move, as the API names them (snake_case, stable). Closed so
+// the dynamic `logs.fields.*` keys typecheck; a name NOT here degrades to a readable form of
+// the raw value rather than to a missing-key string, the same contract FIELD_NAMES has in
+// lib/validationError.ts - which is also why `changed_fields` below is string[], not this.
+export const LOG_FIELDS = [
+  'title',
+  'description',
+  'start_date',
+  'repeats',
+  'assignment_type',
+  'turn_length',
+  'repeat_interval',
+  'weekdays',
+  'assignees',
+  'tags',
+] as const
+export type LogField = (typeof LOG_FIELDS)[number]
+
+// One row of a household's activity log: GET /api/v1/logs. `chore_title` is the snapshot
+// taken when the entry was written, so a renamed or deleted chore still reads; `actor` is null
+// when that account was hard-deleted, as History's `completed_by` is; `target` is whose
+// closure was undone and is null for the three chore actions. `by_admin` says the action came
+// through an impersonated session - a boolean, never the operator's identity.
+//
+// `changed_fields` is populated for `chore_updated` alone and is deliberately string[] rather
+// than LogField[]: the wire may name a field this release has never heard of, and the renderer
+// degrades instead of the type lying.
+export type LogEntry = {
+  id: number
+  created_at: string
+  action: LogAction
+  household: { id: number; name: string }
+  actor: HouseholdMember | null
+  target: HouseholdMember | null
+  chore_id: number | null
+  chore_title: string | null
+  changed_fields: string[]
+  by_admin: boolean
 }
 
 export type DueStatus = 'overdue' | 'today' | 'soon'

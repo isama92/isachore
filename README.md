@@ -52,6 +52,7 @@ shown to them in the sidebar at all.
 | Grant or change the organiser role                  |   ✓   |           |        |        |
 | Rename or delete the household, remove members      |   ✓   |           |        |        |
 | Transfer the household to somebody else             |   ✓   |           |        |        |
+| Read the household's activity log (**Logs**)        |   ✓   |           |        |        |
 
 The owner is one per household and is not a fourth role: they are an organiser, and the extra
 rights come from owning the household. Their row shows as **Admin** in the members table, which
@@ -77,6 +78,16 @@ refuse: an organiser of one household who is a helper in another sees the second
 chores on My Chores and can tick them off, and finds those closures of their own on History,
 while the rest of that household's history, its statistics and its chores management stay out
 of reach.
+
+**Logs** is the household's activity log, and the one page the owner alone reaches: an organiser
+manages the chores, and this is the record of that management, so it answers to whoever the
+household belongs to. It lists who created, edited or deleted a chore and who undid somebody's
+completion or skip, newest first, filterable by action, person and household. An edit records
+*which* fields moved rather than their values, which keeps the log a record of activity rather
+than a second copy of every chore. Entries are kept for **90 days** and then deleted; the window
+is enforced by the read itself as well as by a nightly sweep, so nothing older shows even if the
+sweep has not run. Doing the chores is not logged, since History already lists every completion
+and skip.
 
 History is the one page that narrows within itself rather than being hidden. Everybody reaches
 it: where your role is deputy or above you see the whole household's completions and skips,
@@ -514,7 +525,16 @@ docker compose exec backend python -m app.cli clear-login-throttle 42     # one 
 
 # Expire stale household invitations now (the hourly job, run once)
 docker compose exec backend python -m app.cli expire-invitations
+
+# Delete household log entries past their 90-day retention window (the nightly job, run once)
+docker compose exec backend python -m app.cli prune-logs
 ```
+
+**Scheduled jobs.** The backend runs two of its own, in-process, started with the app: the
+invitation sweep hourly, and the household-log retention prune nightly at 03:30 UTC. Neither
+needs an external cron. The two commands above are the same jobs run once by hand, for a manual
+sweep or for an external scheduler. Note both assume a single web process, which is what the
+prod compose files run; behind several, gate them with a lock (Redis is already wired).
 
 **Clearing a lockout:** repeated failed logins lock out both the attempted email
 and the client IP for the window. `clear-login-throttle` with a user id clears

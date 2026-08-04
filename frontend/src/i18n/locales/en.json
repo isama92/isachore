@@ -96,6 +96,7 @@
     "chores": "Chores Management",
     "history": "History",
     "statistics": "Statistics",
+    "logs": "Logs",
     "tags": "Tags",
     "profile": "Profile",
     "admin": "Admin",
@@ -323,6 +324,49 @@
     "perPerson": {
       "title": "Completions per person",
       "completions": "Completions"
+    }
+  },
+  "logs": {
+    "title": "Logs",
+    "empty": "Nothing logged yet.",
+    "loadError": "Failed to load the log",
+    "unknownActor": "Unknown",
+    "byAdmin": "(via admin)",
+    "noChanges": "—",
+    "headers": {
+      "when": "When",
+      "household": "Household",
+      "actor": "Who",
+      "action": "What",
+      "chore": "Chore",
+      "changes": "Changed"
+    },
+    "actions": {
+      "chore_created": "Chore created",
+      "chore_updated": "Chore updated",
+      "chore_deleted": "Chore deleted",
+      "completion_undone": "Completion undone",
+      "skip_undone": "Skip undone"
+    },
+    "fields": {
+      "title": "Title",
+      "description": "Description",
+      "start_date": "Start date",
+      "repeats": "Repeats",
+      "assignment_type": "Assignment",
+      "turn_length": "Turn length",
+      "repeat_interval": "Repeat every",
+      "weekdays": "On these days",
+      "assignees": "Assignees",
+      "tags": "Tags"
+    },
+    "filters": {
+      "actionLabel": "Action",
+      "actionAll": "All actions",
+      "userLabel": "Person",
+      "userAll": "Everyone",
+      "householdLabel": "Household",
+      "householdAll": "All households"
     }
   },
   "choreCreate": {

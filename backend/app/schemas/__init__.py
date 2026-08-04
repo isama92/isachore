@@ -19,6 +19,7 @@ from app.schemas.household import (
     HouseholdMemberUpdate,
     HouseholdUpdate,
 )
+from app.schemas.household_log import LogEntryRead
 from app.schemas.pagination import Page
 from app.schemas.server_settings import ServerSettingsRead, ServerSettingsUpdate
 from app.schemas.tag import TagCreate, TagRead, TagUpdate
@@ -60,6 +61,7 @@ __all__ = [
     "HouseholdMemberRoleRead",
     "HouseholdMemberUpdate",
     "HouseholdUpdate",
+    "LogEntryRead",
     "LoginRequest",
     "LoginResponse",
     "MeRead",

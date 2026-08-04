@@ -7,6 +7,7 @@ describe('endpoints', () => {
     expect(endpoints.home).toBe('/api/v1/home')
     expect(endpoints.profile.avatar).toBe('/api/v1/profile/avatar')
     expect(endpoints.completions.filters).toBe('/api/v1/completions/filters')
+    expect(endpoints.logs).toBe('/api/v1/logs')
     expect(endpoints.settings.testEmail).toBe('/api/v1/settings/test-email')
   })
 

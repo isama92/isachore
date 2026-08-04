@@ -503,8 +503,8 @@ describe('per-household role', () => {
         authValue: {
           user: me,
           memberships: [
-            { household_id: 1, role: 'organiser' },
-            { household_id: 4, role: 'helper' },
+            { household_id: 1, role: 'organiser', owned: false },
+            { household_id: 4, role: 'helper', owned: false },
           ],
         },
         route: '/chores/7/edit',

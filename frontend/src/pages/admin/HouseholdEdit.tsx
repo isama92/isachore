@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate, useParams } from 'react-router'
 import { toast } from 'sonner'
 import { ArchiveRestoreIcon } from 'lucide-react'
+import { useAuth } from '../../auth/useAuth'
 import { api, ApiError } from '../../lib/api'
 import { endpoints } from '../../lib/endpoints'
 import { routes } from '../../lib/routes'
@@ -28,6 +29,7 @@ export default function AdminHouseholdEdit() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { id = '' } = useParams()
+  const { refresh } = useAuth()
 
   const [household, setHousehold] = useState<Household | null>(null)
   const [loading, setLoading] = useState(true)
@@ -120,7 +122,13 @@ export default function AdminHouseholdEdit() {
             <HouseholdOwnerSelect
               basePath={endpoints.adminHouseholds.byId(household.id)}
               adminId={household.admin_id}
-              onTransferred={setHousehold}
+              // Same as the user-surface page: an operator can be transferring a household
+              // they own themselves, and their own Logs reach moves with it. The refresh is
+              // a no-op for the far more common case where they own nothing here.
+              onTransferred={(updated) => {
+                setHousehold(updated)
+                void refresh()
+              }}
             />
           </div>
           <section className="mt-10">

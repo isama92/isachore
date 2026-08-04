@@ -49,8 +49,8 @@ describe('RequireRole', () => {
     // Deputy in household 2 is enough for Statistics even though household 1 is not: the pages
     // behind the guard span every household, and the API returns only the ones that qualify.
     at('/statistics', [
-      { household_id: 1, role: 'helper' },
-      { household_id: 2, role: 'deputy' },
+      { household_id: 1, role: 'helper', owned: false },
+      { household_id: 2, role: 'deputy', owned: false },
     ])
     expect(screen.getByText('statistics-content')).toBeInTheDocument()
   })

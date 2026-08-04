@@ -8,6 +8,7 @@ import type {
   HouseholdMember,
   HouseholdMemberWithRole,
   InvitationInfo,
+  LogEntry,
   Me,
   ServerSettings,
   StatsData,
@@ -48,14 +49,32 @@ export function makeServerSettings(overrides: Partial<ServerSettings> = {}): Ser
 }
 
 export function makeMe(overrides: Partial<Me> = {}): Me {
-  // Organiser of household 1, matching makeAuthValue's default and makeHousehold's admin_id,
-  // so a /auth/me stub and a directly-supplied auth context describe the same person.
+  // Organiser AND owner of household 1, matching makeAuthValue's default and makeHousehold's
+  // admin_id, so a /auth/me stub and a directly-supplied auth context describe the same person.
   const {
     impersonating = false,
-    memberships = [{ household_id: 1, role: 'organiser' as const }],
+    memberships = [{ household_id: 1, role: 'organiser' as const, owned: true }],
     ...rest
   } = overrides
   return { ...makeUser(rest), impersonating, memberships }
+}
+
+export function makeLogEntry(overrides: Partial<LogEntry> = {}): LogEntry {
+  // Household 1, matching makeAuthValue's default and makeHousehold's admin_id, so the default
+  // auth context owns the household these rows belong to.
+  return {
+    id: 1,
+    created_at: '2026-07-16T14:30:00Z',
+    action: 'chore_created',
+    household: { id: 1, name: 'Test Household' },
+    actor: makeHouseholdMember(),
+    target: null,
+    chore_id: 5,
+    chore_title: 'Clean the bathroom',
+    changed_fields: [],
+    by_admin: false,
+    ...overrides,
+  }
 }
 
 export function makeTag(overrides: Partial<Tag> = {}): Tag {

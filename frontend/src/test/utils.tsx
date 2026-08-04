@@ -11,20 +11,38 @@ import type { HouseholdRole, Membership } from '../lib/types'
  * Memberships granting `role` in each of the given households, for a test whose page spans
  * more than one. The default auth value below covers household 1 only, so a test that stubs
  * households 1 and 2 has to say so or the second is filtered out of every picker.
+ *
+ * Never owned: ownership is a separate fact, and a test about a role should not accidentally
+ * grant the owner-only surfaces too. Use `ownedMemberships` for those.
  */
 export function membershipsFor(role: HouseholdRole, ...householdIds: number[]): Membership[] {
-  return householdIds.map((household_id) => ({ household_id, role }))
+  return householdIds.map((household_id) => ({ household_id, role, owned: false }))
+}
+
+/**
+ * Memberships for households the user OWNS, for a test about an owner-only surface. The role
+ * is hardcoded because the owner is by definition an organiser, so no test can build the
+ * impossible owner-who-is-a-helper. Compose for a mixed case:
+ * `[...ownedMemberships(1), ...membershipsFor('helper', 2)]`.
+ */
+export function ownedMemberships(...householdIds: number[]): Membership[] {
+  return householdIds.map((household_id) => ({
+    household_id,
+    role: 'organiser' as const,
+    owned: true,
+  }))
 }
 
 export function makeAuthValue(overrides: Partial<AuthContextValue> = {}): AuthContextValue {
   return {
     user: null,
     impersonating: false,
-    // Organiser of household 1, which is the household `makeHousehold` builds and the one
-    // `makeUser` (id 1) owns. That pairing is what keeps the existing page tests testing
-    // their own subject instead of turning into assertions about hidden nav and redirects;
-    // tests about a role pass their own `memberships`.
-    memberships: [{ household_id: 1, role: 'organiser' }],
+    // Organiser AND owner of household 1, which is the household `makeHousehold` builds and
+    // the one `makeUser` (id 1) owns - so `owned: false` here would describe somebody who
+    // cannot exist. That pairing is what keeps the existing page tests testing their own
+    // subject instead of turning into assertions about hidden nav and redirects; tests about a
+    // role pass their own `memberships`.
+    memberships: [{ household_id: 1, role: 'organiser', owned: true }],
     loading: false,
     login: vi.fn(async () => ({ twoFactorRequired: false })),
     verifyTwoFactor: vi.fn(async () => {}),

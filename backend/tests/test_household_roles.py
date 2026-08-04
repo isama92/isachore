@@ -186,7 +186,7 @@ async def test_members_list_carries_each_role(
     }
 
 
-async def test_me_reports_every_membership_with_its_role(
+async def test_me_reports_every_membership_with_its_role_and_ownership(
     make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
 ) -> None:
     user = await make_user()
@@ -202,9 +202,29 @@ async def test_me_reports_every_membership_with_its_role(
 
     resp = await client.get("/api/v1/auth/me")
     assert resp.status_code == 200
+    # `owned` is what gates the Logs page, and it is a different question from the role: the
+    # second household here is somebody else's, so this pins that they are not conflated.
     assert resp.json()["memberships"] == [
-        {"household_id": organised.id, "role": HouseholdRole.organiser},
-        {"household_id": helped.id, "role": HouseholdRole.helper},
+        {"household_id": organised.id, "role": HouseholdRole.organiser, "owned": True},
+        {"household_id": helped.id, "role": HouseholdRole.helper, "owned": False},
+    ]
+
+
+async def test_me_reports_an_organiser_who_does_not_own_as_not_owning(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    # The case ownership exists separately for: an organiser is not an owner, so a household
+    # they merely organise must come back `owned: false` and keep Logs out of their sidebar.
+    owner = await make_user(email="owner@example.com")
+    organiser = await make_user(email="organiser@example.com")
+    household = await make_household(
+        members=[owner, organiser], roles={organiser.id: HouseholdRole.organiser}
+    )
+    client = await auth_client(organiser)
+
+    resp = await client.get("/api/v1/auth/me")
+    assert resp.json()["memberships"] == [
+        {"household_id": household.id, "role": HouseholdRole.organiser, "owned": False}
     ]
 
 
@@ -222,7 +242,7 @@ async def test_login_response_carries_memberships(
     )
     assert resp.status_code == 200
     assert resp.json()["user"]["memberships"] == [
-        {"household_id": household.id, "role": HouseholdRole.organiser}
+        {"household_id": household.id, "role": HouseholdRole.organiser, "owned": True}
     ]
 
 

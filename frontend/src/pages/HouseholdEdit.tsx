@@ -107,7 +107,16 @@ export default function HouseholdEdit() {
             <HouseholdOwnerSelect
               basePath={basePath}
               adminId={household.admin_id}
-              onTransferred={setHousehold}
+              // Handing the household on drops the caller's OWN ownership, and the sidebar's
+              // Logs item is gated on exactly that - so this is the fifth case of "anything
+              // that changes your own memberships must refresh()". Without it an ex-owner
+              // keeps the item and reaches a page the API empties, with nothing on screen at
+              // fault. Harmless before Logs existed, because a transfer leaves the old owner
+              // an organiser and no nav item moved.
+              onTransferred={(updated) => {
+                setHousehold(updated)
+                void refresh()
+              }}
             />
           </div>
           <section className="mt-10">

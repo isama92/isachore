@@ -58,6 +58,11 @@ export const endpoints = {
   // separate stats/filters path.
   stats: `${V1}/stats`,
 
+  // The household activity log for the Logs page (owner-only, server-paginated). Its filter
+  // options come from completions.filters too, narrowed client-side to owned households, so
+  // there is no logs/filters path either.
+  logs: `${V1}/logs`,
+
   tags: {
     root: `${V1}/tags`,
     byId: (id: Id) => `${V1}/tags/${id}`,

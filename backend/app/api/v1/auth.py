@@ -74,8 +74,8 @@ async def _me_read(session: SessionDep, user: User, *, impersonating: bool = Fal
     so a login response without them would render the minimal nav until the next reload -
     and it is the login path, not the reload, that most users see first."""
     memberships = [
-        MembershipRead(household_id=household_id, role=role)
-        for household_id, role in await memberships_for(session, user.id)
+        MembershipRead(household_id=m.household_id, role=m.role, owned=m.owned)
+        for m in await memberships_for(session, user.id)
     ]
     return MeRead.model_validate(user).model_copy(
         update={"impersonating": impersonating, "memberships": memberships}

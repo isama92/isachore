@@ -10,13 +10,14 @@ import {
   Home,
   House,
   LogOut,
+  ScrollText,
   Settings,
   Shield,
   Tag as TagIcon,
   Users,
 } from 'lucide-react'
 import { useAuth } from '../auth/useAuth'
-import { hasRoleSomewhere } from '../lib/permissions'
+import { hasRoleSomewhere, ownsAnyHousehold } from '../lib/permissions'
 import { routes } from '../lib/routes'
 import { fullName, initials } from '../lib/user'
 import BrandMark from './brand/BrandMark'
@@ -53,6 +54,9 @@ export default function AppSidebar() {
   // your own where you are a helper) rather than refusing.
   const canSeeStatistics = hasRoleSomewhere(memberships, 'deputy')
   const canManage = hasRoleSomewhere(memberships, 'organiser')
+  // Logs is gated on OWNERSHIP, which is not a rung on the ladder: an organiser who does not
+  // own the household manages its chores but does not get the record of that management.
+  const canSeeLogs = ownsAnyHousehold(memberships)
 
   // Household roles decide which of these a user sees at all: a page they cannot use is
   // hidden rather than shown and then refused. `show` is per item because the roles are per
@@ -72,6 +76,7 @@ export default function AppSidebar() {
       label: t('sidebar.statistics'),
       show: canSeeStatistics,
     },
+    { to: routes.logs, icon: ScrollText, label: t('sidebar.logs'), show: canSeeLogs },
     { to: routes.tags.list, icon: TagIcon, label: t('sidebar.tags'), show: canManage },
     { to: routes.chores.list, icon: ClipboardList, label: t('sidebar.chores'), show: canManage },
     { to: routes.households.list, icon: House, label: t('sidebar.households') },

@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import contains_eager, defer, selectinload
 
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps import CurrentUser, Impersonator, SessionDep
 from app.api.v1.households import SortDir
 from app.core.assignment import initial_assignee, next_assignee, should_reassign
 from app.core.chores import (
@@ -18,6 +18,7 @@ from app.core.chores import (
     next_slot_after,
     snap_to_slot,
 )
+from app.core.household_log import changed_chore_fields, record_log_entry, snapshot_chore
 from app.core.households import (
     escape_like,
     get_member_household,
@@ -29,6 +30,7 @@ from app.models import (
     Chore,
     ChoreOccurrence,
     Household,
+    HouseholdLogAction,
     HouseholdRole,
     OccurrenceStatus,
     RepeatPeriod,
@@ -473,7 +475,9 @@ async def _reconcile_open_occurrence(
 
 
 @router.post("", response_model=ChoreRead, status_code=status.HTTP_201_CREATED)
-async def create_chore(payload: ChoreCreate, user: CurrentUser, session: SessionDep) -> Chore:
+async def create_chore(
+    payload: ChoreCreate, user: CurrentUser, session: SessionDep, impersonator: Impersonator
+) -> Chore:
     household = await _resolve_household_or_404(session, user, payload.household_id)
     assignees = await _resolve_assignees(session, household, payload.assignee_ids)
     tags = await _resolve_tags(session, household, payload.tag_ids)
@@ -507,6 +511,16 @@ async def create_chore(payload: ChoreCreate, user: CurrentUser, session: Session
             assignee_id=current.id if current is not None else None,
             status=OccurrenceStatus.open,
         )
+    )
+    # Staged in this transaction, so the log entry lands exactly when the chore does.
+    await record_log_entry(
+        session,
+        action=HouseholdLogAction.chore_created,
+        household_id=household.id,
+        actor_id=user.id,
+        chore_id=chore.id,
+        chore_title=chore.title,
+        impersonator_id=impersonator.id if impersonator else None,
     )
     await session.commit()
     return await _load_chore(session, chore.id)
@@ -585,7 +599,11 @@ async def get_chore(chore_id: int, user: CurrentUser, session: SessionDep) -> Ch
 
 @router.patch("/{chore_id}", response_model=ChoreRead)
 async def update_chore(
-    chore_id: int, payload: ChoreUpdate, user: CurrentUser, session: SessionDep
+    chore_id: int,
+    payload: ChoreUpdate,
+    user: CurrentUser,
+    session: SessionDep,
+    impersonator: Impersonator,
 ) -> Chore:
     chore = await _managed_chore_or_error(session, user, chore_id)
     # The household is fixed at creation; re-validate assignees/tags against it.
@@ -594,6 +612,10 @@ async def update_chore(
     # Read before the assignments below overwrite it: whether the open occurrence's slot sits
     # on a recurrence grid depends on the period the chore had, not the one it is getting.
     was_unscheduled = chore.repeats == RepeatPeriod.manual
+    # Same reason, for the log: what the chore looked like before this edit. Diffed against a
+    # second snapshot of the same object below rather than against the payload, so the
+    # assignments right here stay the only place that maps one onto the other.
+    before = snapshot_chore(chore)
     chore.title = payload.title
     chore.description = payload.description
     chore.start_date = payload.start_date
@@ -604,10 +626,25 @@ async def update_chore(
     chore.weekdays = payload.weekdays
     chore.assignees = assignees
     chore.tags = tags
+    changed = changed_chore_fields(before, snapshot_chore(chore))
     # Must run after the recurrence fields are assigned: it builds the rule from the chore.
     await _reconcile_open_occurrence(
         session, chore, payload, assignees, was_unscheduled=was_unscheduled
     )
+    # Nothing moved, nothing to say: a resubmitted form is not an event. Staged BEFORE the
+    # try, which is what makes the 409 path right for free - the rollback expunges this too,
+    # so a failed edit leaves no entry and the retry writes exactly one.
+    if changed:
+        await record_log_entry(
+            session,
+            action=HouseholdLogAction.chore_updated,
+            household_id=chore.household_id,
+            actor_id=user.id,
+            chore_id=chore.id,
+            chore_title=chore.title,
+            changed_fields=changed,
+            impersonator_id=impersonator.id if impersonator else None,
+        )
     try:
         await session.commit()
     except IntegrityError:
@@ -624,9 +661,22 @@ async def update_chore(
 
 
 @router.delete("/{chore_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_chore(chore_id: int, user: CurrentUser, session: SessionDep) -> None:
+async def delete_chore(
+    chore_id: int, user: CurrentUser, session: SessionDep, impersonator: Impersonator
+) -> None:
     chore = await _managed_chore_or_error(session, user, chore_id)
     chore.deleted_at = datetime.now(UTC)
+    # The title as it stood at deletion: the chore row survives the soft delete, but the log
+    # must keep reading correctly even if a later hard delete ever takes it.
+    await record_log_entry(
+        session,
+        action=HouseholdLogAction.chore_deleted,
+        household_id=chore.household_id,
+        actor_id=user.id,
+        chore_id=chore.id,
+        chore_title=chore.title,
+        impersonator_id=impersonator.id if impersonator else None,
+    )
     await session.commit()
 
 

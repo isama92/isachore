@@ -46,6 +46,13 @@ and the non-obvious gotchas.
   component code in `src/components/ui/`.
 - **DB**: PostgreSQL 18. **Redis** backs login rate limiting (reachable only as
   `redis:6379` on the compose network, not published to the host).
+- **Scheduled jobs**: an in-process APScheduler (`app/core/scheduler.py`), started and stopped
+  by the `lifespan` in `main.py`. Two jobs today: the hourly invitation-expiry sweep and the
+  nightly household-log prune. Each pairs a `run_*` entry point with a CLI command so an
+  operator can run it once by hand, and each assumes a single web process, which is what the
+  prod compose files run - behind several, gate them with a Redis lock. Neither suite runs a
+  job for real, so a new one needs a by-hand check plus a registration test asserting the
+  trigger string (see `tests/test_invitation_expiry.py`).
 - **Docker** (`docker/`): everything Docker-related except the dev compose file,
   which stays at the root as `compose.yml` because it is the everyday entry point.
   `docker/` holds `backend.Dockerfile` and `frontend.Dockerfile` (multi-stage),
@@ -148,7 +155,12 @@ pre-commit run --all-files                           # what the git hook runs
 - Models live in `app/models/` and inherit from `app.db.base.Base` (naming
   convention for Alembic autogenerate). Re-export new models from
   `app/models/__init__.py`: that import is what registers them on
-  `Base.metadata`. Pydantic schemas live in `app/schemas/`.
+  `Base.metadata`. Miss it and autogenerate silently produces an *empty* migration while every
+  test fails on a missing relation, since `conftest` builds the schema from that metadata. A
+  new table also belongs in `db/seed.py`'s `_WIPE_ORDER`, before whatever it references: a
+  CASCADE would usually cover it, which is exactly why forgetting fails quietly, and
+  `seed --fresh` promises to wipe app data rather than to lean on an `ondelete` a later change
+  could relax. Pydantic schemas live in `app/schemas/`.
 - **Auth**: DB-backed opaque tokens (`auth_tokens` table, SHA-256 hashed), sent
   as an httpOnly `isachore_token` cookie or `Authorization: Bearer`. NO
   self-registration: admins create users; the first admin comes from the `init`
@@ -195,8 +207,8 @@ pre-commit run --all-files                           # what the git hook runs
     so hits `get_current_household` (`api/deps.py`), which 404s for a member of
     none and is the only endpoint that hard-fails; `ChoreCreate` and `TagCreate`
     because their forms have no `household_id` to submit at all. Everything else
-    (Home, Chores, History, Statistics) scopes through `member_household_ids` and
-    simply returns nothing. Note the `noHouseholds` states are now unreachable through
+    (Home, Chores, History, Statistics, Logs) scopes through `member_household_ids` (or
+    `owned_household_ids`) and simply returns nothing. Note the `noHouseholds` states are now unreachable through
     the *sidebar*, since a member of none reaches no role and `RequireRole` sends them
     to Home; they are kept because the guard is client-side and the URLs still work.
   - Do NOT seed a household in a migration: `households.admin_id` is NOT NULL, so
@@ -225,10 +237,12 @@ pre-commit run --all-files                           # what the git hook runs
   schema layer keeps this unreachable through the API, so it is operator error - but it is not
   contained to whoever holds the row.
 
-  Capabilities: every role completes chores (scheduled and unscheduled) and reads
-  the household list; deputy adds History and Statistics; organiser adds chore and tag
-  management, plus inviting and setting deputy/helper roles. Nine things to keep
-  straight:
+  Capabilities: every role completes chores (scheduled and unscheduled), reads the household
+  list, and sees **their own** closures on History (undoing them included); deputy adds the
+  whole household's History plus Statistics; organiser adds chore and tag management, undoing
+  *anybody's* closure, and inviting and setting deputy/helper roles. **Ownership then adds one
+  page of its own, Logs** (`api/v1/logs.py`), which is the only surface gated on `admin_id`
+  rather than on a rung - see the household-log section. Nine things to keep straight:
   - **`admin_id` and `role` overlap on purpose, and the owner always wins.** Ownership
     stays `households.admin_id`; the owner is by definition an organiser, their role is
     not editable (409 from the member PATCH), and `set_household_admin` *promotes the
@@ -265,13 +279,28 @@ pre-commit run --all-files                           # what the git hook runs
     is nothing for an `AlertDialogTrigger` to wrap and no per-row uncontrolled dialog to
     use. Cancelling needs no revert because the Select is controlled by `member.role`,
     which never moved.
-  - **Reads narrow, writes 403** ("union for nav, scope the data"). Home, History,
-    Statistics and the chores list each span every household, so they take
-    `member_household_ids(user_id, min_role)` and return *less data* rather than
-    refusing: a deputy in one household and a helper in another gets the first one's
-    history and never learns the second has any. Mutations go through `require_role`,
-    which 403s, because the caller can see the resource elsewhere and a 404 would be a
-    lie. `GET /chores/{id}` is ungated on purpose (the description dialog on Home and
+  - **Reads narrow, writes 403** ("union for nav, scope the data"). Home, Statistics, Logs and
+    the chores list each span every household, so they take `member_household_ids(user_id,
+    min_role)` (or `owned_household_ids` for Logs) and return *less data* rather than refusing:
+    a deputy in one household and a helper in another gets the first one's statistics and never
+    learns the second has any. **History is the exception that combines two scopes rather than
+    picking one**: an `or_` of the deputy scope and the plain membership scope restricted to
+    `completed_by_user_id == caller`, so the same page shows everything in one household and
+    only your own rows in another. It is unconditional in the sidebar for that reason - there is
+    no rung to gate it on. The `or_` lives in the shared `filters` list so `total` narrows with
+    the rows; narrowing only the page query would make the pager offer pages that come back
+    empty. Mutations go through `require_role`, which 403s, because the caller can see the
+    resource elsewhere and a 404 would be a lie. **`undo_completion` is the one write that
+    hand-raises instead**, because its rule is a disjunction (the recorded completer, OR an
+    organiser of that household) and `require_role`'s "Only household organisers can do this"
+    would deny the deputy who recorded the closure. Its 404 boundary is plain membership, not
+    the deputy scope: a helper reaches History for their own rows now, so a 404 on a row they
+    can see would be exactly the lie this rule warns about. The owner passes on their membership
+    row, which a transfer always promotes - never on `admin_id`, which that endpoint
+    deliberately does not read. One documented stretch: a helper targeting a housemate's row
+    gets the 403 even though they cannot see that row anywhere, which makes it a weak existence
+    oracle inside their own household. Accepted; nothing in the response body is personal data.
+    `GET /chores/{id}` is ungated on purpose (the description dialog on Home and
     Unscheduled needs it for helpers), which is why the chores router has both
     `_get_user_chore_or_404` and `_managed_chore_or_error`. The management list has its own
     schema, `ChoreListRead` - a sibling of `ChoreRead` under `ChoreReadBase`, carrying
@@ -288,8 +317,14 @@ pre-commit run --all-files                           # what the git hook runs
     hidden".
   - **`GET /completions/filters` is deliberately NOT role-narrowed.** It also feeds the
     Home and Unscheduled filter bars (`useFilterOptions.ts`), which every role uses, so
-    narrowing it would empty the pickers on the one page a helper does have. History and
-    Statistics filter its `households` client-side instead.
+    narrowing it would empty those pickers. Three pages now reuse it and narrow client-side:
+    Statistics and Logs filter its `households` (by role and by *ownership* respectively);
+    History deliberately stopped narrowing at all, since a helper household is now a live
+    option that yields the caller's own rows. It hides its whole filter bar instead when the
+    caller reaches deputy nowhere, because their own closures are already the entire list. The
+    known dead end all three share: the member list spans every household the caller belongs
+    to, with no member -> household association to narrow it by, so a person plus a household
+    that do not pair yields an empty page. Nothing leaks (those names are on Home already).
   - **`add_member` takes a required role, and the column's `server_default` is
     `helper`.** `household_members` is a Core `Table`, so the `members` relationship
     inserts the two foreign keys only and would leave any bypassing path on the default.
@@ -309,7 +344,10 @@ pre-commit run --all-files                           # what the git hook runs
     `HouseholdMemberWithRole`, not a field on `HouseholdMember`.
   - **Every response carrying the signed-in user carries their memberships**, via
     `_me_read` in `api/v1/auth.py`: `/auth/me`, the login response (`LoginResponse.user`
-    is `MeRead`) and `/verify-2fa`. Login sets the client's auth state directly rather
+    is `MeRead`) and `/verify-2fa`. Each one is `(household_id, role, owned)` -
+    `memberships_for` returns a `Membership` NamedTuple, and `owned` costs no query because
+    `Household` is already joined for the `deleted_at` filter. `owned` is a separate fact from
+    the ladder rather than a rung on it, and it is the only thing the Logs page is gated on. Login sets the client's auth state directly rather
     than refetching, so without that the first screen after signing in would render the
     minimal nav. The frontend holds them as `memberships` on the auth context (a sibling
     of `impersonating`, same reasoning: not a property of the user account) and reads
@@ -317,23 +355,34 @@ pre-commit run --all-files                           # what the git hook runs
     every request, so a stale copy shows or hides the wrong nav item until the next
     `/auth/me` and grants nothing.
   - **Anything that changes the caller's OWN memberships must `refresh()`.** The context
-    is populated at login and never refetched on its own, so all four handlers that move
-    the caller in or out of a household re-read `/auth/me`: `HouseholdCreate` (creating
-    one makes you its organiser), `AcceptInvite` (joining makes you a helper),
-    `HouseholdEdit`'s `leave()` and `Households`' delete (a soft-deleted household drops
-    out of `memberships_for`). Gaining one is the loud direction: a brand-new account
-    creates its first household - the documented first step for every new user - and
-    without the re-read still sees the no-household sidebar, with every management page
-    bouncing off `RequireRole` until they reload by hand. Losing one is quieter but not
-    harmless: the sidebar keeps offering what that household granted, and Tags then 404s
-    with nothing on screen able to clear it, since no stored filter is at fault. Each of
-    the four is pinned by a test that fails when the `refresh()` is removed.
+    is populated at login and never refetched on its own, so all five handlers that move
+    the caller in or out of a household - or change what they hold in one - re-read
+    `/auth/me`: `HouseholdCreate` (creating one makes you its organiser), `AcceptInvite`
+    (joining makes you a helper), `HouseholdEdit`'s `leave()`, `Households`' delete (a
+    soft-deleted household drops out of `memberships_for`), and **both `HouseholdOwnerSelect`
+    call sites** (`HouseholdEdit` and its admin twin), since a transfer drops the caller's
+    `owned`. Gaining one is the loud direction: a brand-new account creates its first
+    household - the documented first step for every new user - and without the re-read still
+    sees the no-household sidebar, with every management page bouncing off `RequireRole` until
+    they reload by hand. Losing one is quieter but not harmless: the sidebar keeps offering
+    what that household granted, and Tags then 404s with nothing on screen able to clear it,
+    since no stored filter is at fault. The transfer case is the newest and was missing until
+    Logs existed, because until then no nav item moved on a transfer. Each of the five is
+    pinned by a test that fails when the `refresh()` is removed. Note `Households.tsx` and both
+    edit pages still read ownership from the household row's `admin_id` rather than from
+    `owned`: they hold the authoritative value, and Admin > Households renders households the
+    operator has no membership in at all. Not duplication to collapse.
   - **`RequireRole` cannot decide anything per household**, only "reaches the role
     somewhere", because the pages behind it span all of them. A page acting on one
     specific household needs its own check where the API would let it get that far:
     `ChoreEdit` does one and leaves for the list otherwise, since `GET /chores/{id}` is
     open to every role, while `TagEdit` needs none because `GET /tags/{id}` 403s by
-    itself. `HouseholdMembersTable` keeps its role props (`viewerUnrestricted`,
+    itself. History's undo cell is the second instance and the first that decides a *control*
+    rather than a redirect: `hasRoleIn(memberships, entry.household.id, 'organiser')`, mirroring
+    the API's disjunction row by row. **`RequireOwner` is a third guard, not a rung on this
+    one**: ownership is off the ladder, so a pseudo-`min="owner"` would put "owner" into
+    `HOUSEHOLD_ROLES`, and from there into a role picker and a PATCH the API rejects. Three
+    guards, three different facts - a server-wide flag, a rung somewhere, `admin_id` somewhere. `HouseholdMembersTable` keeps its role props (`viewerUnrestricted`,
     `viewerRole`) separate from `canManage` rather than folding them together, because
     they govern different endpoints; both default to "nobody", which is what keeps a
     deputy or helper's view read-only without passing anything. `viewerUnrestricted` is
@@ -361,6 +410,78 @@ pre-commit run --all-files                           # what the git hook runs
   the target user and parks the admin's own token in the `isachore_admin_token`
   cookie; `POST /auth/stop-impersonating` restores it. `/auth/me` reports
   `impersonating`; logout ends both sessions.
+- **The household log** (`household_log_entries`, `core/household_log.py`, `api/v1/logs.py`,
+  `pages/Logs.tsx`): who changed what in one household's chore management, plus who undid a
+  closure, read by that household's **owner** alone. Deliberately NOT `audit_events`, which is
+  the operator trail for auth / 2FA / admin user management: that one keys its action off a
+  native `audit_action` enum, so a new value needs an `ALTER TYPE` (which is why `cli.py`
+  reuses `user_updated` rather than adding one), and it carries `ip_address`, which must never
+  reach a household surface. Seven things to keep straight:
+  - **`action` is a `String(50)` with a `HouseholdLogAction` StrEnum supplying the values**,
+    the same pattern as `household_members.role` and `users.status`, so a new action needs no
+    migration. `test_the_action_column_holds_every_action` is what actually pins that. The wire
+    carries `action` and `changed_fields` as plain **strings**, not the enum and not a Literal
+    union: coercing them back would raise on a row a newer release wrote, i.e. an unfilterable
+    500 on every page holding one, so the closed set lives on the client
+    (`LOG_ACTIONS` / `LOG_FIELDS` in `lib/types.ts`) and `lib/logs.ts` degrades an unknown value
+    to a readable form. Those two tuples are hand-mirrors of `HouseholdLogAction` and
+    `CHORE_LOG_FIELDS` with nothing checking them, like `HOUSEHOLD_ROLES` and `users.language`:
+    keep them in step by hand. The enum still guards the `action` query *parameter*, where a 422
+    is right.
+  - **Undoing a completion and undoing a skip are two actions, not one with a flag.** They
+    read completely differently to whoever is looking, and nothing downstream re-derives which
+    it was - the flag is cleared by the reopen itself.
+  - **The log holds no reference to the occurrence, and cannot.** `undo_completion` has two
+    branches and each defeats a different `ondelete`: reopening nulls the row's title,
+    completer and completion time in place, so a surviving FK points at something that no
+    longer describes the closure; the older-closure branch hard-deletes the row, so RESTRICT
+    would 500 a working feature and CASCADE would let an append-only log erase itself. So the
+    handler captures `chore_id`, `title`, `completed_by_user_id` and `skipped` into locals
+    **before** the branch and writes from those alone. `chore_id` is `SET NULL` for a related
+    reason: CASCADE would let the log delete its own rows, and RESTRICT would break a hard
+    household delete, which cascades into `chores` in an order Postgres does not guarantee
+    against this table's own CASCADE. Nothing hard-deletes a household today, so that is a
+    landmine avoided rather than a live requirement. `chore_title` is the snapshot that keeps a row readable either
+    way, exactly as `chore_occurrences.title` does against a rename.
+  - **A chore edit records which field names moved, never their values**, in
+    `CHORE_LOG_FIELDS` declaration order (so a row is stable and the UI never sorts). The diff
+    is two `snapshot_chore` calls on the *same* object, before and after the assignments in
+    `update_chore` - never the object against the payload - so every normalisation
+    `_normalised_schedule` applies is reflected on both sides and cannot drift. `weekdays` is
+    snapshotted as a tuple, which neutralises the ARRAY aliasing footgun by construction, and
+    `[]` collapses to `None` so a normalised legacy row reports no phantom change.
+    `description` compares the stored strings as they are: both sides are already
+    `SanitisedHtml` output, and re-sanitising the older side would hide a real allowlist
+    tightening instead of reporting it. **The open occurrence's assignee is deliberately
+    absent** - it is derived and `_reconcile_open_occurrence` recomputes it on most edits - so
+    a PATCH that only moves `current_assignee_id`, or only sets `clear_current_assignee`,
+    writes no entry at all. Both are pinned; so is the no-op edit, which writes nothing.
+  - **`record_log_entry` only `session.add`s; the caller commits.** Same contract as
+    `core/audit.py`'s `record_event`, and it is what makes the 409 path in `update_chore`
+    correct for free: the entry is staged *before* the `try`, so the rollback expunges it and a
+    retry writes exactly one. Never move it after the commit.
+  - **Retention is 90 days, enforced twice.** `LOG_RETENTION` is a module constant, NOT a
+    Settings field - a product promise rather than a deployment knob, like
+    `MAX_PENDING_INVITATIONS`. The read endpoint applies it as a query predicate *and* a daily
+    `prune-logs` scheduler job deletes past it, so the promise holds on a deploy where the job
+    has never run and the table still does not grow without bound. `prune_old_log_entries` is unit-tested, but neither suite runs
+    `run_prune_logs`'s own session or fires the scheduler: verify those by hand with the CLI
+    (see README) after back-dating a row. **The 409 path in `update_chore` is by-hand-only
+    too** - the collision needs a genuinely concurrent `POST /complete`, which the savepoint
+    fixtures cannot produce, so the "rollback expunges the entry" claim rests on reading the
+    code, like the advisory-lock note above.
+  - **The impersonator is recorded but never named to the household.** `by_admin: bool` on the
+    read schema, the id in the column: the operator may be a stranger there, and the rule
+    about keeping household-peer payloads off `UserRead` applies to their identity too. Nothing
+    reads that id - it is there for a by-hand query, and `audit_events` is what holds the
+    durable impersonation trail, unpruned.
+    Both people on a row are `HouseholdMemberRead` (no email), and there is no free-text column
+    for a caller to write into - a `detail` field on a surface a housemate reads is where
+    personal data creeps in. (`chore_title` is user-authored text, but a copy of something the
+    reader already sees on the chore itself.) The writer also emits **no application log line**,
+    deliberately unlike `record_event`: a copy there would sit outside the 90-day promise, since
+    logs ship off-box under their own retention. That plus the bounded window is the whole
+    AVG / ISO 27001 story, and keeping it in one place is what makes it true.
 - **Who is on the hook now** is `chore_occurrences.assignee_id` on the single open
   occurrence, not a column on the chore; the pool is `chore_assignees` and the
   rotation order is computed, never stored (`app/core/assignment.py`). The API
@@ -628,7 +749,7 @@ pre-commit run --all-files                           # what the git hook runs
   it has to match that endpoint's whitelist (`CHORE_SORT_COLUMNS` and friends) or
   sorting breaks silently. Four things not to undo:
   - **State lives in the URL**, and with a `storageKey` also in `localStorage` under
-    `isachore-table-<key>` (seven keys; `household-members` is deliberately shared by
+    `isachore-table-<key>` (eight keys; `household-members` is deliberately shared by
     both household edit pages). Storage is read ONCE at mount and what comes back
     *becomes* that mount's defaults, which is the whole trick: it buys "URL wins over
     storage, storage wins over the page's own defaults" with no extra branch and no
@@ -654,8 +775,13 @@ pre-commit run --all-files                           # what the git hook runs
     NOT clear, which is why `Tags` prunes a dead `household_id` itself once its
     household list loads: `list_tags` 404s for a household you are not in, and its
     selector is hidden below two households, so nothing on screen could clear it.
-    `Chores` and `History` prune too (via latest-value refs, so the options are not
-    refetched), though they merely return an empty page. `clearTableSettings()` runs
+    `Chores`, `History` and `Logs` prune too (via latest-value refs, so the options are not
+    refetched), though they merely return an empty page. Two wrinkles worth copying if a
+    fourth page joins them: History's prune runs on the options request's **failure** path as
+    well, because its hidden-bar branch reads no payload and a helper would otherwise keep
+    filters applied with no Select on screen to clear them; and `Logs` prunes its `action`
+    filter with no network at all, in the same `setFilters` call, since that option list is a
+    closed const of ours rather than something a request can teach us. `clearTableSettings()` runs
     on logout because the saved filters name colleagues and households; theme and
     language deliberately survive, being the browser's preferences rather than one
     account's data.

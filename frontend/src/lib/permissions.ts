@@ -51,6 +51,31 @@ export function householdIdsWithRole(memberships: Membership[], min: HouseholdRo
 }
 
 /**
+ * Whether the user owns at least one household.
+ *
+ * The nav rule for Logs. Ownership is `households.admin_id`, NOT a rung on the role ladder:
+ * the owner is by definition an organiser, but an organiser is not an owner, and only the
+ * owner renames or deletes the household, removes members or transfers it. So this is a
+ * sibling of `hasRoleSomewhere` rather than a call to it.
+ *
+ * False for a member of none, and false for a membership that carries no ownership flag at
+ * all (an older API answering a cached shell). Both hide the item, which is the fail-closed
+ * direction: the alternative is offering a page the API will empty.
+ */
+export function ownsAnyHousehold(memberships: Membership[]): boolean {
+  return memberships.some((m) => m.owned)
+}
+
+/**
+ * The households the user owns, for narrowing a picker or filter list. The ownership
+ * counterpart of `householdIdsWithRole`, needed for the same reason: `/completions/filters` is
+ * not narrowed server-side, so Logs would otherwise offer a household its list has no rows for.
+ */
+export function ownedHouseholdIds(memberships: Membership[]): Set<number> {
+  return new Set(memberships.filter((m) => m.owned).map((m) => m.household_id))
+}
+
+/**
  * The roles `viewer` may set on `target` in their shared household. Empty means "no control":
  * render the role as a badge.
  *

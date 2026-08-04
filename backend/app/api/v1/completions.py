@@ -3,14 +3,16 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import and_, func, or_, select
 
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps import CurrentUser, Impersonator, SessionDep
 from app.api.v1.households import SortDir
 from app.core.chores import days_late
+from app.core.household_log import record_log_entry
 from app.core.households import member_household_ids, role_in_household, roles_at_least
 from app.models import (
     Chore,
     ChoreOccurrence,
     Household,
+    HouseholdLogAction,
     HouseholdRole,
     OccurrenceStatus,
     RepeatPeriod,
@@ -189,7 +191,9 @@ async def list_completions(
 
 
 @router.delete("/{completion_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def undo_completion(completion_id: int, user: CurrentUser, session: SessionDep) -> None:
+async def undo_completion(
+    completion_id: int, user: CurrentUser, session: SessionDep, impersonator: Impersonator
+) -> None:
     """Undo a closure, completion or skip alike (identified by its done-occurrence id).
     Either the user it is recorded against (completed_by) or an organiser of that household
     may undo it. Both halves matter: the occurrence stores no separate record of who
@@ -236,6 +240,17 @@ async def undo_completion(completion_id: int, user: CurrentUser, session: Sessio
                 detail="You can only undo your own entries unless you are a household organiser",
             )
 
+    # Everything the household log needs, read NOW and never off `occ` again: both branches
+    # below destroy it. Reopening nulls the title, the completer and the completion time and
+    # clears `skipped`; an older closure is deleted outright. Which is also why the log holds
+    # no reference to the occurrence itself - there is no `ondelete` that survives both paths.
+    logged_chore_id = occ.chore_id
+    logged_title = occ.title
+    logged_target_id = occ.completed_by_user_id
+    logged_action = (
+        HouseholdLogAction.skip_undone if occ.skipped else HouseholdLogAction.completion_undone
+    )
+
     # Is this the chore's most recent completion? Ordered by `completed_at`, NOT by
     # `scheduled_for`: slots only run in completion order while they come off a recurrence
     # grid, and an unscheduled chore's successor is anchored at the moment it was completed.
@@ -275,4 +290,14 @@ async def undo_completion(completion_id: int, user: CurrentUser, session: Sessio
     else:
         # An older completion: a history edit, the current open occurrence stands.
         await session.delete(occ)
+    await record_log_entry(
+        session,
+        action=logged_action,
+        household_id=household_id,
+        actor_id=user.id,
+        chore_id=logged_chore_id,
+        chore_title=logged_title,
+        target_id=logged_target_id,
+        impersonator_id=impersonator.id if impersonator else None,
+    )
     await session.commit()

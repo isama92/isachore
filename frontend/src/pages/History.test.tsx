@@ -339,8 +339,8 @@ describe('History', () => {
       authValue: {
         user: authUser,
         memberships: [
-          { household_id: 1, role: 'organiser' },
-          { household_id: 2, role: 'helper' },
+          { household_id: 1, role: 'organiser', owned: false },
+          { household_id: 2, role: 'helper', owned: false },
         ],
       },
     })
@@ -410,8 +410,8 @@ describe('History', () => {
       authValue: {
         user: authUser,
         memberships: [
-          { household_id: 1, role: 'deputy' },
-          { household_id: 2, role: 'helper' },
+          { household_id: 1, role: 'deputy', owned: false },
+          { household_id: 2, role: 'helper', owned: false },
         ],
       },
     })

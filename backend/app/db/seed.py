@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.assignment import initial_assignee, next_assignee, should_reassign
 from app.core.chores import RecurrenceRule, first_occurrence, next_occurrence_after
+from app.core.household_log import record_log_entry
 from app.core.households import add_member, personal_household_name
 from app.core.security import hash_password
 from app.models import (
@@ -35,6 +36,8 @@ from app.models import (
     ConfirmationToken,
     Household,
     HouseholdInvitation,
+    HouseholdLogAction,
+    HouseholdLogEntry,
     HouseholdRole,
     OccurrenceStatus,
     RepeatPeriod,
@@ -342,6 +345,11 @@ class SeedSummary:
 # no ON DELETE; user-referencing tables before users). Association tables cascade with
 # their parent (chore/household). app_settings and alembic_version are left untouched.
 _WIPE_ORDER = [
+    # First: it references households, chores and users. The household_id CASCADE would
+    # clear it anyway, which is exactly why leaving it out would fail silently - and
+    # `seed --fresh` promises to wipe app data rather than to rely on an ondelete a later
+    # change could relax. Same reasoning that put AuditEvent on this list.
+    HouseholdLogEntry,
     ChoreOccurrence,
     Chore,
     Tag,
@@ -554,11 +562,16 @@ async def seed(session: AsyncSession, *, fresh: bool = False) -> SeedSummary:
         await add_member(session, households[key].id, member.id, role)
     summary.households = len(households)
 
+    # (household, chore) per seeded chore, so the log entries below can be written once the
+    # ids exist. The seeder builds chores directly rather than through the endpoints, so it has
+    # to write its own entries or a freshly seeded stack would show an empty Logs page.
+    built: list[tuple[Household, Chore]] = []
+
     def build(hh_key: str, spec: ChoreSpec) -> None:
         pool = [by_email[e] for e in spec.assignee_emails]
         current = by_email[spec.current_email] if spec.current_email else None
         spec_tags = [tags[(hh_key, name)] for name in spec.tags if (hh_key, name) in tags]
-        _, occ = _seed_chore(
+        chore, occ = _seed_chore(
             session,
             household_id=households[hh_key].id,
             spec=spec,
@@ -568,6 +581,7 @@ async def seed(session: AsyncSession, *, fresh: bool = False) -> SeedSummary:
             rng=rng,
             now=now,
         )
+        built.append((households[hh_key], chore))
         summary.chores += 1
         summary.occurrences += occ
 
@@ -610,6 +624,20 @@ async def seed(session: AsyncSession, *, fresh: bool = False) -> SeedSummary:
             ),
         ):
             build(key, spec)
+
+    # One `chore_created` entry per seeded chore, credited to the household owner and stamped
+    # now (the column's server_default), so it sits inside the retention window and the owner
+    # has something to read. Flushed first, because the entries need the chore ids.
+    await session.flush()
+    for household, chore in built:
+        await record_log_entry(
+            session,
+            action=HouseholdLogAction.chore_created,
+            household_id=household.id,
+            actor_id=household.admin_id,
+            chore_id=chore.id,
+            chore_title=chore.title,
+        )
 
     await session.commit()
     return summary

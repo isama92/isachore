@@ -3,7 +3,7 @@ import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactElement } from 'react'
 import AppSidebar from './AppSidebar'
-import { membershipsFor, renderWithProviders } from '../test/utils'
+import { membershipsFor, ownedMemberships, renderWithProviders } from '../test/utils'
 import { makeUser } from '../test/fixtures'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -70,7 +70,7 @@ describe('AppSidebar', () => {
   })
 
   it('renders the core nav items in order', () => {
-    // The default auth value is an organiser, i.e. every item.
+    // The default auth value owns household 1 and organises it, i.e. every item.
     renderSidebar({ user: makeUser() })
     const nav = screen.getByRole('navigation', { name: 'Main navigation' })
     const labels = screen.getAllByRole('link').filter((el) => nav.contains(el))
@@ -79,6 +79,7 @@ describe('AppSidebar', () => {
       'Unscheduled Chores',
       'History',
       'Statistics',
+      'Logs',
       'Tags',
       'Chores Management',
       'Households',
@@ -138,14 +139,28 @@ describe('AppSidebar', () => {
     ])
   })
 
+  it('hides Logs from an organiser who owns nothing', () => {
+    // Ownership is not a rung on the ladder: this user manages the household's chores and
+    // still does not get the record of that management. Tags proves the organiser role landed,
+    // so the missing Logs is about `owned` rather than about the role being ignored.
+    renderSidebar({ user: makeUser(), memberships: membershipsFor('organiser', 1) })
+    expect(navLabels()).toContain('Tags')
+    expect(navLabels()).not.toContain('Logs')
+  })
+
+  it('shows Logs to an owner', () => {
+    renderSidebar({ user: makeUser(), memberships: ownedMemberships(1) })
+    expect(navLabels()).toContain('Logs')
+  })
+
   it('shows a mixed-role user everything one household grants', () => {
     // Helper in household 1, organiser in 2: the union wins, and the endpoints behind each
     // page then return only household 2's data.
     renderSidebar({
       user: makeUser(),
       memberships: [
-        { household_id: 1, role: 'helper' },
-        { household_id: 2, role: 'organiser' },
+        { household_id: 1, role: 'helper', owned: false },
+        { household_id: 2, role: 'organiser', owned: false },
       ],
     })
     expect(navLabels()).toContain('Chores Management')

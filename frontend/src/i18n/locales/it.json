@@ -96,6 +96,7 @@
     "chores": "Gestione faccende",
     "history": "Cronologia",
     "statistics": "Statistiche",
+    "logs": "Registro attività",
     "tags": "Etichette",
     "profile": "Profilo",
     "admin": "Admin",
@@ -323,6 +324,49 @@
     "perPerson": {
       "title": "Completamenti per persona",
       "completions": "Completamenti"
+    }
+  },
+  "logs": {
+    "title": "Registro attività",
+    "empty": "Ancora nessuna attività registrata.",
+    "loadError": "Impossibile caricare il registro",
+    "unknownActor": "Sconosciuto",
+    "byAdmin": "(tramite admin)",
+    "noChanges": "—",
+    "headers": {
+      "when": "Quando",
+      "household": "Nucleo domestico",
+      "actor": "Chi",
+      "action": "Cosa",
+      "chore": "Faccenda",
+      "changes": "Modifiche"
+    },
+    "actions": {
+      "chore_created": "Faccenda creata",
+      "chore_updated": "Faccenda modificata",
+      "chore_deleted": "Faccenda eliminata",
+      "completion_undone": "Completamento annullato",
+      "skip_undone": "Salto annullato"
+    },
+    "fields": {
+      "title": "Titolo",
+      "description": "Descrizione",
+      "start_date": "Data di inizio",
+      "repeats": "Ripetizione",
+      "assignment_type": "Assegnazione",
+      "turn_length": "Durata del turno",
+      "repeat_interval": "Ripeti ogni",
+      "weekdays": "Nei giorni",
+      "assignees": "Assegnatari",
+      "tags": "Etichette"
+    },
+    "filters": {
+      "actionLabel": "Azione",
+      "actionAll": "Tutte le azioni",
+      "userLabel": "Persona",
+      "userAll": "Tutti",
+      "householdLabel": "Nucleo domestico",
+      "householdAll": "Tutti i nuclei domestici"
     }
   },
   "choreCreate": {
