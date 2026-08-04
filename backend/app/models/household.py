@@ -63,6 +63,16 @@ class Household(Base):
     # member (see the household endpoints); users are soft-deleted, never hard-deleted, so
     # no cascade.
     admin_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    # The IANA zone the household lives in, which is what every "today" question about its
+    # chores is answered against (see app/core/chores.py). Stored as a plain String with the
+    # closed set enforced at the schema layer, the same approach as users.status and
+    # household_members.role, so the tz database can grow without a migration.
+    #
+    # The server_default is UTC rather than anything real: `HouseholdCreate` requires an
+    # explicit zone, so nothing that goes through the API can land on it, and a row that
+    # bypassed the API failing closed to the old app-wide behaviour beats it silently
+    # claiming a place it is not in.
+    timezone: Mapped[str] = mapped_column(String(64), server_default="UTC")
     # Soft delete: NULL means active, a timestamp means the household is deleted
     # and hidden from the user surface (admins can still view and restore it).
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)

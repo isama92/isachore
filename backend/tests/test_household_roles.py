@@ -86,7 +86,7 @@ async def test_creator_of_a_household_is_an_organiser(
     user = await make_user()
     client = await auth_client(user)
 
-    resp = await client.post("/api/v1/households", json={"name": "The Flat"})
+    resp = await client.post("/api/v1/households", json={"name": "The Flat", "timezone": "UTC"})
     assert resp.status_code == 201
     # Nobody else could promote them, so the owner has to start out able to manage it.
     assert await _stored_role(db_session, resp.json()["id"], user.id) == HouseholdRole.organiser

@@ -80,6 +80,7 @@ export default function ChoreEdit() {
         <p className="text-[13px] font-bold text-danger">{error ?? t('choreEdit.notFound')}</p>
       ) : (
         <ChoreForm
+          timezone={chore.household.timezone}
           members={members}
           tags={tags}
           initial={{

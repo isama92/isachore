@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Query
@@ -6,8 +6,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, SessionDep
+from app.core import clock
 from app.core.chores import days_since
-from app.core.households import assignee_visibility, chore_scope
+from app.core.households import assignee_visibility, chore_scope, household_zone
 from app.models import Chore, ChoreOccurrence, OccurrenceStatus, RepeatPeriod
 from app.schemas import UnscheduledChoreRead, UnscheduledRead
 from app.schemas.chore import ChoreHouseholdRead
@@ -59,7 +60,7 @@ async def get_unscheduled(
     match the due view: `household_id` narrows to one household, `assignee_id` (repeatable)
     keeps those members' chores plus unassigned/shared ones. Unpaginated, like the due view.
     """
-    now = datetime.now(UTC)
+    now = clock.now()
     filters = [
         *chore_scope(user.id, household_id),
         Chore.repeats == RepeatPeriod.manual,
@@ -84,16 +85,20 @@ async def get_unscheduled(
 
     last_done = await _last_completions(session, [occ.chore_id for occ in occurrences])
 
-    def since(chore_id: int) -> int | None:
-        last = last_done.get(chore_id)
-        return days_since(last, now) if last is not None else None
+    def since(occ: ChoreOccurrence) -> int | None:
+        # "Two days ago" is a local claim, so it is counted in the chore's household's zone,
+        # not the caller's and not UTC. The household is already selectinloaded above.
+        last = last_done.get(occ.chore_id)
+        if last is None:
+            return None
+        return days_since(last, now, household_zone(occ.chore.household.timezone))
 
     return UnscheduledRead(
         items=[
             UnscheduledChoreRead(
                 id=occ.chore_id,
                 title=occ.chore.title,
-                days_since_last_completion=since(occ.chore_id),
+                days_since_last_completion=since(occ),
                 # Free: the query already selectinloads the whole Chore. See home.py.
                 has_description=occ.chore.description is not None,
                 household=ChoreHouseholdRead.model_validate(occ.chore.household),

@@ -18,15 +18,42 @@ it already has (Jan 31 -> Feb 28 -> Mar 28, never back to Mar 31) and what makes
 interval > 1 carry its phase in the occurrence chain instead of recomputing it from a
 lattice the existing rows were never on.
 
-All datetimes are handled in UTC. There is no per-user timezone today, so "today"
-is a UTC-day boundary for everyone (a per-user timezone is a future enhancement).
+Every function here takes the household's timezone, and that is not decoration: a chore is
+due on a *day*, and which day it is depends on where the household is. The invariant the
+whole module maintains is
+
+    `scheduled_for` is local midnight of the day the chore is due, in `tz`.
+
+so a chore due on 5 August in Amsterdam is stored as 2026-08-04T22:00Z in summer and
+2026-01-04T23:00Z in winter, and reads back as local midnight on the 5th either way. Slots
+are stored as instants (the column is `timestamptz`); the zone is what turns one back into a
+calendar day. Datetimes arrive here UTC-aware, straight from Postgres, so every function
+converts to `tz` first and works in local wall clock from there.
+
+Two consequences of that conversion worth knowing:
+
+- The `timedelta` arithmetic below is DST-correct *because* of it, with no special handling.
+  Python adds to an aware datetime's wall-clock fields and keeps its tzinfo, and `ZoneInfo`
+  then recomputes the offset from the shifted fields - so "the same time tomorrow" really is
+  the same local time, an hour of absolute difference notwithstanding. `_add_months`'
+  `replace()` behaves the same way. Doing this in UTC is what would drift.
+- A step can land on a local time that does not exist, in the few zones whose DST transition
+  is at midnight (`America/Santiago` among them). Python resolves that under `fold=0` to a
+  real instant an hour off the nominal one, on the correct date. Nothing here reads a slot's
+  time-of-day - every comparison is `.date()` - so the date being right is the whole
+  requirement.
+
+`completed_at` is the exception to all of this and is deliberately never re-anchored: it is
+stamped at the moment the button is pressed and is a plain instant, correct in any zone. It
+takes a `tz` here only to be *bucketed* into a local day, never to be moved.
 """
 
 from calendar import monthrange
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from enum import StrEnum
+from zoneinfo import ZoneInfo
 
 from app.models import RepeatPeriod
 
@@ -39,7 +66,8 @@ MAX_INTERVAL = 365
 
 
 class DueStatus(StrEnum):
-    """Where a chore's next occurrence falls relative to today (UTC day)."""
+    """Where a chore's next occurrence falls relative to today, as the chore's household
+    reckons a day."""
 
     overdue = "overdue"
     today = "today"
@@ -129,28 +157,34 @@ def _weekly_step(weekday: int, rule: RecurrenceRule) -> int:
     return DAYS_IN_WEEK * rule.interval - weekday + rule.weekdays[0]
 
 
-def next_slot_after(dt: datetime, rule: RecurrenceRule) -> datetime:
-    """The next slot strictly after `dt`, preserving its time-of-day and tzinfo. Never
-    call with `manual`, which has no grid to step along (`next_occurrence_after` reopens an
-    unscheduled chore at its completion moment before it gets here)."""
+def next_slot_after(dt: datetime, rule: RecurrenceRule, tz: ZoneInfo) -> datetime:
+    """The next slot strictly after `dt`, preserving its local time-of-day. Never call with
+    `manual`, which has no grid to step along (`next_occurrence_after` reopens an
+    unscheduled chore at its completion moment before it gets here).
+
+    Converting to `tz` up front is what makes every branch DST-correct: the arithmetic then
+    runs on local wall-clock fields, so a daily chore due at local midnight stays at local
+    midnight across a transition instead of sliding to 23:00 or 01:00."""
+    local = dt.astimezone(tz)
     match rule.repeats:
         case RepeatPeriod.daily:
-            return dt + timedelta(days=rule.interval)
+            return local + timedelta(days=rule.interval)
         case RepeatPeriod.weekly:
             if rule.pinned:
-                return dt + timedelta(days=_weekly_step(dt.astimezone(UTC).weekday(), rule))
-            return dt + timedelta(weeks=rule.interval)
+                return local + timedelta(days=_weekly_step(local.weekday(), rule))
+            return local + timedelta(weeks=rule.interval)
         case RepeatPeriod.monthly:
-            return _add_months(dt, rule.interval)
+            return _add_months(local, rule.interval)
         case RepeatPeriod.yearly:
-            return _add_months(dt, 12 * rule.interval)
+            return _add_months(local, 12 * rule.interval)
         case _:  # manual has no interval
             raise ValueError(f"{rule.repeats} has no recurrence interval")
 
 
-def snap_to_slot(dt: datetime, rule: RecurrenceRule) -> datetime:
+def snap_to_slot(dt: datetime, rule: RecurrenceRule, tz: ZoneInfo) -> datetime:
     """`dt` itself when it already falls on one of the rule's weekdays, else the nearest
-    slot after it, at most six days on.
+    slot after it, at most six days on. Which weekday `dt` is on is a local question, hence
+    the zone: an Amsterdam slot stored at 22:00Z on a Sunday is a Monday to the household.
 
     Snapping re-phases the cycle from `dt` instead of spending the interval, so pinning
     weekdays onto a live chore moves its open occurrence by days, never by weeks. Only a
@@ -161,13 +195,13 @@ def snap_to_slot(dt: datetime, rule: RecurrenceRule) -> datetime:
     """
     if not rule.pinned:
         return dt
-    weekday = dt.astimezone(UTC).weekday()
-    forward = min((selected - weekday) % DAYS_IN_WEEK for selected in rule.weekdays)
-    return dt + timedelta(days=forward)
+    local = dt.astimezone(tz)
+    forward = min((selected - local.weekday()) % DAYS_IN_WEEK for selected in rule.weekdays)
+    return local + timedelta(days=forward)
 
 
 def advance_anchor(
-    scheduled_for: datetime, completed_at: datetime, rule: RecurrenceRule
+    scheduled_for: datetime, completed_at: datetime, rule: RecurrenceRule, tz: ZoneInfo
 ) -> datetime:
     """The last grid slot on or before the completion date, given the `scheduled_for`
     occurrence was completed at `completed_at`. `next_occurrence_after` steps once more
@@ -190,28 +224,33 @@ def advance_anchor(
         # here. Kept so a direct call cannot reach next_slot_after's ValueError: an
         # unscheduled chore has no grid to roll forward on, so its slot stands.
         return scheduled_for
-    completed_date = completed_at.astimezone(UTC).date()
+    completed_date = completed_at.astimezone(tz).date()
     anchor = scheduled_for
-    nxt = next_slot_after(anchor, rule)
-    while nxt.astimezone(UTC).date() <= completed_date:
-        anchor, nxt = nxt, next_slot_after(nxt, rule)
+    nxt = next_slot_after(anchor, rule, tz)
+    while nxt.astimezone(tz).date() <= completed_date:
+        anchor, nxt = nxt, next_slot_after(nxt, rule, tz)
     return anchor
 
 
-def first_occurrence(start_date: date, rule: RecurrenceRule) -> datetime:
-    """The first occurrence's due datetime: midnight UTC of the chore's start date,
-    snapped forward to the first selected weekday (materialised as the initial open
-    occurrence when a chore is created).
+def first_occurrence(start_date: date, rule: RecurrenceRule, tz: ZoneInfo) -> datetime:
+    """The first occurrence's due datetime: local midnight of the chore's start date in the
+    household's zone, snapped forward to the first selected weekday (materialised as the
+    initial open occurrence when a chore is created).
+
+    This is the one place a `date` becomes an instant, which is why `chores.start_date` can
+    stay a plain calendar date: it records the day the household means to start, and the zone
+    is what says when that day begins. Store it as midnight UTC instead and a household west
+    of Greenwich gets a chore that was due yesterday the moment it is created.
 
     Snapping forward rather than onto a start-date-anchored lattice is what keeps a
     Saturday start with "every two weeks on Tuesday" due in three days instead of ten.
     """
-    midnight = datetime(start_date.year, start_date.month, start_date.day, tzinfo=UTC)
-    return snap_to_slot(midnight, rule)
+    midnight = datetime(start_date.year, start_date.month, start_date.day, tzinfo=tz)
+    return snap_to_slot(midnight, rule, tz)
 
 
 def next_occurrence_after(
-    scheduled_for: datetime, completed_at: datetime, rule: RecurrenceRule
+    scheduled_for: datetime, completed_at: datetime, rule: RecurrenceRule, tz: ZoneInfo
 ) -> datetime:
     """The due datetime of the occurrence following completion of `scheduled_for` at
     `completed_at`. Every period yields one, so a chore always has an open occurrence.
@@ -229,29 +268,54 @@ def next_occurrence_after(
     schedule-anchored recurrence, stamped onto the successor occurrence row."""
     if rule.repeats == RepeatPeriod.manual:
         return completed_at
-    return next_slot_after(advance_anchor(scheduled_for, completed_at, rule), rule)
+    return next_slot_after(advance_anchor(scheduled_for, completed_at, rule, tz), rule, tz)
 
 
-def days_until_due(due: datetime, now: datetime) -> int:
-    """Whole days from now's UTC date to the due date (negative = overdue).
-    Date-based so a chore due at 00:00 today reads as due today, not overdue."""
-    return (due.astimezone(UTC).date() - now.astimezone(UTC).date()).days
+def days_until_due(due: datetime, now: datetime, tz: ZoneInfo) -> int:
+    """Whole days from today to the due date in the household's zone (negative = overdue).
+    Date-based so a chore due at local midnight today reads as due today, not overdue.
+
+    This is the function the whole feature exists for. Answered in UTC, it told someone in
+    Amsterdam at 01:30 that today's chore was due tomorrow, because 01:30 local is still
+    yesterday in UTC."""
+    return (due.astimezone(tz).date() - now.astimezone(tz).date()).days
 
 
-def days_since(moment: datetime, now: datetime) -> int:
-    """Whole days from `moment`'s UTC date to now's (0 = earlier today, 1 = yesterday).
-    The mirror of days_until_due for a past moment, on the same date-based UTC-day
-    convention: what the unscheduled view reports instead of a due date, since those
-    chores are measured by how long since they were last done."""
-    return (now.astimezone(UTC).date() - moment.astimezone(UTC).date()).days
+def days_since(moment: datetime, now: datetime, tz: ZoneInfo) -> int:
+    """Whole days from `moment` to now in the household's zone (0 = earlier today,
+    1 = yesterday). The mirror of days_until_due for a past moment, on the same date-based
+    local-day convention: what the unscheduled view reports instead of a due date, since
+    those chores are measured by how long since they were last done."""
+    return (now.astimezone(tz).date() - moment.astimezone(tz).date()).days
 
 
-def days_late(scheduled_for: datetime, completed_at: datetime) -> int:
+def days_late(scheduled_for: datetime, completed_at: datetime, tz: ZoneInfo) -> int:
     """How many whole days late a completion was (>0 late, 0 on time, <0 early).
     The mirror of days_until_due for a past occurrence, using the same date-based
-    UTC-day convention so a chore checked off at 23:00 on its due date reads as
-    on time, not a day late."""
-    return (completed_at.astimezone(UTC).date() - scheduled_for.astimezone(UTC).date()).days
+    local-day convention so a chore checked off at 23:00 local on its due date reads as
+    on time, not a day late.
+
+    `completed_at` is a plain instant and is never re-anchored anywhere; the zone here only
+    decides which local day it fell on."""
+    return (completed_at.astimezone(tz).date() - scheduled_for.astimezone(tz).date()).days
+
+
+def local_day_bounds(now: datetime, tz: ZoneInfo) -> tuple[datetime, datetime]:
+    """The half-open [start, end) of the local day `now` falls in, as instants.
+
+    What the endpoints filter `completed_at` between. Built in Python rather than as a
+    `::date` cast, which would read Postgres's session TimeZone, and rather than an
+    `AT TIME ZONE` on the column, which would hand Postgres a zone name from a household row:
+    it carries its own copy of the tz database, so a name the two do not share would raise
+    inside the query. A 500 from SQL is a worse failure than a 422 from a validator, and
+    keeping the maths here means only Python ever has to know the name.
+
+    `start + timedelta(days=1)` is wall-clock arithmetic on an aware datetime, so the window
+    is 23 or 25 hours long across a DST transition - which is exactly what a local day is.
+    """
+    local = now.astimezone(tz)
+    start = datetime(local.year, local.month, local.day, tzinfo=tz)
+    return start, start + timedelta(days=1)
 
 
 def due_status(days: int) -> DueStatus:

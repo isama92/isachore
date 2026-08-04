@@ -1,4 +1,3 @@
-from datetime import UTC, date, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -8,23 +7,24 @@ from sqlalchemy.orm import contains_eager, defer, selectinload
 
 from app.api.deps import CurrentUser, Impersonator, SessionDep
 from app.api.v1.households import SortDir
+from app.core import clock
 from app.core.assignment import initial_assignee, next_assignee, should_reassign
 from app.core.chores import (
-    RecurrenceRule,
     days_until_due,
     due_status,
     first_occurrence,
     next_occurrence_after,
-    next_slot_after,
     snap_to_slot,
 )
 from app.core.household_log import changed_chore_fields, record_log_entry, snapshot_chore
 from app.core.households import (
     escape_like,
     get_member_household,
+    household_zone,
     member_household_ids,
     require_role,
 )
+from app.core.occurrences import free_slot_from, initial_slot, rule_for, zone_for
 from app.models import (
     AssignmentType,
     Chore,
@@ -219,60 +219,6 @@ def _resolve_current_assignee(pool: list[User], current_assignee_id: int | None)
     return match
 
 
-def _rule(chore: Chore) -> RecurrenceRule:
-    """The chore's recurrence rule, as the pure `core.chores` helpers want it."""
-    return RecurrenceRule.of(chore.repeats, chore.repeat_interval, chore.weekdays)
-
-
-def _initial_slot(start_date: date | None, rule: RecurrenceRule, now: datetime) -> datetime:
-    """Where a chore's first open occurrence sits. A scheduled chore opens on its start
-    date; an unscheduled one has no start date and opens now, reading as "available since"
-    rather than a deadline."""
-    return first_occurrence(start_date, rule) if start_date is not None else now
-
-
-async def _free_slot_from(
-    session: SessionDep, chore_id: int, candidate: datetime, rule: RecurrenceRule
-) -> datetime:
-    """`candidate`, advanced along the grid past every slot this chore has already completed.
-
-    Re-dating a chore onto a grid it has history on can land exactly on one of its `done`
-    rows, and `uq_occurrence_chore_scheduled` is per (chore, scheduled_for): the commit would
-    fail and `update_chore` would surface a 409 that retrying could never get past, because
-    the same edit recomputes the same occupied slot every time. It used to be impossible - an
-    open row's slot was always later than every done row's - but unscheduled chores broke
-    that: one anchors its successors at completion timestamps, so a chore that was unscheduled
-    for a while has done rows on both sides of its open one.
-
-    Walking forward applies the same rule `advance_anchor` already does: a slot the chore has
-    been completed for is not a slot it can be due for again. The rule always has an interval
-    to step, since a candidate only exists when there is a start date (never `manual`), and it
-    terminates because every step strictly advances while the done set is finite.
-
-    Note this is one of the two queries that deliberately does NOT filter out skipped rows
-    (see `ChoreOccurrence.skipped`). The question here is which slots are *occupied*, not
-    which produced work, and a skipped slot is every bit as occupied: excluding them would
-    put the unclearable 409 above straight back.
-    """
-    taken = set(
-        (
-            await session.execute(
-                select(ChoreOccurrence.scheduled_for).where(
-                    ChoreOccurrence.chore_id == chore_id,
-                    ChoreOccurrence.status == OccurrenceStatus.done,
-                    ChoreOccurrence.scheduled_for >= candidate,
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    slot = candidate
-    while slot in taken:
-        slot = next_slot_after(slot, rule)
-    return slot
-
-
 async def _completion_counts(session: SessionDep, chore_id: int) -> dict[int, int]:
     """Completions of this chore per crediting member (done occurrences grouped by
     completed_by_user_id). Used only by the `least_done` strategy.
@@ -381,12 +327,13 @@ async def _reconcile_open_occurrence(
     Either way the assignee is reconciled. An unscheduled chore has no start date, so its
     slot always stands.
     """
-    rule = _rule(chore)
+    rule = rule_for(chore)
+    tz = zone_for(chore)
     occ = await _open_occurrence(session, chore.id)
     # Structural, so skipped rows count here (see `ChoreOccurrence.skipped`): this asks where
     # the chain has got to, not what was achieved. Filtering them would pick an earlier closure
     # and, on the revive path below, seed a slot a skipped row already holds - and that path
-    # inserts directly rather than going through `_free_slot_from`, so nothing would catch it.
+    # inserts directly rather than going through `free_slot_from`, so nothing would catch it.
     latest_done = (
         await session.execute(
             select(ChoreOccurrence)
@@ -408,9 +355,10 @@ async def _reconcile_open_occurrence(
                 latest_done.scheduled_for,
                 latest_done.completed_at or latest_done.scheduled_for,
                 rule,
+                tz,
             )
             if latest_done is not None
-            else _initial_slot(payload.start_date, rule, datetime.now(UTC))
+            else initial_slot(payload.start_date, rule, clock.now(), tz)
         )
         # Same shape as create_chore's version below, deliberately: the ternary this replaces
         # relied on `or` binding tighter than the conditional expression, which parsed correctly
@@ -457,7 +405,7 @@ async def _reconcile_open_occurrence(
             # an unscheduled chore's slot is its last completion moment ("available since"),
             # not a grid position: snapping that would hand a non-deadline straight to the due
             # machinery and land a chore the user just dated "today" weeks overdue.
-            first_occurrence(payload.start_date, rule)
+            first_occurrence(payload.start_date, rule, tz)
             if latest_done is None or was_unscheduled
             # Otherwise the row sits on the grid the chore had when it was written, which this
             # edit may have redefined. `snap_to_slot` is idempotent and moves it by days rather
@@ -466,12 +414,12 @@ async def _reconcile_open_occurrence(
             # in the future and leave the overdue bucket - reasonable, since the edit just
             # declared which weekdays it happens on. Only pinning moves anything: every other
             # rule accepts any datetime, because its phase lives in the occurrence chain.
-            else snap_to_slot(occ.scheduled_for, rule)
+            else snap_to_slot(occ.scheduled_for, rule, tz)
         )
         # Both candidates can land on a slot this chore has already completed, which
-        # `_free_slot_from` is what keeps off a `done` row - see its docstring for why neither
+        # `free_slot_from` is what keeps off a `done` row - see its docstring for why neither
         # is safe to assign blind.
-        occ.scheduled_for = await _free_slot_from(session, chore.id, candidate, rule)
+        occ.scheduled_for = await free_slot_from(session, chore.id, candidate, rule, tz)
 
 
 @router.post("", response_model=ChoreRead, status_code=status.HTTP_201_CREATED)
@@ -507,7 +455,12 @@ async def create_chore(
     session.add(
         ChoreOccurrence(
             chore_id=chore.id,
-            scheduled_for=_initial_slot(payload.start_date, _rule(chore), datetime.now(UTC)),
+            scheduled_for=initial_slot(
+                payload.start_date,
+                rule_for(chore),
+                clock.now(),
+                household_zone(household.timezone),
+            ),
             assignee_id=current.id if current is not None else None,
             status=OccurrenceStatus.open,
         )
@@ -650,7 +603,7 @@ async def update_chore(
     except IntegrityError:
         # Reconcile computes an occurrence slot, so it can collide with a slot a concurrent
         # POST /complete just wrote. This chore's own `done` rows are already accounted for
-        # (`_free_slot_from` walks past them), so what is left is a genuine race, which a
+        # (`free_slot_from` walks past them), so what is left is a genuine race, which a
         # retry can clear - unlike a self-collision, which would 409 forever.
         await session.rollback()
         raise HTTPException(
@@ -665,7 +618,7 @@ async def delete_chore(
     chore_id: int, user: CurrentUser, session: SessionDep, impersonator: Impersonator
 ) -> None:
     chore = await _managed_chore_or_error(session, user, chore_id)
-    chore.deleted_at = datetime.now(UTC)
+    chore.deleted_at = clock.now()
     # The title as it stood at deletion: the chore row survives the soft delete, but the log
     # must keep reading correctly even if a later hard delete ever takes it.
     await record_log_entry(
@@ -696,7 +649,8 @@ async def _close_occurrence(
     The successor's assignee is the one real behavioural fork: a completion hands the chore
     on when the turn ends (`_successor_assignee`), a skip keeps it where it is
     (`_retained_assignee`)."""
-    now = datetime.now(UTC)
+    now = clock.now()
+    tz = zone_for(chore)
     scheduled_for = occ.scheduled_for
     # Flip the current occurrence to done FIRST (it becomes the history row and frees
     # the one-open-per-chore slot), then materialise the successor - never the reverse,
@@ -711,7 +665,7 @@ async def _close_occurrence(
     # Anchor the successor to the occurrence just cleared (skip-missed applied), so its
     # due date advances one interval on the grid rather than from the completion time.
     # An unscheduled chore has no grid and reopens at `now` instead.
-    upcoming = next_occurrence_after(scheduled_for, now, _rule(chore))
+    upcoming = next_occurrence_after(scheduled_for, now, rule_for(chore), tz)
     pool = list(chore.assignees)
     next_person = (
         _retained_assignee(chore, occ.assignee_id, pool)
@@ -736,7 +690,7 @@ async def _close_occurrence(
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=conflict_detail) from None
 
-    days = days_until_due(upcoming, now)
+    days = days_until_due(upcoming, now, tz)
     return CompletionRead(
         id=completion_id,
         chore_id=chore.id,

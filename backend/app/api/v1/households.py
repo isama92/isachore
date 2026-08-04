@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import ColumnElement, delete, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, SessionDep
 from app.core.config import settings
@@ -13,6 +14,7 @@ from app.core.households import (
     add_member,
     chore_count_column,
     escape_like,
+    household_zone,
     is_active_member,
     member_count_column,
     member_of,
@@ -20,6 +22,7 @@ from app.core.households import (
     role_in_household,
 )
 from app.core.invitations import round_up_to_hour
+from app.core.occurrences import reanchor_open_occurrences
 from app.core.security import INVITATION_TOKEN_TTL, generate_token
 from app.models import (
     Household,
@@ -99,6 +102,7 @@ async def build_household_page(
             id=household.id,
             name=household.name,
             admin_id=household.admin_id,
+            timezone=household.timezone,
             created_at=household.created_at,
             deleted_at=household.deleted_at,
             member_count=member_count,
@@ -196,6 +200,7 @@ async def load_household_read(
         id=household.id,
         name=household.name,
         admin_id=household.admin_id,
+        timezone=household.timezone,
         created_at=household.created_at,
         deleted_at=household.deleted_at,
         member_count=member_count,
@@ -226,6 +231,53 @@ async def set_household_admin(session: SessionDep, household: Household, new_adm
         )
         .values(role=HouseholdRole.organiser)
     )
+
+
+async def apply_timezone_change(
+    session: SessionDep, household: Household, new_timezone: str | None
+) -> int:
+    """Move the household to `new_timezone`, re-anchoring its open slots so every scheduled
+    chore keeps the local date it already showed. Returns how many moved (0 when the zone was
+    omitted or unchanged).
+
+    Shared by the user-facing PATCH and its admin twin so the re-anchor cannot be forgotten on
+    one of them - which would leave a household whose chores all silently shift by a day
+    depending on which page the change was made from.
+
+    Both guards are about *work*, not correctness. `None` means "not in the payload" on a
+    partial update. An unchanged zone would re-anchor every open occurrence onto the instant it
+    already holds, which is a no-op the ORM would not even flush - SQLAlchemy issues no UPDATE
+    for an attribute set to an equal value, and aware datetimes compare by instant - so nothing
+    would be written and `updated_at` would not move either. What the guards save is the query
+    per open occurrence that `free_slot_from` costs on the way to that no-op, which a plain
+    rename would otherwise pay on every save.
+    """
+    if new_timezone is None or new_timezone == household.timezone:
+        return 0
+    old_zone = household_zone(household.timezone)
+    household.timezone = new_timezone
+    return await reanchor_open_occurrences(
+        session, household.id, old_zone, household_zone(new_timezone)
+    )
+
+
+async def commit_household_update(session: SessionDep) -> None:
+    """Commit a household PATCH, mapping a slot collision to a 409 rather than a 500.
+
+    Only reachable through `apply_timezone_change`, which is the one thing on this endpoint
+    that writes occurrence rows. `free_slot_from` already walks each candidate past the slots
+    the chore has completed, so what is left is a genuine race - a completion landing between
+    that walk and this commit and taking the slot - which is exactly the shape `update_chore`
+    maps to a 409. Shared by both PATCH handlers so the two cannot drift.
+    """
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A chore was completed while the timezone was changing; please try again",
+        ) from None
 
 
 def refuse_owner_row(household: Household, user_id: int) -> None:
@@ -397,7 +449,7 @@ async def create_household(
 ) -> HouseholdListRead:
     # The creator becomes the household owner and its first member, and owners are
     # organisers: there is nobody else who could promote them.
-    household = Household(name=payload.name, admin_id=user.id)
+    household = Household(name=payload.name, admin_id=user.id, timezone=payload.timezone)
     session.add(household)
     await session.flush()
     await add_member(session, household.id, user.id, HouseholdRole.organiser)
@@ -425,7 +477,8 @@ async def update_household(
         household.name = payload.name
     if payload.admin_id is not None:
         await set_household_admin(session, household, payload.admin_id)
-    await session.commit()
+    await apply_timezone_change(session, household, payload.timezone)
+    await commit_household_update(session)
     return await load_household_read(session, household.id)
 
 

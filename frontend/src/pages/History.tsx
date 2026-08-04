@@ -248,7 +248,7 @@ export default function History() {
       id: 'created_at',
       accessorFn: (e) => e.completed_at,
       header: t('history.headers.completed'),
-      cell: ({ row }) => formatDateTime(row.original.completed_at),
+      cell: ({ row }) => formatDateTime(row.original.completed_at, row.original.household.timezone),
       meta: { cellClassName: 'font-medium text-muted-foreground' },
     },
     {

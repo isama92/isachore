@@ -161,6 +161,13 @@ pre-commit run --all-files                           # what the git hook runs
   CASCADE would usually cover it, which is exactly why forgetting fails quietly, and
   `seed --fresh` promises to wipe app data rather than to lean on an `ondelete` a later change
   could relax. Pydantic schemas live in `app/schemas/`.
+- **`core/occurrences.py` is the DB-touching layer over `core/chores.py`**, which stays pure:
+  the latter knows where the recurrence grid falls, the former knows which slots a chore has
+  actually used (`free_slot_from`, `initial_slot`, `rule_for`, `zone_for`,
+  `reanchor_open_occurrences`). It exists as its own module rather than as private helpers in
+  the chores router because two routers need it - the chores one and the household one, which
+  re-anchors slots on a timezone change - and `api/v1/chores.py` already imports from
+  `api/v1/households.py`, so the reverse would be an import cycle.
 - **Auth**: DB-backed opaque tokens (`auth_tokens` table, SHA-256 hashed), sent
   as an httpOnly `isachore_token` cookie or `Authorization: Bearer`. NO
   self-registration: admins create users; the first admin comes from the `init`
@@ -491,6 +498,69 @@ pre-commit run --all-files                           # what the git hook runs
     deliberately unlike `record_event`: a copy there would sit outside the 90-day promise, since
     logs ship off-box under their own retention. That plus the bounded window is the whole
     AVG / ISO 27001 story, and keeping it in one place is what makes it true.
+- **Timezones are per household** (`households.timezone`, an IANA name in a `String(64)` with
+  the closed set enforced at the schema layer, same pattern as `users.status`). A household is
+  a physical place, so the zone belongs to it rather than to a user. The invariant everything
+  rests on:
+
+  > **`chore_occurrences.scheduled_for` is local midnight of the day the chore is due, in its
+  > household's zone.** So 5 August in Amsterdam is `2026-08-04T22:00Z` in summer and
+  > `2026-01-04T23:00Z` in winter, and reads back as local midnight on the 5th either way.
+
+  Answered in UTC, `days_until_due` told someone in Amsterdam at 01:30 that today's chore was
+  due tomorrow, because 01:30 local is still yesterday in UTC. Eight things to keep straight:
+  - **Two things deliberately do NOT move, and re-anchoring either is a data-corruption bug.**
+    `completed_at` is stamped from `clock.now()` when the button is pressed: it is a plain
+    instant, correct in every zone, and only the day boundary it is *read against* was ever
+    wrong. And an **unscheduled (`manual`) chore's `scheduled_for`** is the moment it became
+    available, not a calendar anchor. The timezone migration excludes both; so does
+    `reanchor_open_occurrences`.
+  - **`chores.start_date` stays a plain `date`.** It records the day the household means to
+    start, and `first_occurrence` is the single place that turns it into an instant, in the
+    household's zone. That is why the column, the wire type and `ChoreForm`'s Calendar all
+    needed no change. Do not "fix" it into a timestamp.
+  - **The DST-correct arithmetic is free, and only because the datetimes carry a `ZoneInfo`.**
+    Python adds to an aware datetime's wall-clock *fields* and keeps its tzinfo, so
+    `dt + timedelta(days=1)` really is "the same local time tomorrow" and `_add_months`'
+    `replace()` behaves the same way. Every function in `core/chores.py` therefore converts to
+    `tz` first; doing the arithmetic on a UTC-aware value is what would drift by an hour twice
+    a year. A step can land on a local time that does not exist (zones whose transition is at
+    midnight); `fold=0` resolves it to a real instant on the correct *date*, which is all the
+    date-based comparisons read.
+  - **Home and Statistics span several households at once, so there is no single day window.**
+    Both call `zones_in_scope` (`core/households.py`) and OR one `local_day_bounds` clause per
+    distinct zone - seeded with `false()`, which is both the right answer for a user in no
+    household and what keeps it off SQLAlchemy's deprecated argument-less `or_()`. Statistics
+    additionally buckets each completion by *its* household's local day and seeds its chart
+    axis over the union of the per-zone ranges.
+  - **Never `AT TIME ZONE <column>` at runtime.** Postgres carries its own copy of the tz
+    database, so a name Python and Postgres do not share raises *inside the query* - a 500 from
+    SQL rather than a 422 from a validator. The zone maths is Python's, which is also why
+    `local_day_bounds` exists. The timezone migration is the one exception and is safe only
+    because every row holds the same hardcoded zone at that point.
+  - **`household_zone` falls back to UTC on an unknown name rather than raising**, for the same
+    reason the household log's `action` stays a plain string on the wire: it runs on read paths
+    spanning every household a user belongs to, so raising would take out My Chores, History and
+    Statistics for everyone in a household holding one bad row. Unreachable through the API,
+    which validates against `available_timezones()` on write.
+  - **Changing a household's zone re-anchors its OPEN slots** (`apply_timezone_change` ->
+    `reanchor_open_occurrences`), reinterpreting each wall-clock reading in the new zone so
+    "due 5 August" still says 5 August. Done rows stay put - history records what happened.
+    Every candidate goes through `free_slot_from`, because the new instant can land on a slot
+    the chore has already completed, and the select takes `FOR UPDATE OF chore_occurrences` so a
+    concurrent `POST /complete` cannot flip a row to `done` between the read and the write - the
+    one way this could re-date a history row. Both the user PATCH and its admin twin call the
+    shared helper. `apply_timezone_change`'s two guards are about work rather than correctness:
+    re-anchoring an *unchanged* zone writes nothing (SQLAlchemy issues no UPDATE for an equal
+    value, and aware datetimes compare by instant), so what they save is one query per open
+    occurrence on a plain rename.
+  - **The frontend renders household timestamps in the household's zone**, via the optional
+    `timeZone` argument on the three formatters in `lib/format.ts` and `lib/chores.ts`. It is
+    carried on `ChoreHouseholdRead`, which is embedded in five payloads, so one field reaches
+    Home, Unscheduled, History, the chore reads and the filter options. Without it a slot stored
+    at 22:00Z prints "4 Aug" beside a server-computed "Due today" meaning the 5th. Account and
+    admin surfaces (a user's `created_at`, an invitation's expiry) deliberately keep the
+    viewer's zone: those belong to no household.
 - **Who is on the hook now** is `chore_occurrences.assignee_id` on the single open
   occurrence, not a column on the chore; the pool is `chore_assignees` and the
   rotation order is computed, never stored (`app/core/assignment.py`). The API
@@ -530,7 +600,7 @@ pre-commit run --all-files                           # what the git hook runs
   (`3c1f04a7e9d2`) reopens the ones it left dead. Consequences worth knowing:
   - **`chores.start_date` is nullable and NULL for every one of them.** It only ever
     seeded the first slot, which for an unscheduled chore means nothing, so their first
-    occurrence opens at creation time instead (`_initial_slot`). The schema layer keeps
+    occurrence opens at creation time instead (`initial_slot`). The schema layer keeps
     this true from both directions (`_normalised_schedule`): the date is silently
     dropped for `manual` and **required** for every other period, the one part of the
     schedule rejected rather than normalised. So a NULL `start_date` and `repeats ==
@@ -565,9 +635,10 @@ pre-commit run --all-files                           # what the git hook runs
       the slot from the new `start_date` rather than `snap_to_slot` it: snapping is the
       identity for every unpinned rule, so the chore would keep its last-completion moment
       and read as overdue by however long ago that was, while the form said "start today".
-    - Every re-dated slot goes through `_free_slot_from`, which walks it past any slot the
-      chore has **already completed**. `first_occurrence` and every grid slot are both
-      midnight UTC, so re-dating onto a grid the chore has history on can land exactly on a
+    - Every re-dated slot goes through `free_slot_from` (`core/occurrences.py`), which walks it
+      past any slot the chore has **already completed**. `first_occurrence` and every grid slot
+      are both local midnight in the household's zone, so re-dating onto a grid the chore has
+      history on can land exactly on a
       done row; `uq_occurrence_chore_scheduled` then fails the commit and `update_chore`
       returns a 409 that retrying can never clear, since the same edit recomputes the same
       occupied slot. "Did it today, parked it as unscheduled, later put it back on a
@@ -923,6 +994,31 @@ the negative paths (401/403/400/404/409), not just the happy one.
   monkeypatching `settings.login_*`. Coverage: add
   `--cov=app --cov-report=term-missing --cov-report=html` (report at
   `backend/htmlcov/`).
+- **Pin the clock with `app.core.clock.now`, and patch the module attribute.** The endpoints
+  call `clock.now()` rather than importing the name precisely so `monkeypatch.setattr(clock,
+  "now", ...)` reaches them; `from app.core.clock import now` in a caller would defeat it. The
+  pure helpers in `core/chores.py` take `now` as a parameter and need no seam.
+  `tests/test_timezones.py` is where day-boundary behaviour lives, and it carries two
+  conventions worth copying: extreme zones (`Pacific/Kiritimati` +14, `Pacific/Niue` -11) over
+  plausible ones, because they straddle UTC and so fail loudly if a zone is dropped; and every
+  household fixture defaulting to `timezone="UTC"`, which is what keeps several hundred
+  pre-timezone due assertions elsewhere in the suite meaning what they used to.
+
+  **Two traps this cost real time on, both instances of the "satisfy every other clause" rule
+  above.** First, the obvious regression test for the reported bug pins *nothing*: asserting
+  "at 01:30 in Amsterdam the chore reads as due today" passes even with the comparison reverted
+  to UTC, because the slot sits at 22:00Z and the clock at 23:30Z, so both shift by the same two
+  hours and the difference between two dates survives. A zone only changes the answer where
+  exactly *one* operand crosses midnight - 23:00 local is such a moment, and
+  `test_home_uses_the_household_day_late_in_the_evening` is the test that actually fails when
+  the zone is dropped. Second, `end - start` on two aware datetimes **sharing a tzinfo** ignores
+  the zone entirely and subtracts wall-clock fields, so "this DST day is 25 hours long" is a
+  constant 24 unless both sides are `.astimezone(UTC)`'d first.
+- **`chore_occurrences.updated_at` cannot be observed moving under the fixtures.** Both its
+  defaults are SQL `now()`, which is `transaction_timestamp()` and so frozen for the whole
+  savepoint-wrapped test; in production each request is its own transaction. The suite pins the
+  column's configuration instead, and the elapsed behaviour is a by-hand check (complete a
+  chore on the dev stack, then compare the two columns).
 - **The boot migration is shell, so neither suite reaches it.** After touching
   `backend/docker-entrypoint.sh` or either `ENTRYPOINT`, verify by hand:
   `docker compose down -v && docker compose up -d --build backend`, then

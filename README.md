@@ -4,8 +4,8 @@ Chore management for households. Track who does what, see what is overdue, due
 today, or coming up, shared between the people in a household, with a JSON API so
 mobile clients can join later.
 
-Features: multi-user households with invitations, ownership transfer and per-member
-roles, chores with four assignment strategies (manual, alphabetical, least-done,
+Features: multi-user households with invitations, ownership transfer, per-member
+roles and a per-household timezone, chores with four assignment strategies (manual, alphabetical, least-done,
 random) and turn-taking rotation, a My Chores due view with one-tap completion and daily
 progress, a separate Unscheduled Chores view for the ones you do whenever you feel
 like it (never due, repeatable on demand, showing how long since each was last
@@ -30,6 +30,18 @@ command (see below); every other user is created by an admin in the UI under
 
 A new account starts with no household. Creating one is the user's own first step,
 under **Households**, or they accept an invitation to somebody else's.
+
+### Household timezone
+
+Each household has a timezone, picked when it is created (prefilled from your browser) and
+editable afterwards by its owner. Everything about a chore's *day* is measured against it: when
+a chore is due, whether it is overdue, whether a completion counts towards today's progress, and
+how many days late it was. Without this the day boundary was UTC for everybody, so anyone an
+hour or two ahead of it saw yesterday's chores after midnight.
+
+Moving a household to a different zone re-dates its scheduled chores so they keep the dates they
+already showed - a chore due on 5 August still says 5 August - and asks for confirmation first.
+Completed history is never touched.
 
 ### Household roles
 
@@ -641,4 +653,5 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
 
 ### Todo
 
+- [x] Per-household timezone, so due dates follow the household's day rather than UTC
 - [ ] Live updates when a housemate completes a chore (websocket)

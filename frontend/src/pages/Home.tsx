@@ -271,7 +271,7 @@ export default function Home() {
                         key={chore.id}
                         title={chore.title}
                         dotClass={dueDotClass(chore)}
-                        detail={`${relativeDueLabel(t, chore)} · ${formatDateTime(chore.next_due)} · ${repeatLabel(t, chore)}`}
+                        detail={`${relativeDueLabel(t, chore)} · ${formatDateTime(chore.next_due, chore.household.timezone)} · ${repeatLabel(t, chore)}`}
                         assignee={
                           chore.assignees.length === 0
                             ? t('home.unassigned')

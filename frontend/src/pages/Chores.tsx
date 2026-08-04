@@ -375,7 +375,7 @@ export default function Chores() {
       // are common, and the whole point of this column is to order by creation.
       accessorKey: 'created_at',
       header: t('chores.headers.createdAt'),
-      cell: ({ row }) => formatDateTime(row.original.created_at),
+      cell: ({ row }) => formatDateTime(row.original.created_at, row.original.household.timezone),
       meta: { cellClassName: 'font-medium text-muted-foreground' },
     },
     {

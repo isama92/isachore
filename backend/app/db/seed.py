@@ -18,6 +18,7 @@ a run of `done` rows plus exactly one `open` row per active chore.
 import random
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.assignment import initial_assignee, next_assignee, should_reassign
 from app.core.chores import RecurrenceRule, first_occurrence, next_occurrence_after
 from app.core.household_log import record_log_entry
-from app.core.households import add_member, personal_household_name
+from app.core.households import add_member, household_zone, personal_household_name
 from app.core.security import hash_password
 from app.models import (
     AssignmentType,
@@ -48,6 +49,9 @@ from app.models import (
 
 # Every seeded user shares this password (>= 8 chars). Dev-only placeholder.
 SEED_PASSWORD = "password"
+# Where the seeded households live. Matches the timezone migration's backfill, so a dev
+# database reseeded from scratch behaves like one that was upgraded.
+SEED_TIMEZONE = "Europe/Amsterdam"
 # Fixed so a `random` strategy (and thus the whole dataset) is reproducible.
 _RNG_SEED = 20260721
 
@@ -395,6 +399,7 @@ def _seed_chore(
     tags: list[Tag],
     rng: random.Random,
     now: datetime,
+    tz: ZoneInfo,
 ) -> tuple[Chore, int]:
     """Create the chore and its occurrence chain (history + one open row). Returns the
     chore and how many occurrences were written."""
@@ -424,7 +429,7 @@ def _seed_chore(
     session.add(chore)
 
     assignee = current if current is not None else initial_assignee(spec.assignment, pool, rng=rng)
-    scheduled = first_occurrence(start, rule)
+    scheduled = first_occurrence(start, rule, tz)
     counts: dict[int, int] = {}
     occurrences = 0
     today = now.date()
@@ -458,7 +463,7 @@ def _seed_chore(
             )
         )
         occurrences += 1
-        nxt = next_occurrence_after(scheduled, completed_at, rule)
+        nxt = next_occurrence_after(scheduled, completed_at, rule, tz)
         # A skip earns no rotation credit and spends none of the turn, exactly as
         # `_close_occurrence` has it: it neither feeds the least_done tally nor advances the
         # handoff, so whoever skipped is still up next.
@@ -521,7 +526,10 @@ async def seed(session: AsyncSession, *, fresh: bool = False) -> SeedSummary:
         tag_names: list[str],
         roles: dict[str, HouseholdRole] | None = None,
     ) -> None:
-        hh = Household(name=name, admin_id=owner.id)
+        # An explicit zone rather than the column's UTC default, so the seeded due dates line
+        # up with a European developer's own "today" and the day-boundary behaviour is
+        # exercised somewhere other than UTC (where the whole feature is a no-op).
+        hh = Household(name=name, admin_id=owner.id, timezone=SEED_TIMEZONE)
         session.add(hh)
         households[key] = hh
         # Memberships are recorded now and inserted after the flush below, via add_member:
@@ -580,6 +588,7 @@ async def seed(session: AsyncSession, *, fresh: bool = False) -> SeedSummary:
             tags=spec_tags,
             rng=rng,
             now=now,
+            tz=household_zone(households[hh_key].timezone),
         )
         built.append((households[hh_key], chore))
         summary.chores += 1

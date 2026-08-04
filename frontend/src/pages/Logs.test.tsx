@@ -58,7 +58,7 @@ describe('Logs', () => {
           id: 7,
           action: 'chore_deleted',
           chore_title: 'Scrub the tub',
-          household: { id: 1, name: 'Beach House' },
+          household: { id: 1, name: 'Beach House', timezone: 'UTC' },
           actor: jo,
         }),
       ],

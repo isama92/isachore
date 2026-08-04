@@ -18,7 +18,7 @@ from app.core import security
 from app.core.assignment import initial_assignee
 from app.core.chores import RecurrenceRule, first_occurrence
 from app.core.config import settings
-from app.core.households import add_member
+from app.core.households import add_member, household_zone
 from app.core.security import generate_token, hash_token
 from app.db.base import Base
 from app.db.redis import get_redis
@@ -236,7 +236,12 @@ def make_household(db_session: AsyncSession) -> Callable[..., Awaitable[Househol
         admin: User | None = None,
         deleted_at: datetime | None = None,
         roles: dict[int, HouseholdRole] | None = None,
+        timezone: str = "UTC",
     ) -> Household:
+        # UTC by default, matching the column's server_default. Load-bearing in the same way
+        # the organiser default below is: every due assertion in the suite predates household
+        # zones and was written against a UTC day, so any other default would silently re-date
+        # several hundred fixtures. Tests about timezones pass one explicitly.
         # Every member is an organiser unless `roles` (keyed by user id) says otherwise.
         # That default is deliberate and load-bearing: before roles existed, membership
         # granted everything, so it is what keeps the chores / tags / stats / history
@@ -263,7 +268,9 @@ def make_household(db_session: AsyncSession) -> Callable[..., Awaitable[Househol
             db_session.add(owner)
             await db_session.flush()
             admin_id = owner.id
-        household = Household(name=name, admin_id=admin_id, deleted_at=deleted_at)
+        household = Household(
+            name=name, admin_id=admin_id, deleted_at=deleted_at, timezone=timezone
+        )
         db_session.add(household)
         await db_session.flush()  # assigns household.id, which add_member needs
         # Not `household.members.extend(...)`: the relationship writes the two foreign keys
@@ -352,7 +359,12 @@ def make_chore(db_session: AsyncSession) -> Callable[..., Awaitable[Chore]]:
             db_session.add(
                 ChoreOccurrence(
                     chore_id=chore.id,
-                    scheduled_for=first_occurrence(slot_from, rule),
+                    # Anchored in the household's zone, like the create endpoint: a fixture
+                    # placed at midnight UTC in a non-UTC household would sit off the grid the
+                    # endpoints compute against, and the timezone tests would pass by accident.
+                    scheduled_for=first_occurrence(
+                        slot_from, rule, household_zone(household.timezone)
+                    ),
                     assignee_id=current.id if current is not None else None,
                     status=OccurrenceStatus.open,
                 )

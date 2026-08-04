@@ -1,13 +1,18 @@
-from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Query
-from sqlalchemy import select
+from sqlalchemy import and_, false, or_, select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, SessionDep
-from app.core.chores import days_until_due, due_status
-from app.core.households import assignee_visibility, chore_scope
+from app.core import clock
+from app.core.chores import days_until_due, due_status, local_day_bounds
+from app.core.households import (
+    assignee_visibility,
+    chore_scope,
+    household_zone,
+    zones_in_scope,
+)
 from app.models import Chore, ChoreOccurrence, OccurrenceStatus, RepeatPeriod
 from app.schemas import DueChoreRead, HomeRead, ProgressRead
 from app.schemas.chore import ChoreHouseholdRead
@@ -39,10 +44,12 @@ async def get_home(
     adding or clearing members widens it. Progress is computed over the same
     filtered scope. A household or member id the user can't see just yields an
     empty scope, like the chores list."""
-    now = datetime.now(UTC)
-    # UTC day bounds (not a `::date` cast, which depends on the session TimeZone).
-    today_start = datetime(now.year, now.month, now.day, tzinfo=UTC)
-    tomorrow_start = today_start + timedelta(days=1)
+    now = clock.now()
+    # Today starts at a different instant in each household, so there is no single day window
+    # to filter by: the zones are collected here and the progress query below ORs one window
+    # per zone. Nearly always an `or_` of one, since a user's households are nearly always in
+    # the same place. See `local_day_bounds` for why this is Python rather than SQL.
+    zones = await zones_in_scope(session, user.id, household_id)
 
     # Unscheduled chores are deliberately absent from both queries below: they carry no due
     # date, so they can be neither overdue nor due today, and counting them in today's
@@ -72,7 +79,8 @@ async def get_home(
     items: list[DueChoreRead] = []
     pending_ids: set[int] = set()  # overdue or due today, still not done
     for occ in occurrences:
-        days = days_until_due(occ.scheduled_for, now)
+        # The household is already selectinloaded below, so the zone costs no extra query.
+        days = days_until_due(occ.scheduled_for, now, household_zone(occ.chore.household.timezone))
         if days <= 0:
             pending_ids.add(occ.chore_id)
         items.append(
@@ -112,12 +120,28 @@ async def get_home(
     # got through", and a skipped chore is off the list: it was dealt with, decided about,
     # and is gone from the pending set either way. Statistics asks a different question -
     # how much work was done - and does filter them out, so the two disagree by design.
+    #
+    # One window per zone, ORed: "today" is a local question, so a household in Auckland is
+    # judged against its own midnight rather than whichever household happened to be first.
+    # The `false()` seed is what a user in no household collapses to - the right answer, since
+    # the surrounding scope is empty too - and it is also what keeps this off SQLAlchemy's
+    # deprecated argument-less `or_()`.
     done_filters = [
         *scope,
         ChoreOccurrence.status == OccurrenceStatus.done,
-        ChoreOccurrence.completed_at >= today_start,
-        ChoreOccurrence.completed_at < tomorrow_start,
-        ChoreOccurrence.scheduled_for < tomorrow_start,
+        or_(
+            false(),
+            *[
+                and_(
+                    Chore.household_id.in_(ids),
+                    ChoreOccurrence.completed_at >= day_start,
+                    ChoreOccurrence.completed_at < day_end,
+                    ChoreOccurrence.scheduled_for < day_end,
+                )
+                for tz, ids in zones.items()
+                for day_start, day_end in [local_day_bounds(now, tz)]
+            ],
+        ),
     ]
     if assignee_clause is not None:
         done_filters.append(assignee_clause)

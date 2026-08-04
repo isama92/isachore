@@ -65,7 +65,7 @@ describe('History', () => {
         makeHistoryEntry({
           id: 7,
           title: 'Scrub the tub',
-          household: { id: 4, name: 'Beach House' },
+          household: { id: 4, name: 'Beach House', timezone: 'UTC' },
           completed_by: makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' }),
         }),
       ],
@@ -324,7 +324,7 @@ describe('History', () => {
           id: 8,
           title: 'Theirs',
           completed_by: jo,
-          household: { id: 2, name: 'Beach House' },
+          household: { id: 2, name: 'Beach House', timezone: 'UTC' },
         }),
       ],
       options: {

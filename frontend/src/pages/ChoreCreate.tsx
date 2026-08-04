@@ -128,6 +128,11 @@ export default function ChoreCreate() {
       </div>
     ) : null
 
+  // The chosen household's zone, which is what "today" means for this chore's start date.
+  // Undefined until the households load, and `todayISO` then falls back to the viewer's own
+  // zone - which is what the form used to do unconditionally.
+  const timezone = households.find((h) => h.id === householdId)?.timezone
+
   // Prefilled values when cloning; empty defaults otherwise. ChoreForm lazy-inits
   // from this and the form mounts only after households load, so clone values are
   // ready in time.
@@ -137,7 +142,7 @@ export default function ChoreCreate() {
     // `||`, not `??`: cloning an unscheduled chore carries '' (it has no start date), and
     // the field should be ready with today's date if the period is switched to a recurring
     // one. The form drops the value while the period stays unscheduled.
-    start_date: clone?.start_date || todayISO(),
+    start_date: clone?.start_date || todayISO(timezone),
     repeats: clone?.repeats ?? 'weekly',
     assignment_type: clone?.assignment_type ?? 'manual',
     turn_length: clone?.turn_length ?? 1,
@@ -196,6 +201,7 @@ export default function ChoreCreate() {
           <ChoreForm
             members={members}
             tags={tags}
+            timezone={timezone}
             initial={initial}
             submitLabel={t('choreCreate.submit')}
             cancelTo={routes.chores.list}

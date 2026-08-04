@@ -20,6 +20,13 @@ dependencies = [
     "qrcode>=7.4.2",
     "redis[hiredis]>=8.0.1",
     "sqlalchemy[asyncio]>=2.0.51,<2.1",
+    # zoneinfo reads the system tz database first and only falls back to this package, so it
+    # is insurance rather than the source. Worth owning explicitly all the same: every
+    # household carries an IANA zone now, so a base image that stopped shipping
+    # /usr/share/zoneinfo would turn every request into a 500 - and "the Dockerfiles own the
+    # toolchain versions" cuts both ways, since a Dependabot bump can change the base image
+    # without anyone here deciding to.
+    "tzdata>=2025.2",
     "uvicorn[standard]>=0.51.0",
 ]
 

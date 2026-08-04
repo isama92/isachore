@@ -1,4 +1,7 @@
+import logging
+from collections import defaultdict
 from typing import NamedTuple
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import HTTPException, status
 from sqlalchemy import ColumnElement, Select, func, insert, or_, select
@@ -13,6 +16,8 @@ from app.models import (
     UserStatus,
     household_members,
 )
+
+logger = logging.getLogger(__name__)
 
 # Whitelisted sort keys for the household tables and the members table. Literals
 # at the query-param layer make an unknown value a 422; the maps below turn a
@@ -146,6 +151,58 @@ def chore_scope(user_id: int, household_id: int | None) -> list[ColumnElement[bo
     if household_id is not None:
         scope.append(Chore.household_id == household_id)
     return scope
+
+
+def household_zone(name: str) -> ZoneInfo:
+    """A household's stored timezone as a `ZoneInfo`, falling back to UTC on a name Python
+    does not know.
+
+    `ZoneInfo` caches by name itself, so this adds no memoisation - only the fallback. That
+    fallback is deliberate and follows the same reasoning as keeping the household log's
+    `action` a plain string on the wire: this runs on read paths that span every household a
+    user belongs to, so raising here would take out My Chores, Statistics and History for
+    everyone in a household holding one bad row, with nothing on screen able to explain it.
+
+    Unreachable through the API, which validates the name against `available_timezones()` on
+    write, so getting here means an operator edited the row or the tz database dropped a name
+    a previous release accepted. UTC is the right floor for that: it is what the app did
+    before households had zones, so the household degrades to the old behaviour rather than
+    silently claiming to be somewhere else.
+    """
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        logger.warning("Household timezone %r is not a known zone; falling back to UTC", name)
+        return ZoneInfo("UTC")
+
+
+async def zones_in_scope(
+    session: AsyncSession,
+    user_id: int,
+    household_id: int | None = None,
+    min_role: HouseholdRole | None = None,
+) -> dict[ZoneInfo, list[int]]:
+    """The households the user can see, grouped by the zone each reckons its days in.
+
+    My Chores and Statistics both span every household at once but have to answer a
+    *per-household* question ("was this completed today?"), and today starts at a different
+    instant in each. Grouping is what lets one query still do it: the callers build an `or_`
+    of one day-window clause per zone rather than a single global window. A user's households
+    are nearly always in one zone, so that is nearly always an `or_` of one.
+
+    `household_id` and `min_role` mirror the caller's own scope so the grouping cannot include
+    a household the surrounding query excludes - a stats window keyed on a household the
+    deputy scope drops would widen nothing, but it would be a lie waiting to be relied on.
+    """
+    query = select(Household.id, Household.timezone).where(
+        Household.id.in_(member_household_ids(user_id, min_role))
+    )
+    if household_id is not None:
+        query = query.where(Household.id == household_id)
+    grouped: dict[ZoneInfo, list[int]] = defaultdict(list)
+    for row_id, name in (await session.execute(query)).all():
+        grouped[household_zone(name)].append(row_id)
+    return dict(grouped)
 
 
 def assignee_visibility(assignee_id: list[int] | None) -> ColumnElement[bool] | None:

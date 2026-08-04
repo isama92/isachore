@@ -66,7 +66,7 @@ export function makeLogEntry(overrides: Partial<LogEntry> = {}): LogEntry {
     id: 1,
     created_at: '2026-07-16T14:30:00Z',
     action: 'chore_created',
-    household: { id: 1, name: 'Test Household' },
+    household: { id: 1, name: 'Test Household', timezone: 'UTC' },
     actor: makeHouseholdMember(),
     target: null,
     chore_id: 5,
@@ -98,7 +98,7 @@ export function makeChore(overrides: Partial<Chore> = {}): Chore {
     repeat_interval: 1,
     weekdays: null,
     created_at: '2026-07-01T00:00:00Z',
-    household: { id: 1, name: 'Test Household' },
+    household: { id: 1, name: 'Test Household', timezone: 'UTC' },
     assignees: [],
     current_assignee: null,
     tags: [],
@@ -126,6 +126,10 @@ export function makeHousehold(overrides: Partial<Household> = {}): Household {
     id: 1,
     name: 'Test Household',
     admin_id: 1,
+    // UTC by default, mirroring the backend fixture: every existing date assertion in the
+    // suite was written against a UTC day, so any other default would silently re-date them.
+    // Timezone-specific cases override it.
+    timezone: 'UTC',
     created_at: '2026-01-01T00:00:00Z',
     deleted_at: null,
     member_count: 0,
@@ -186,7 +190,7 @@ export function makeHistoryEntry(overrides: Partial<HistoryEntry> = {}): History
     skipped: false,
     days_late: 0,
     completed_by: makeHouseholdMember(),
-    household: { id: 1, name: 'Test Household' },
+    household: { id: 1, name: 'Test Household', timezone: 'UTC' },
     ...overrides,
   }
 }
@@ -230,7 +234,7 @@ export function makeDueChore(overrides: Partial<DueChore> = {}): DueChore {
     // Defaults to no instructions, so the marker icon is opt-in per test: most rows are about
     // due state and would otherwise gain an extra button for every query to trip over.
     has_description: false,
-    household: { id: 1, name: 'Test Household' },
+    household: { id: 1, name: 'Test Household', timezone: 'UTC' },
     assignees: [],
     ...overrides,
   }
@@ -245,7 +249,7 @@ export function makeUnscheduledChore(overrides: Partial<UnscheduledChore> = {}):
     days_since_last_completion: 4,
     // See makeDueChore: opt-in, so the marker icon does not appear on every row by default.
     has_description: false,
-    household: { id: 1, name: 'Test Household' },
+    household: { id: 1, name: 'Test Household', timezone: 'UTC' },
     assignees: [],
     ...overrides,
   }

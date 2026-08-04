@@ -8,8 +8,10 @@ from app.api.v1.households import (
     HouseholdSortBy,
     MemberSortBy,
     SortDir,
+    apply_timezone_change,
     build_household_page,
     build_members_page,
+    commit_household_update,
     load_household_read,
     remove_member,
     set_household_admin,
@@ -77,7 +79,7 @@ async def create_household(
     # admin_id is required, and it must reference a member, so the creating admin
     # becomes the household's owner and first member (an organiser, as owners are).
     # They (or another admin) can transfer ownership once real members are added.
-    household = Household(name=payload.name, admin_id=admin.id)
+    household = Household(name=payload.name, admin_id=admin.id, timezone=payload.timezone)
     session.add(household)
     await session.flush()
     await add_member(session, household.id, admin.id, HouseholdRole.organiser)
@@ -99,7 +101,8 @@ async def update_household(
         household.name = payload.name
     if payload.admin_id is not None:
         await set_household_admin(session, household, payload.admin_id)
-    await session.commit()
+    await apply_timezone_change(session, household, payload.timezone)
+    await commit_household_update(session)
     return await load_household_read(session, household.id)
 
 

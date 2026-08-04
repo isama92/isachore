@@ -98,6 +98,18 @@ export type Tag = {
   color: string
 }
 
+// The household a chore, closure or log entry belongs to, as embedded in every
+// household-scoped payload (the backend's ChoreHouseholdRead). Five payloads carry it, so it
+// is named rather than repeated inline.
+export type ChoreHousehold = {
+  id: number
+  name: string
+  // The IANA zone this household reckons its days in. On the wire so a timestamp renders in
+  // the same zone the server judged it in - otherwise a slot stored at 22:00Z shows as "4 Aug"
+  // next to a server-computed "Due today" that means the 5th.
+  timezone: string
+}
+
 export type Chore = {
   id: number
   title: string
@@ -120,7 +132,7 @@ export type Chore = {
   created_at: string
   // The household the chore belongs to (fixed at creation). Drives the list's
   // household column/filter and the edit form's read-only household.
-  household: { id: number; name: string }
+  household: ChoreHousehold
   // The full pool of people the chore rotates between, in the data-minimised member shape
   // (no email): GET /chores/{id} is open to every role, so it must not ship one.
   assignees: HouseholdMember[]
@@ -155,7 +167,7 @@ export type HistoryEntry = {
   skipped: boolean
   days_late: number | null
   completed_by: HouseholdMember | null
-  household: { id: number; name: string }
+  household: ChoreHousehold
 }
 
 // Option lists for the History filters: GET /api/v1/completions/filters. Also reused by
@@ -209,7 +221,7 @@ export type LogEntry = {
   id: number
   created_at: string
   action: string
-  household: { id: number; name: string }
+  household: ChoreHousehold
   actor: HouseholdMember | null
   target: HouseholdMember | null
   chore_id: number | null
@@ -278,7 +290,7 @@ export type DueChore = {
   // marker icon on the row; the dialog fetches the chore itself on open, so a household's
   // descriptions never ride along on the landing page's payload.
   has_description: boolean
-  household: { id: number; name: string }
+  household: ChoreHousehold
   assignees: HouseholdMember[]
 }
 
@@ -301,7 +313,7 @@ export type UnscheduledChore = {
   // See DueChore: a flag, not the description. Not due state, so it does not breach the "no due
   // vocabulary in this view" rule above.
   has_description: boolean
-  household: { id: number; name: string }
+  household: ChoreHousehold
   assignees: HouseholdMember[]
 }
 
@@ -365,6 +377,9 @@ export type Household = {
   id: number
   name: string
   admin_id: number
+  // The IANA zone its chores are due in. Owner-editable; changing it re-dates the
+  // household's scheduled chores so they keep their local dates.
+  timezone: string
   created_at: string
   deleted_at: string | null
   member_count: number

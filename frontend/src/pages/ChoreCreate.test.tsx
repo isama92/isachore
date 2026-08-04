@@ -238,7 +238,12 @@ describe('ChoreCreate', () => {
     await user.click(screen.getByRole('button', { name: 'Add chore' }))
 
     await screen.findByText('chores-list')
-    expect(postBody(fetchMock)).toMatchObject({ repeats: 'daily', start_date: todayISO() })
+    // Today in the selected HOUSEHOLD's zone, not the viewer's: `start_date` is a calendar
+    // date the backend reads in that zone, so the two genuinely differ for part of every day.
+    expect(postBody(fetchMock)).toMatchObject({
+      repeats: 'daily',
+      start_date: todayISO(makeHousehold().timezone),
+    })
   })
 
   it('drops pinned weekdays when the period stops being weekly, keeping the interval', async () => {

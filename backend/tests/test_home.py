@@ -175,7 +175,7 @@ async def test_home_items_carry_household_and_assignees(
     client = await auth_client(me)
 
     item = (await client.get("/api/v1/home")).json()["items"][0]
-    assert item["household"] == {"id": household.id, "name": "Home Base"}
+    assert item["household"] == {"id": household.id, "name": "Home Base", "timezone": "UTC"}
     assert item["assignees"] == [{"id": anna.id, "first_name": "Anna", "last_name": "Aardvark"}]
     # Data minimisation: the member shape must not leak email.
     assert "email" not in item["assignees"][0]

@@ -49,7 +49,7 @@ class ChoreOccurrence(Base):
     and *analytical* ones (how much work got done, by whom, on time). A flag keeps every
     structural query right by construction, since a skipped row is still a closed row,
     and confines the work to the analytical ones. A third status would instead have
-    broken `_free_slot_from`, `uq_open_occurrence_per_chore`, `undo_completion`'s
+    broken `free_slot_from`, `uq_open_occurrence_per_chore`, `undo_completion`'s
     latest-closure test and the history list, several of them silently. See `skipped`
     below for the resulting contract.
     """
@@ -101,8 +101,8 @@ class ChoreOccurrence(Base):
     #     the latest. They must NEVER filter: a skipped row occupies its slot and sits on the
     #     timeline exactly like a completion, and excluding it produces a slot collision on
     #     uq_occurrence_chore_scheduled - a 409 that retrying can never clear. These are
-    #     `_free_slot_from` and `_reconcile_open_occurrence`'s `latest_done` (api/v1/chores.py),
-    #     and both queries in `undo_completion` (api/v1/completions.py).
+    #     `free_slot_from` (core/occurrences.py), `_reconcile_open_occurrence`'s `latest_done`
+    #     (api/v1/chores.py), and both queries in `undo_completion` (api/v1/completions.py).
     #   - *Analytical* reads ask how much work happened, by whom, on time. They must ALWAYS
     #     add `skipped.is_(False)`, or a skip is silently counted as work done.
     #
@@ -114,6 +114,14 @@ class ChoreOccurrence(Base):
     # stats' single pass) is neither, and filters per row instead.
     skipped: Mapped[bool] = mapped_column(Boolean, server_default=false(), default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # When the row last changed. An occurrence is no longer write-once - completing one
+    # stamps four columns, undoing a completion clears them again, and an edit can move
+    # `assignee_id` or re-date `scheduled_for` - so `created_at` alone stopped answering
+    # "is this what it was". Backfilled from `created_at` rather than the migration's clock,
+    # so a row nothing has touched reports the moment it was made.
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
     chore: Mapped["Chore"] = relationship(back_populates="occurrences")
     # Two FKs point at users, so each relationship names its own foreign key.

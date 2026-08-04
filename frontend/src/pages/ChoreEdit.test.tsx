@@ -31,7 +31,7 @@ const savedChore = makeChore({
   id: 7,
   title: 'Scrub the tub',
   description: 'Old notes',
-  household: { id: 4, name: 'Beach House' },
+  household: { id: 4, name: 'Beach House', timezone: 'UTC' },
   assignees: [makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })],
   tags: [makeTag({ id: 3, name: 'deep-clean' })],
 })
@@ -90,7 +90,7 @@ describe('ChoreEdit', () => {
       title: 'Water plants',
       assignment_type: 'alphabetical',
       turn_length: 3,
-      household: { id: 4, name: 'Beach House' },
+      household: { id: 4, name: 'Beach House', timezone: 'UTC' },
       assignees: [makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })],
     })
     mockFetch([
@@ -116,7 +116,7 @@ describe('ChoreEdit', () => {
       repeats: 'weekly',
       repeat_interval: 2,
       weekdays: [1, 4],
-      household: { id: 4, name: 'Beach House' },
+      household: { id: 4, name: 'Beach House', timezone: 'UTC' },
     })
     const fetchMock = mockFetch([
       { path: '/api/v1/chores/7', method: 'GET', body: pinned },
@@ -146,7 +146,7 @@ describe('ChoreEdit', () => {
       title: 'Sort the loft',
       repeats: 'manual',
       start_date: null,
-      household: { id: 4, name: 'Beach House' },
+      household: { id: 4, name: 'Beach House', timezone: 'UTC' },
     })
     const fetchMock = mockFetch([
       { path: '/api/v1/chores/7', method: 'GET', body: unscheduled },
@@ -170,7 +170,7 @@ describe('ChoreEdit', () => {
       title: 'Washing machine',
       repeats: 'weekly',
       weekdays: [1],
-      household: { id: 4, name: 'Beach House' },
+      household: { id: 4, name: 'Beach House', timezone: 'UTC' },
     })
     const fetchMock = mockFetch([
       { path: '/api/v1/chores/7', method: 'GET', body: pinned },
@@ -196,7 +196,7 @@ describe('ChoreEdit', () => {
       id: 7,
       title: 'Dishes',
       assignment_type: 'manual',
-      household: { id: 4, name: 'Beach House' },
+      household: { id: 4, name: 'Beach House', timezone: 'UTC' },
       assignees: [jo],
       current_assignee: jo,
     })
@@ -224,7 +224,7 @@ describe('ChoreEdit', () => {
       id: 7,
       title: 'Dishes',
       assignment_type: 'random',
-      household: { id: 4, name: 'Beach House' },
+      household: { id: 4, name: 'Beach House', timezone: 'UTC' },
       assignees: [jo, sam],
       current_assignee: jo,
     })
@@ -271,7 +271,7 @@ describe('ChoreEdit', () => {
           id: 7,
           title: 'Dishes',
           assignment_type: 'random',
-          household: { id: 4, name: 'Beach House' },
+          household: { id: 4, name: 'Beach House', timezone: 'UTC' },
           assignees: [],
           current_assignee: null,
         }),
@@ -300,7 +300,7 @@ describe('ChoreEdit', () => {
           id: 7,
           title: 'Dishes',
           assignment_type: 'manual',
-          household: { id: 4, name: 'Beach House' },
+          household: { id: 4, name: 'Beach House', timezone: 'UTC' },
           assignees: [jo],
           current_assignee: jo,
         }),
@@ -374,7 +374,7 @@ describe('clearing the current assignee', () => {
     id: 7,
     title: 'Dishes',
     assignment_type: 'manual',
-    household: { id: 4, name: 'Beach House' },
+    household: { id: 4, name: 'Beach House', timezone: 'UTC' },
     assignees: [jo, sam],
     current_assignee: jo,
   })
@@ -436,7 +436,7 @@ describe('clearing the current assignee', () => {
       id: 7,
       title: 'Dishes',
       assignment_type: 'random',
-      household: { id: 4, name: 'Beach House' },
+      household: { id: 4, name: 'Beach House', timezone: 'UTC' },
       assignees: [],
       current_assignee: null,
     })
@@ -470,7 +470,7 @@ describe('clearing the current assignee', () => {
       id: 7,
       title: 'Dishes',
       assignment_type: 'manual',
-      household: { id: 4, name: 'Beach House' },
+      household: { id: 4, name: 'Beach House', timezone: 'UTC' },
       assignees: [jo, sam],
       current_assignee: null,
     })

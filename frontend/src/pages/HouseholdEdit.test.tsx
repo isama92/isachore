@@ -341,7 +341,8 @@ describe('HouseholdEdit', () => {
     expect(await screen.findByText('households-list')).toBeInTheDocument()
     expect(patched).toContain('/api/v1/households/5')
     const patch = fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')
-    expect(JSON.parse(String(patch![1]?.body))).toEqual({ name: 'New' })
+    // The stored zone rides along unchanged; the fixture household is on UTC.
+    expect(JSON.parse(String(patch![1]?.body))).toEqual({ name: 'New', timezone: 'UTC' })
   })
 
   it('removes a member after confirmation', async () => {

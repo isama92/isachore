@@ -8,7 +8,7 @@ import { api, ApiError } from '../../lib/api'
 import { endpoints } from '../../lib/endpoints'
 import { routes } from '../../lib/routes'
 import type { Household } from '../../lib/types'
-import { HouseholdForm } from '@/components/households/HouseholdForm'
+import { HouseholdForm, type HouseholdFormValues } from '@/components/households/HouseholdForm'
 import { HouseholdMembersTable } from '@/components/households/HouseholdMembersTable'
 import { HouseholdOwnerSelect } from '@/components/households/HouseholdOwnerSelect'
 import {
@@ -53,8 +53,8 @@ export default function AdminHouseholdEdit() {
     }
   }, [id, t])
 
-  async function save(name: string) {
-    await api.patch<Household>(endpoints.adminHouseholds.byId(id), { name })
+  async function save({ name, timezone }: HouseholdFormValues) {
+    await api.patch<Household>(endpoints.adminHouseholds.byId(id), { name, timezone })
     toast.success(t('households.toastUpdated'))
     await navigate(routes.admin.households.list)
   }
@@ -114,6 +114,7 @@ export default function AdminHouseholdEdit() {
           {error && <p className="mb-4 text-[13px] font-bold text-danger">{error}</p>}
           <HouseholdForm
             initialName={household.name}
+            initialTimezone={household.timezone}
             submitLabel={t('common.save')}
             cancelTo={routes.admin.households.list}
             onSubmit={save}

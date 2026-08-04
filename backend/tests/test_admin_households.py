@@ -93,7 +93,7 @@ async def test_admin_create_household_owns_and_joins(
     admin = await make_user(email="admin@example.com", is_admin=True)
     client = await auth_client(admin)
 
-    resp = await client.post("/api/v1/admin/households", json={"name": "HQ"})
+    resp = await client.post("/api/v1/admin/households", json={"name": "HQ", "timezone": "UTC"})
     assert resp.status_code == 201
     body = resp.json()
     assert body["name"] == "HQ"
@@ -108,7 +108,7 @@ async def test_admin_create_as_member_forbidden(
 ) -> None:
     member = await make_user(email="member@example.com")
     client = await auth_client(member)
-    resp = await client.post("/api/v1/admin/households", json={"name": "Nope"})
+    resp = await client.post("/api/v1/admin/households", json={"name": "Nope", "timezone": "UTC"})
     assert resp.status_code == 403
 
 

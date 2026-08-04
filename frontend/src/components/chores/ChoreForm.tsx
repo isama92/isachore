@@ -93,6 +93,9 @@ type Props = {
   // swaps these when the household select changes.
   members: HouseholdMember[]
   tags: Tag[]
+  // The chosen household's IANA zone. `start_date` is a calendar date the backend reads in
+  // it, so "today" has to mean the household's today, not the viewer's.
+  timezone?: string
   initial: ChoreFormValues
   submitLabel: string
   cancelTo: string
@@ -115,6 +118,7 @@ type Props = {
 export function ChoreForm({
   members,
   tags,
+  timezone,
   initial,
   submitLabel,
   cancelTo,
@@ -300,7 +304,9 @@ export function ChoreForm({
                 // date). Default it to today so the field can never render blank and the
                 // payload can never be rejected for a missing date.
                 start_date:
-                  repeats !== 'manual' && !values.start_date ? todayISO() : values.start_date,
+                  repeats !== 'manual' && !values.start_date
+                    ? todayISO(timezone)
+                    : values.start_date,
               })
             }}
           >

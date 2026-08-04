@@ -72,12 +72,24 @@ export function repeatLabel(
   return t('options.repeatOnDays', { schedule, days: days.join(', ') })
 }
 
-// Today's date as a local (timezone-safe) "YYYY-MM-DD" string.
-export function todayISO(): string {
-  const d = new Date()
-  const month = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${d.getFullYear()}-${month}-${day}`
+// Today's date as a "YYYY-MM-DD" string, in `timeZone` when given and the viewer's own zone
+// otherwise. Assembled from parts rather than sliced off an ISO string, which would be UTC
+// and so wrong for half of every day.
+//
+// The household's zone is what callers should pass: `start_date` is a calendar date the
+// backend interprets in that zone, so prefilling a chore form with the viewer's "today" dates
+// it a day out for anyone away from home - and that prefill can trigger a 409 when the
+// recomputed slot lands on an occurrence the chore has already completed.
+export function todayISO(timeZone?: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((p) => p.type === type)?.value ?? ''
+  return `${part('year')}-${part('month')}-${part('day')}`
 }
 
 // Local (timezone-safe) formatting of an ISO date-only string like "2026-07-16",
@@ -93,9 +105,13 @@ export function formatDate(iso: string): string {
 }
 
 // Formatting of a full ISO timestamp like "2026-07-16T14:30:00Z" as date + time
-// in the active language's locale, rendered in the viewer's timezone. Used by the
-// History view, where several chores can be completed on the same day.
-export function formatDateTime(iso: string): string {
+// in the active language's locale. Used by the History view, where several chores can be
+// completed on the same day.
+//
+// `timeZone` is the IANA zone to render in; pass the row's household zone so "16 Jul, 14:30"
+// is the time the household saw, and so it agrees with the server-computed `days_late`
+// beside it. Omitted, it falls back to the viewer's own zone.
+export function formatDateTime(iso: string, timeZone?: string): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return iso
   return date.toLocaleString(localeFor(i18n.language), {
@@ -104,5 +120,6 @@ export function formatDateTime(iso: string): string {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    timeZone,
   })
 }
