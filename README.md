@@ -682,9 +682,4 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
 
 ### Todo
 
-- [x] Per-household timezone, so due dates follow the household's day rather than UTC
-- [x] Snapshot a closure's timezone onto the occurrence, so moving a household no longer
-      re-measures how late its past chores were. Not by shifting `completed_at`, which is the
-      instant the work happened and is load-bearing as an absolute (stats windows, the
-      latest-closure test, "done today"); `chore_occurrences.title` is the precedent.
 - [ ] Live updates when a housemate completes a chore (websocket)
