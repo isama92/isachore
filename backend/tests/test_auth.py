@@ -5,6 +5,7 @@ from httpx import AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.app_settings import get_app_settings
 from app.core.security import generate_token, hash_token
 from app.models import AuditAction, AuditEvent, AuthToken, User, UserStatus
 
@@ -316,3 +317,46 @@ async def test_stop_impersonating_expired_admin_token(
     assert event is not None
     assert event.target_user_id == member.id
     assert event.detail == "admin session expired"
+
+
+async def test_me_reports_whether_the_server_asks_for_confirmation(
+    db_session: AsyncSession,
+    make_user: Callable[..., Awaitable[User]],
+    auth_client: Callable[[User], Awaitable[AsyncClient]],
+    smtp: list,
+) -> None:
+    """The Profile page shows its confirmation badge only when the server asks for one, and
+    this is where it learns that: the flag is what tells a client how to read the
+    `confirmed_at` in the same payload. A null there means nothing on a server that never
+    asks, and "not proved" on one that does."""
+    user = await make_user(email="member@example.com")
+    client = await auth_client(user)
+
+    assert (await client.get("/api/v1/auth/me")).json()["email_confirmation_required"] is False
+
+    app_settings = await get_app_settings(db_session)
+    app_settings.require_confirmation = True
+    await db_session.commit()
+
+    assert (await client.get("/api/v1/auth/me")).json()["email_confirmation_required"] is True
+
+
+async def test_the_login_response_carries_the_confirmation_flag_too(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    make_user: Callable[..., Awaitable[User]],
+    smtp: list,
+) -> None:
+    # Login sets the client's auth state directly rather than refetching, so a flag missing
+    # here would leave the first screen after signing in reading `confirmed_at` wrongly.
+    await make_user(email="member@example.com", password="password12345")
+    app_settings = await get_app_settings(db_session)
+    app_settings.require_confirmation = True
+    await db_session.commit()
+
+    resp = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "member@example.com", "password": "password12345"},
+    )
+
+    assert resp.json()["user"]["email_confirmation_required"] is True

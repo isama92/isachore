@@ -62,9 +62,12 @@ export function makeMe(overrides: Partial<Me> = {}): Me {
   const {
     impersonating = false,
     memberships = [{ household_id: 1, role: 'organiser' as const, owned: true }],
+    // Off by default, which is the server default and keeps the Profile confirmation badge
+    // out of tests that are not about it.
+    email_confirmation_required = false,
     ...rest
   } = overrides
-  return { ...makeUser(rest), impersonating, memberships }
+  return { ...makeUser(rest), impersonating, memberships, email_confirmation_required }
 }
 
 export function makeLogEntry(overrides: Partial<LogEntry> = {}): LogEntry {

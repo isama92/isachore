@@ -239,16 +239,18 @@ How accounts match up:
   (`python -m app.cli init` also clears it, but only for the account it recovers
   and only while no active admin exists, so it is not the tool for this.)
 - An account still *waiting confirmation* becomes active on its first SSO
-  sign-in: the provider has vouched for the address, which is what the
-  confirmation email was there to prove. A *deactivated* account is always
-  refused.
-- **Email verification is only required when you require it.** With
-  **Require user confirmation** on, the provider must report the address as
-  verified; with it off, the check is skipped. Worth knowing if you turn it off:
-  the local path still needs an admin to set a password, so with the check
-  skipped the SSO path is the more permissive of the two, and an account left
-  *waiting confirmation* from when the setting was on can then be claimed and
-  activated on an unverified address.
+  sign-in, and its outstanding confirmation link is revoked with it. Note what
+  that stands on: the emailed link proves the mailbox, while a provider sign-in
+  proves the directory account an admin pointed at that address, so this is your
+  directory being trusted rather than the address being proved. The account is
+  marked confirmed either way. A *deactivated* account is always refused.
+- **Whether an address is verified is isachore's own question.** It is answered by
+  the account's own confirmation (shown on **Profile** as a badge beside the
+  address, where the server asks for confirmation at all), not by the provider's
+  `email_verified` claim, which is not read. Providers disagree too much about it
+  to gate on: Authentik omits it by default, others always send true. What stands
+  in for it is that admins create the accounts, so an address only matches
+  somebody an admin already added.
 
 **Two-factor authentication does not apply to SSO sign-ins.** The provider owns
 authentication, including whatever MFA it enforces, so isachore does not ask for

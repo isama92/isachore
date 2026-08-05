@@ -68,7 +68,6 @@ def stub_complete(
     *,
     subject: str = "subject-1",
     email: str | None = "member@example.com",
-    email_verified: bool = True,
     issuer: str = ISSUER,
     error: str | None = None,
 ) -> dict:
@@ -79,9 +78,7 @@ def stub_complete(
         seen.update(code=code, code_verifier=code_verifier, nonce=nonce)
         if error is not None:
             raise OidcError(error)
-        return OidcIdentity(
-            subject=subject, issuer=issuer, email=email, email_verified=email_verified
-        )
+        return OidcIdentity(subject=subject, issuer=issuer, email=email)
 
     monkeypatch.setattr(oidc_core, "complete", _complete)
     return seen
@@ -549,34 +546,6 @@ async def test_callback_refuses_when_the_provider_sends_no_email(
     assert [e.detail for e in events] == ["oidc no email claim"]
 
 
-async def test_a_missing_email_is_reported_as_such_even_when_confirmation_is_required(
-    client: AsyncClient,
-    db_session: AsyncSession,
-    oidc: str,
-    smtp: list,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The ordering the guard buys: the no-email check has to come BEFORE the email_verified
-    one.
-
-    Reversed, a provider that sent no address at all would be met with "your email address has
-    not been verified with your sign-in provider" - advice about a claim it never sent, which
-    sends whoever reads it to the wrong place entirely.
-    """
-    app_settings = await get_app_settings(db_session)
-    app_settings.require_confirmation = True
-    await db_session.commit()
-
-    stub_begin(monkeypatch)
-    stub_complete(monkeypatch, email=None, email_verified=False)
-    state = await start_flow(client)
-
-    resp = await callback(client, state)
-
-    assert sso_error(resp) == "no_account"
-    assert sso_error(resp) != "email_unverified"
-
-
 async def test_callback_refuses_a_disabled_account(
     client: AsyncClient, make_user: Login, oidc: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -908,115 +877,6 @@ async def test_callback_is_404_without_a_provider(client: AsyncClient) -> None:
     assert resp.status_code == 404
 
 
-# --- the conditional email_verified rule --------------------------------
-#
-# Both directions, because a one-sided test passes with the condition inverted: the
-# refusal case alone would still pass if the code ignored require_confirmation and always
-# refused, and the allow case alone would pass if it never checked at all.
-
-
-async def test_unverified_email_is_refused_when_confirmation_is_required(
-    client: AsyncClient,
-    db_session: AsyncSession,
-    make_user: Login,
-    oidc: str,
-    smtp: list,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    await make_user(email="member@example.com")
-    app_settings = await get_app_settings(db_session)
-    app_settings.require_confirmation = True
-    await db_session.commit()
-
-    stub_begin(monkeypatch)
-    stub_complete(monkeypatch, email="member@example.com", email_verified=False)
-    state = await start_flow(client)
-
-    resp = await callback(client, state)
-
-    assert sso_error(resp) == "email_unverified"
-    assert client.cookies.get("isachore_token") is None
-
-
-async def test_unverified_email_is_accepted_when_confirmation_is_not_required(
-    client: AsyncClient,
-    db_session: AsyncSession,
-    make_user: Login,
-    oidc: str,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """With confirmation off, the server has said it does not care about verified
-    addresses, so SSO must not be stricter than every other way into the same account."""
-    user = await make_user(email="member@example.com")
-    app_settings = await get_app_settings(db_session)
-    assert app_settings.require_confirmation is False
-
-    stub_begin(monkeypatch)
-    stub_complete(monkeypatch, email="member@example.com", email_verified=False)
-    state = await start_flow(client)
-
-    resp = await callback(client, state)
-
-    assert sso_error(resp) is None
-    assert client.cookies.get("isachore_token")
-    await db_session.refresh(user)
-    assert user.oidc_subject == "subject-1"
-
-
-async def test_verified_email_is_accepted_when_confirmation_is_required(
-    client: AsyncClient,
-    db_session: AsyncSession,
-    make_user: Login,
-    oidc: str,
-    smtp: list,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The other half of the refusal above: the rule is about the claim, not the setting."""
-    await make_user(email="member@example.com")
-    app_settings = await get_app_settings(db_session)
-    app_settings.require_confirmation = True
-    await db_session.commit()
-
-    stub_begin(monkeypatch)
-    stub_complete(monkeypatch, email="member@example.com", email_verified=True)
-    state = await start_flow(client)
-
-    resp = await callback(client, state)
-
-    assert sso_error(resp) is None
-    assert client.cookies.get("isachore_token")
-
-
-async def test_the_verified_rule_is_skipped_for_an_already_linked_account(
-    client: AsyncClient,
-    db_session: AsyncSession,
-    make_user: Login,
-    oidc: str,
-    smtp: list,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Email verification gates *linking*, not every sign-in.
-
-    Once the subject is linked the address is not consulted again, so a provider that
-    later stops sending email_verified cannot lock an existing user out.
-    """
-    user = await make_user(email="member@example.com")
-    user.oidc_subject = "subject-1"
-    user.oidc_issuer = ISSUER
-    app_settings = await get_app_settings(db_session)
-    app_settings.require_confirmation = True
-    await db_session.commit()
-
-    stub_begin(monkeypatch)
-    stub_complete(monkeypatch, subject="subject-1", email_verified=False)
-    state = await start_flow(client)
-
-    resp = await callback(client, state)
-
-    assert sso_error(resp) is None
-    assert client.cookies.get("isachore_token")
-
-
 # --- throttling ---------------------------------------------------------
 
 
@@ -1139,7 +999,6 @@ def make_id_token(key: RSAKey, **overrides) -> str:
         "iat": now,
         "nonce": "the-nonce",
         "email": "member@example.com",
-        "email_verified": True,
     }
     claims.update(overrides)
     return jwt.encode({"alg": "RS256", "kid": key.kid}, claims, key)
@@ -1257,7 +1116,6 @@ async def test_an_unsigned_token_is_rejected_even_if_the_provider_advertises_non
             "iat": now,
             "nonce": "the-nonce",
             "email": "member@example.com",
-            "email_verified": True,
         },
         # joserfc needs a key object even for `none`; the value is unused in the signature.
         signing_key,
@@ -1292,7 +1150,6 @@ async def test_a_symmetric_signature_is_rejected_even_if_advertised(
             "iat": now,
             "nonce": "the-nonce",
             "email": "member@example.com",
-            "email_verified": True,
         },
         OctKey.import_key("not-a-real-secret"),
     )
@@ -1700,49 +1557,53 @@ async def test_no_userinfo_endpoint_is_not_an_error(oidc: str) -> None:
 
 
 def test_userinfo_wins_over_the_id_token(oidc: str) -> None:
-    """The precedence that decides the linking rule, stated directly.
+    """The precedence that picks the account a first sign-in links to.
 
     Providers that keep the id_token minimal send email only from userinfo, so preferring the
     token would break them outright. It does mean an unsigned body overrides a signed claim,
     which is sound only because _fetch_userinfo refuses any body whose `sub` disagrees.
     """
     identity = oidc_core.build_identity(
-        {"sub": "subject-1", "email": "stale@example.com", "email_verified": False},
-        {"sub": "subject-1", "email": "current@example.com", "email_verified": True},
+        {"sub": "subject-1", "email": "stale@example.com"},
+        {"sub": "subject-1", "email": "current@example.com"},
         issuer=ISSUER,
     )
 
     assert identity.email == "current@example.com"
-    assert identity.email_verified is True
-
-
-def test_a_verdict_is_never_applied_to_the_other_sources_address(oidc: str) -> None:
-    """Both fields come from the same mapping, chosen on whether userinfo has an address.
-
-    Reading them independently is the subtle bug: a provider whose userinfo sends `email` but
-    omits `email_verified`, while the ID token sends both, would pair userinfo's address with
-    the token's `true` - a verdict about a *different* address, and the one input the linking
-    rule trusts. So userinfo's address must arrive unverified here, not inherit the token's.
-    """
-    identity = oidc_core.build_identity(
-        {"sub": "subject-1", "email": "known-good@example.com", "email_verified": True},
-        {"sub": "subject-1", "email": "self-set@example.com"},
-        issuer=ISSUER,
-    )
-
-    assert identity.email == "self-set@example.com"
-    assert identity.email_verified is False
 
 
 def test_the_id_token_fills_the_gaps_userinfo_leaves(oidc: str) -> None:
     identity = oidc_core.build_identity(
-        {"sub": "subject-1", "email": "from-token@example.com", "email_verified": True},
+        {"sub": "subject-1", "email": "from-token@example.com"},
         {"sub": "subject-1"},
         issuer=ISSUER,
     )
 
     assert identity.email == "from-token@example.com"
-    assert identity.email_verified is True
+
+
+@pytest.mark.parametrize(
+    "verified",
+    [
+        # Absent is Authentik's default scope mapping, and the shape that used to refuse a
+        # correctly configured provider. The other two are what other providers send.
+        {},
+        {"email_verified": False},
+        {"email_verified": "no"},
+        {"email_verified": True},
+    ],
+)
+def test_the_verified_claim_is_ignored_wherever_it_appears(oidc: str, verified: dict) -> None:
+    """`build_identity` is the only place the raw claim mappings are read, so it is the only
+    place a per-variant test of "the claim is not consulted" means anything."""
+    identity = oidc_core.build_identity(
+        {"sub": "subject-1", "email": "jo@example.com", **verified},
+        {"sub": "subject-1", **verified},
+        issuer=ISSUER,
+    )
+
+    assert identity.email == "jo@example.com"
+    assert not hasattr(identity, "email_verified")
 
 
 def test_an_address_is_normalised_the_way_the_column_stores_it(oidc: str) -> None:
@@ -1759,36 +1620,6 @@ def test_a_missing_email_is_none_rather_than_empty(oidc: str) -> None:
     identity = oidc_core.build_identity({"sub": "subject-1"}, {}, issuer=ISSUER)
 
     assert identity.email is None
-    assert identity.email_verified is False
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        (True, True),
-        (False, False),
-        ("true", True),
-        ("TRUE", True),
-        (" yes ", True),
-        ("1", True),
-        ("false", False),
-        ("0", False),
-        ("", False),
-        (None, False),
-        (1, False),
-    ],
-)
-def test_a_boolean_ish_verified_claim_is_read_leniently_but_fails_closed(
-    oidc: str, value: object, expected: bool
-) -> None:
-    """`email_verified` is specified as a boolean and not always sent as one, so a provider
-    that stringifies it must not read as unverified - that would be a silent refusal nobody
-    could diagnose. Anything unrecognised stays false, which is the fail-closed direction."""
-    identity = oidc_core.build_identity(
-        {"sub": "subject-1", "email": "jo@example.com", "email_verified": value}, {}, issuer=ISSUER
-    )
-
-    assert identity.email_verified is expected
 
 
 # --- begin() and complete(), with the OAuth2 client stubbed ---------------
@@ -1872,7 +1703,7 @@ async def test_complete_returns_the_identity(
     stub_key_set(monkeypatch, signing_key)
     client = _FakeOAuthClient(
         token={"id_token": make_id_token(signing_key), "access_token": "at"},
-        userinfo={"sub": "subject-1", "email": "from-userinfo@example.com", "email_verified": True},
+        userinfo={"sub": "subject-1", "email": "from-userinfo@example.com"},
     )
     stub_oauth_client(monkeypatch, client)
 
@@ -1883,7 +1714,6 @@ async def test_complete_returns_the_identity(
     assert identity.subject == "subject-1"
     assert identity.issuer == ISSUER
     assert identity.email == "from-userinfo@example.com"
-    assert identity.email_verified is True
     # The verifier and the redirect uri both go to the token endpoint, which is what makes
     # the exchange unusable to anyone who has only the code.
     assert client.fetch_kwargs["code"] == "the-code"
@@ -2193,3 +2023,69 @@ async def test_a_verification_failure_says_what_it_saw(
     assert "kid=not-ours" in message
     assert f"provider keys: {signing_key.kid}" in message
     assert "algorithms tried: RS256" in message
+
+
+# --- verification is isachore's own question -----------------------------
+
+
+async def test_the_providers_view_of_the_address_does_not_gate_the_sign_in(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    make_user: Login,
+    oidc: str,
+    smtp: list,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Whether an address is verified is answered by `users.confirmed_at`, not by the
+    provider, and that holds with confirmation switched on - the setting that used to be half
+    of this decision.
+
+    Deliberately runs with confirmation ON, since that is the only configuration a provider
+    gate could ever have fired in. Reinstating one would not merely fail this: `OidcIdentity`
+    has no such field, so reading it is an AttributeError.
+    """
+    user = await make_user(email="member@example.com")
+    app_settings = await get_app_settings(db_session)
+    app_settings.require_confirmation = True
+    await db_session.commit()
+
+    stub_begin(monkeypatch)
+    stub_complete(monkeypatch)
+    state = await start_flow(client)
+
+    resp = await callback(client, state)
+
+    assert sso_error(resp) is None
+    assert client.cookies.get("isachore_token")
+    await db_session.refresh(user)
+    assert user.oidc_subject == "subject-1"
+
+
+async def test_an_unconfirmed_account_can_still_sign_in_through_the_provider(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    make_user: Login,
+    oidc: str,
+    smtp: list,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`confirmed_at` records whether the address was proved; it does not gate signing in.
+
+    An active account that never confirmed is exactly the state the Profile badge exists to
+    show, so it has to be reachable rather than refused at the door.
+    """
+    user = await make_user(email="member@example.com")
+    # Nulled after the fact: `make_user` substitutes now() for an active user, so passing
+    # confirmed_at=None is indistinguishable from omitting it and cannot express this edge.
+    user.confirmed_at = None
+    app_settings = await get_app_settings(db_session)
+    app_settings.require_confirmation = True
+    await db_session.commit()
+
+    stub_begin(monkeypatch)
+    stub_complete(monkeypatch)
+    state = await start_flow(client)
+
+    assert sso_error(await callback(client, state)) is None
+    await db_session.refresh(user)
+    assert user.confirmed_at is None

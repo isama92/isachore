@@ -13,6 +13,7 @@ from app.api.deps import (
     get_request_token,
     get_user_by_token,
 )
+from app.core.app_settings import get_app_settings
 from app.core.audit import record_event
 from app.core.config import settings
 from app.core.crypto import crypto_configured
@@ -130,18 +131,28 @@ async def open_session(
 
 async def _me_read(session: SessionDep, user: User, *, impersonating: bool = False) -> MeRead:
     """The signed-in user as every endpoint that hands one back reports them: with their
-    household memberships.
+    household memberships, and whether this server asks for email confirmation.
 
     Login, the second 2FA step and /auth/me all go through this so a client can never hold
     a session whose roles are missing. The sidebar decides what to show from `memberships`,
     so a login response without them would render the minimal nav until the next reload -
-    and it is the login path, not the reload, that most users see first."""
+    and it is the login path, not the reload, that most users see first. The confirmation
+    flag rides along for the same reason in miniature: Profile reads it against the
+    `confirmed_at` in this same payload, so arriving separately would let the two disagree."""
     memberships = [
         MembershipRead(household_id=m.household_id, role=m.role, owned=m.owned)
         for m in await memberships_for(session, user.id)
     ]
+    # One primary-key lookup on a single-row table, per call. `session.get` consults the
+    # identity map first, but nothing else on these three paths loads that row, so in
+    # practice it is a SELECT rather than a hit - cheap, but not free.
+    app_settings = await get_app_settings(session)
     return MeRead.model_validate(user).model_copy(
-        update={"impersonating": impersonating, "memberships": memberships}
+        update={
+            "impersonating": impersonating,
+            "memberships": memberships,
+            "email_confirmation_required": app_settings.require_confirmation,
+        }
     )
 
 

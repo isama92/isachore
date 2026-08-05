@@ -15,6 +15,7 @@ import { fullName, initials } from '../lib/user'
 import type { User } from '../lib/types'
 import { cn } from '@/lib/utils'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -31,7 +32,7 @@ import {
 
 // The section ids, in page order, that the side submenu links to and the
 // scroll-spy tracks. Module-scoped so it is a stable IntersectionObserver input.
-const SECTION_IDS = ['photo', 'name', 'appearance', 'security'] as const
+const SECTION_IDS = ['photo', 'personal', 'appearance', 'security'] as const
 
 // The cap this page enforces and advertises, mirroring the default of
 // settings.avatar_max_bytes (backend/app/core/config.py) so the hint and the
@@ -45,7 +46,7 @@ const AVATAR_MAX_MB = 5
 const AVATAR_MAX_BYTES = AVATAR_MAX_MB * 1024 * 1024
 
 export default function Profile() {
-  const { user, refresh } = useAuth()
+  const { user, refresh, emailConfirmationRequired } = useAuth()
   const { t } = useTranslation()
   const { theme, setTheme, accent, setAccent } = useTheme()
   const { language, setLanguage } = useLanguage()
@@ -254,7 +255,7 @@ export default function Profile() {
           <ul className="sticky top-8 flex w-44 flex-col gap-1">
             {[
               { id: 'photo', label: t('profile.photo') },
-              { id: 'name', label: t('profile.nameHeading') },
+              { id: 'personal', label: t('profile.personalHeading') },
               { id: 'appearance', label: t('profile.appearance') },
               { id: 'security', label: t('profile.securityHeading') },
             ].map((item) => (
@@ -329,11 +330,43 @@ export default function Profile() {
             {avatarError && <p className="mt-4 text-[13px] font-bold text-danger">{avatarError}</p>}
           </section>
 
-          {/* Name */}
-          <section id="name" className="scroll-mt-20 rounded-2xl border border-line bg-card p-6">
+          {/* Personal data: the address, read-only, then the editable name. */}
+          <section
+            id="personal"
+            className="scroll-mt-20 rounded-2xl border border-line bg-card p-6"
+          >
             <h2 className="mb-4 font-display text-lg font-bold tracking-tight">
-              {t('profile.nameHeading')}
+              {t('profile.personalHeading')}
             </h2>
+
+            {/* Read-only, and outside the form below: the address identifies the account and
+                is an admin's to change, so it is shown rather than edited. */}
+            <div className="mb-6 flex flex-col gap-1.5">
+              <Label asChild>
+                <span id="profile-email-label">{t('profile.emailLabel')}</span>
+              </Label>
+              {/* aria-labelledby rather than relying on adjacency: there is no control here
+                  for a <label for> to point at, so without it a screen reader reads the
+                  address with no idea what it is. */}
+              <div
+                className="flex flex-wrap items-center gap-2.5"
+                role="group"
+                aria-labelledby="profile-email-label"
+              >
+                <span className="text-sm font-semibold break-all">{user.email}</span>
+                {/* Only where the server asks for confirmation. Everywhere else a null
+                    `confirmed_at` means nothing was ever asked of this person, so a badge
+                    either way would be reporting on a process that does not run. */}
+                {emailConfirmationRequired && (
+                  <Badge variant={user.confirmed_at ? 'default' : 'destructive'}>
+                    {user.confirmed_at
+                      ? t('profile.emailConfirmed')
+                      : t('profile.emailNotConfirmed')}
+                  </Badge>
+                )}
+              </div>
+            </div>
+
             <form onSubmit={(e) => void onNameSubmit(e)} className="flex flex-col gap-4">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="flex flex-col gap-1.5">

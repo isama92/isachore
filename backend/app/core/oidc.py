@@ -121,7 +121,6 @@ class OidcIdentity:
     subject: str
     issuer: str
     email: str | None
-    email_verified: bool
 
 
 def oidc_configured() -> bool:
@@ -292,21 +291,6 @@ async def begin(*, state: str) -> tuple[str, str, str]:
     return url, nonce, code_verifier
 
 
-def _claim_is_true(value: Any) -> bool:
-    """Whether a boolean-ish claim is affirmatively true.
-
-    ``email_verified`` is specified as a boolean but is not always sent as one, so a
-    provider that stringifies it should not be read as "unverified" - that would be a
-    silent refusal an operator could not diagnose. Anything unrecognised stays false,
-    which is the fail-closed direction.
-    """
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() in {"true", "1", "yes"}
-    return False
-
-
 def describe_token(id_token: str) -> str:
     """How a token was put together, for a log line when it will not verify.
 
@@ -355,20 +339,24 @@ def build_identity(
 ) -> OidcIdentity:
     """Combine the verified ID token claims with the userinfo body into an identity.
 
-    Its own function rather than four lines inside ``complete`` because the precedence it
-    encodes decides who gets in: `email` picks the local account a first sign-in links to,
-    and `email_verified` decides whether that link is allowed at all. A pure function is one
-    a test can state that rule against directly, instead of reaching it through a stubbed
-    token exchange.
+    Its own function rather than three lines inside ``complete`` because the one thing it
+    decides matters: `email` picks the local account a first sign-in links to. A pure
+    function is one a test can state that rule against directly, instead of reaching it
+    through a stubbed token exchange.
     """
-    # Both fields come from the SAME mapping, chosen by whether userinfo carries an address
-    # at all. Reading them independently would let one source's verdict be applied to the
-    # other's address: a provider whose userinfo sends `email` but omits `email_verified`,
-    # while the ID token sends both, would otherwise pair userinfo's address with the token's
-    # `true` - a verdict about a different address entirely, which is the one input the
-    # linking rule trusts.
-    source = userinfo if userinfo.get("email") else claims
-    email = source.get("email")
+    # userinfo wins where it carries an address, the id_token fills in otherwise. Providers
+    # that keep the id_token minimal send email only from userinfo, so preferring the token
+    # would break them outright.
+    #
+    # This does let an *unsigned* body decide which local account a first sign-in links to,
+    # which is sound only because of what stands behind it: the response came from the
+    # provider's own endpoint over TLS, presented with an access token obtained moments
+    # earlier, and `_fetch_userinfo` refuses any body whose `sub` disagrees with the verified
+    # token. Weaken any of those and this precedence needs revisiting. It also means a second
+    # identity field read from these two mappings could not simply follow suit: two fields
+    # taken independently could pair one source's answer with the other's address, so a
+    # second one has to be selected per source rather than per field.
+    email = userinfo.get("email") or claims.get("email")
     return OidcIdentity(
         subject=str(claims["sub"]),
         issuer=issuer,
@@ -376,7 +364,6 @@ def build_identity(
         # (`NormalisedEmail` in schemas/user.py does the same on the way in), so a provider
         # sending "Jo@Example.com" still finds jo@example.com.
         email=str(email).strip().lower() if email else None,
-        email_verified=_claim_is_true(source.get("email_verified")),
     )
 
 
@@ -557,15 +544,4 @@ async def complete(*, code: str, code_verifier: str, nonce: str) -> OidcIdentity
         subject = str(claims["sub"])
         userinfo = await _fetch_userinfo(client, metadata, subject)
 
-    # userinfo is preferred as a whole when it carries an address, the id_token used otherwise
-    # - see build_identity for why the choice is per source rather than per field. Authentik
-    # sends email in both; providers that keep the id_token minimal send it only here, so
-    # ignoring userinfo would break those outright.
-    #
-    # Worth being explicit that this lets an *unsigned* body override a *signed* claim,
-    # including `email_verified`, which decides the linking rule. That is sound only because
-    # of the two things above it: the response came from the provider's own endpoint over
-    # TLS, presented with an access token we just obtained, and `_fetch_userinfo` refuses any
-    # body whose `sub` does not match the token's. Weaken either and this precedence has to
-    # be revisited.
     return build_identity(claims, userinfo, issuer=str(metadata["issuer"]))

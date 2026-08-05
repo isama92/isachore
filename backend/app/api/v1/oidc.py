@@ -18,7 +18,7 @@ both answer with a redirect, which is not incidental:
   translated message.
 
 The refusal codes are deliberately coarse. A visitor learns whether *they* need to do
-something ("no account here", "your email is not verified") and nothing about anyone
+something ("no account here", "this account is deactivated") and nothing about anyone
 else's account; the diagnostic detail goes to the log and the audit trail. That is also
 why the provider's own failures collapse into one `provider` code.
 """
@@ -40,7 +40,6 @@ from app.api.v1.auth import mint_session, open_session
 # below is testable with no provider anywhere near it. Importing the names would bind
 # them at import time and silently defeat every stub in tests/test_oidc.py.
 from app.core import oidc as oidc_core
-from app.core.app_settings import get_app_settings
 from app.core.audit import record_event
 from app.core.config import settings
 from app.core.oidc import NO_OIDC_DETAIL, OidcError, OidcIdentity, oidc_configured
@@ -69,7 +68,6 @@ router = APIRouter()
 # message and degrades an unrecognised one to a generic apology, so adding a code here
 # is safe ahead of the frontend catching up.
 ERROR_NO_ACCOUNT = "no_account"
-ERROR_EMAIL_UNVERIFIED = "email_unverified"
 ERROR_ACCOUNT_DISABLED = "account_disabled"
 ERROR_ALREADY_LINKED = "already_linked"
 ERROR_STATE = "state"
@@ -296,30 +294,20 @@ async def callback(
     user = await _find_linked_user(session, identity)
 
     if user is None:
-        # A first sign-on: match the provider's email to a local account. This is the
-        # only moment email is trusted for identity, so it is the moment the
-        # email_verified rule has to hold.
+        # A first sign-on: match the provider's address to a local account. This is the one
+        # moment an address is trusted for identity, and after it the durable
+        # (issuer, subject) pair takes over.
         if not identity.email:
             return await _refuse(
                 session, redis, code=ERROR_NO_ACCOUNT, ip=ip, reason="no email claim"
             )
 
-        # Only enforced when the server itself says it cares about verified addresses.
-        # With "require email confirmation" off, accounts are created active without
-        # anyone proving an address, so demanding proof here would make SSO stricter
-        # than every other way into the same account - and would refuse providers that
-        # simply omit the claim, for a server that never wanted it.
-        app_settings = await get_app_settings(session)
-        if app_settings.require_confirmation and not identity.email_verified:
-            return await _refuse(
-                session,
-                redis,
-                code=ERROR_EMAIL_UNVERIFIED,
-                ip=ip,
-                reason="email unverified",
-                email=identity.email,
-            )
-
+        # Whether an address is verified is isachore's own question, answered by
+        # `users.confirmed_at` and surfaced on the Profile page. The provider's
+        # `email_verified` claim is not consulted: the account already exists, an admin
+        # created it, and the provider's job here is to prove who is at the keyboard, not to
+        # re-assert something this app already tracks. It also varies enough between
+        # providers - absent, stringified, or always true - to be a poor gate.
         result = await session.execute(select(User).where(User.email == identity.email))
         user = result.scalar_one_or_none()
         if user is None:
@@ -356,9 +344,13 @@ async def callback(
 
     if user.status == UserStatus.waiting_confirmation:
         # An admin created them and the confirmation email never landed, or they never
-        # clicked it. Signing in through the provider proves the same thing that link
-        # was there to prove - that the address reaches them - so it finishes the job
-        # rather than leaving them stuck behind an SMTP relay they cannot fix.
+        # clicked it. A provider sign-in stands in for that link: it proves control of the
+        # directory account an admin pointed at this address, which is what a deployment
+        # running SSO has already decided to trust. Be precise about the difference, because
+        # `confirmed_at` is stamped here and the Profile badge reads it: the emailed link
+        # proves the *mailbox*, this proves the *directory identity*. They coincide only for
+        # a directory that verifies addresses, which is the assumption behind not reading
+        # `email_verified` at all - see the account-matching comment above.
         user.status = UserStatus.active
         user.confirmed_at = datetime.now(UTC)
         # ...and the outstanding link has to go with it, which every other path that

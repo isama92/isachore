@@ -11,8 +11,17 @@ import { jsonResponse, mockFetch } from '../test/utils'
 import { makeMe } from '../test/fixtures'
 
 function Harness() {
-  const { user, impersonating, memberships, loading, login, verifyTwoFactor, logout, refresh } =
-    useAuth()
+  const {
+    user,
+    impersonating,
+    memberships,
+    emailConfirmationRequired,
+    loading,
+    login,
+    verifyTwoFactor,
+    logout,
+    refresh,
+  } = useAuth()
   return (
     <div>
       <span data-testid="loading">{String(loading)}</span>
@@ -21,6 +30,7 @@ function Harness() {
       <span data-testid="memberships">
         {memberships.map((m) => `${m.household_id}:${m.role}`).join(',') || 'none'}
       </span>
+      <span data-testid="confirmation-required">{String(emailConfirmationRequired)}</span>
       <button onClick={() => void login('a@example.com', 'password12345', true)}>login</button>
       <button onClick={() => void verifyTwoFactor('123456')}>verify</button>
       <button onClick={() => void logout()}>logout</button>
@@ -508,5 +518,108 @@ describe('AuthProvider', () => {
 
     await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('none'))
     expect(screen.getByTestId('memberships')).toHaveTextContent('none')
+  })
+})
+
+describe('AuthProvider email confirmation flag', () => {
+  // Server-wide, so it has to be adopted on every path that sets a user and cleared on every
+  // path that drops one - the same eight sites `memberships` uses. A path that forgot it
+  // would leave the Profile badge reading the previous session's server.
+  it('adopts it from the mount probe', async () => {
+    mockFetch([
+      {
+        path: '/api/v1/auth/me',
+        body: makeMe({ email_confirmation_required: true }),
+      },
+    ])
+    renderProvider()
+
+    await waitFor(() =>
+      expect(screen.getByTestId('confirmation-required')).toHaveTextContent('true'),
+    )
+  })
+
+  it('adopts it from the login response, with no second /auth/me', async () => {
+    const fetchMock = mockFetch([
+      { path: '/api/v1/auth/me', status: 401, body: { detail: 'Not authenticated' } },
+      {
+        path: '/api/v1/auth/login',
+        method: 'POST',
+        body: { two_factor_required: false, user: makeMe({ email_confirmation_required: true }) },
+      },
+    ])
+    renderProvider()
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'))
+    const before = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/auth/me')).length
+
+    await userEvent.click(screen.getByText('login'))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('confirmation-required')).toHaveTextContent('true'),
+    )
+    const after = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/auth/me')).length
+    expect(after).toBe(before)
+  })
+
+  it('clears it on logout', async () => {
+    mockFetch([
+      { path: '/api/v1/auth/me', body: makeMe({ email_confirmation_required: true }) },
+      { path: '/api/v1/auth/logout', method: 'POST', status: 204 },
+    ])
+    renderProvider()
+    await waitFor(() =>
+      expect(screen.getByTestId('confirmation-required')).toHaveTextContent('true'),
+    )
+
+    await userEvent.click(screen.getByText('logout'))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('confirmation-required')).toHaveTextContent('false'),
+    )
+  })
+})
+
+describe('AuthProvider email confirmation flag, on refresh', () => {
+  it('re-adopts it on refresh', async () => {
+    // Worth its own case beyond the memberships parity: Profile calls refresh() after every
+    // save it offers, so a dropped adoption here blanks the badge on the very page that owns
+    // it, mid-session and with nothing on screen explaining why.
+    let required = true
+    mockFetch([
+      {
+        path: '/api/v1/auth/me',
+        body: () => makeMe({ email_confirmation_required: required }),
+      },
+    ])
+    renderProvider()
+    await waitFor(() =>
+      expect(screen.getByTestId('confirmation-required')).toHaveTextContent('true'),
+    )
+
+    required = false
+    await userEvent.click(screen.getByText('refresh'))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('confirmation-required')).toHaveTextContent('false'),
+    )
+  })
+
+  it('adopts it from the second step of a two-step login', async () => {
+    mockFetch([
+      { path: '/api/v1/auth/me', status: 401, body: { detail: 'Not authenticated' } },
+      {
+        path: '/api/v1/auth/verify-2fa',
+        method: 'POST',
+        body: makeMe({ email_confirmation_required: true }),
+      },
+    ])
+    renderProvider()
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'))
+
+    await userEvent.click(screen.getByText('verify'))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('confirmation-required')).toHaveTextContent('true'),
+    )
   })
 })
