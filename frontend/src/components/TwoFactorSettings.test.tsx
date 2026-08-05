@@ -20,6 +20,19 @@ describe('TwoFactorSettings', () => {
     expect(screen.getByRole('button', { name: 'Enable' })).toBeInTheDocument()
   })
 
+  it('says that single sign-on uses the provider own verification instead', () => {
+    // A sign-in through an identity provider deliberately skips this step, so somebody who
+    // has just enrolled and then signs in through SSO without being asked for a code would
+    // otherwise reasonably read that as a bug. Worded to be true on a server with no
+    // provider configured too, since this panel cannot see that setting.
+    renderWithProviders(<TwoFactorSettings />, {
+      authValue: { user: makeUser({ two_factor_enabled: true }) },
+    })
+    expect(
+      screen.getByText(/sign-ins through it use that provider's own verification instead/i),
+    ).toBeInTheDocument()
+  })
+
   it('shows the enabled state with regenerate and disable actions', () => {
     renderWithProviders(<TwoFactorSettings />, {
       authValue: { user: makeUser({ two_factor_enabled: true }) },

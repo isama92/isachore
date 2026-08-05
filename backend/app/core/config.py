@@ -121,6 +121,41 @@ class Settings(BaseSettings):
     # smtp_starttls in practice.
     smtp_use_tls: bool = False
 
+    # OpenID Connect single sign-on (Authentik, Authelia, Keycloak, ...). All
+    # optional so the app boots without a provider, in which case the sign-in button
+    # never renders and the OIDC endpoints 404; the flow is gated on
+    # oidc_configured() in app/core/oidc.py, exactly as email is gated on
+    # smtp_configured(). Unlike SMTP, a half-configured provider refuses boot
+    # outside a dev environment (app/core/startup.py): two of the three set reads as
+    # "not configured", so the button silently never renders and an operator who
+    # clearly meant to turn SSO on gets no signal at all.
+    #
+    # The base url whose <issuer>/.well-known/openid-configuration resolves, and
+    # which must equal the `iss` claim of the ID tokens it hands out. For Authentik
+    # that is https://auth.example.com/application/o/<application-slug>/
+    oidc_issuer: str | None = None
+    oidc_client_id: str | None = None
+    oidc_client_secret: str | None = None
+    # Name shown on the sign-in button ("Sign in with Authentik"). Cosmetic, like
+    # totp_issuer, so it is deliberately NOT part of oidc_configured(): a deploy that
+    # forgot it should still be able to sign in, under the generic default.
+    oidc_provider_name: str = "SSO"
+    # Space-separated scopes. "openid" is required by the protocol and "email" is
+    # what an account is matched on, so this exists to widen the set rather than to
+    # narrow it.
+    oidc_scopes: str = "openid email profile"
+    # Turn password sign-in off: hides the credential form and makes POST /auth/login return
+    # 403. There is deliberately no in-app exemption, not even for admins, so recovering from
+    # a broken provider means setting this back to false and restarting. Refuses boot outside
+    # dev when no provider is configured, since that combination locks every user out.
+    #
+    # Deliberately scoped to *password sign-in* rather than described as "the only way in":
+    # an account confirmation link (POST /confirm/{token}) still sets a password and opens a
+    # session, which is the flow an admin starts by creating a user, and gating it here would
+    # break account setup on a deployment that uses both. Nobody can reach it without a live
+    # emailed token, so it is a second door with its own key rather than a bypass.
+    oidc_only: bool = False
+
 
 settings = Settings()
 

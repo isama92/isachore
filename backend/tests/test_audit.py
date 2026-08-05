@@ -4,6 +4,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import record_event
 from app.models import AuditAction, AuditEvent, User
 
 Login = Callable[..., Awaitable[User]]
@@ -270,3 +271,38 @@ async def test_create_and_deactivate_while_impersonating_record_operator(
     assert len(deactivate_events) == 1
     assert deactivate_events[0].actor_user_id == eve.id
     assert deactivate_events[0].impersonator_user_id == admin.id
+
+
+async def test_a_newline_in_detail_cannot_forge_a_log_record(
+    db_session: AsyncSession, caplog
+) -> None:
+    """The audit log is one record per line, so a CR or LF in `detail` could otherwise append
+    a second, plausible-looking record - `audit action=login_success actor=1 ...`.
+
+    Most callers pass something the app produced or pydantic validated. Not all: the SSO
+    callback's `?error=` is a raw query parameter on an unauthenticated endpoint, and an email
+    claim is whatever the identity provider was told. So this is a property of the formatter.
+    """
+    forged = "x\naudit action=login_success actor=1 target=None impersonator=None ip=1.2.3.4"
+
+    with caplog.at_level("INFO", logger="app.audit"):
+        await record_event(db_session, action=AuditAction.login_failed, detail=forged)
+
+    line = next(r.getMessage() for r in caplog.records if r.name == "app.audit")
+    assert "\n" not in line
+    assert "\\x0a" in line
+    # The row keeps the original: a DB column is not line-oriented, so nothing is forgeable
+    # there, and truncating what an operator can query would be the worse trade.
+    stored = await _events(db_session, AuditAction.login_failed)
+    assert stored[0].detail == forged
+
+
+async def test_ordinary_detail_is_logged_unchanged(db_session: AsyncSession, caplog) -> None:
+    # The scrub must not mangle the everyday case, which is an email address or a field list.
+    with caplog.at_level("INFO", logger="app.audit"):
+        await record_event(
+            db_session, action=AuditAction.user_updated, detail="first_name, last_name"
+        )
+
+    line = next(r.getMessage() for r in caplog.records if r.name == "app.audit")
+    assert "detail=first_name, last_name" in line

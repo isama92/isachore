@@ -23,6 +23,7 @@ from sqlalchemy.exc import ArgumentError
 
 from app.core.config import is_dev_environment, settings
 from app.core.crypto import crypto_configured
+from app.core.oidc import oidc_configured
 
 logger = logging.getLogger("app.startup")
 
@@ -90,6 +91,46 @@ def _database_password_problem() -> str | None:
     return None
 
 
+def _oidc_problems() -> list[str]:
+    """Single sign-on misconfigurations that are worth refusing a deploy over.
+
+    All three are silent otherwise, and one of them is a lockout. A half-configured provider
+    reads as "not configured", so the sign-in button never renders and the endpoints 404 -
+    quiet in the worst way, since the operator plainly meant to turn it on. A plaintext
+    issuer puts the client secret on the wire. And OIDC_ONLY without a provider leaves
+    nobody able to sign in at all.
+    """
+    problems: list[str] = []
+    present = {
+        "OIDC_ISSUER": bool(settings.oidc_issuer),
+        "OIDC_CLIENT_ID": bool(settings.oidc_client_id),
+        "OIDC_CLIENT_SECRET": bool(settings.oidc_client_secret),
+    }
+    missing = sorted(name for name, is_set in present.items() if not is_set)
+    if missing and len(missing) != len(present):
+        # Some but not all: an operator who set two of three has clearly intended to
+        # turn SSO on, so failing quietly (button never renders) would be the worst
+        # outcome. All three unset is the ordinary "no SSO" deployment and fine.
+        problems.append(
+            "single sign-on is partly configured: "
+            + ", ".join(missing)
+            + " missing. Set all of OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET, "
+            "or none of them"
+        )
+    if settings.oidc_issuer and not settings.oidc_issuer.lower().startswith("https://"):
+        # The client secret is presented to the token endpoint under this origin.
+        problems.append(
+            "OIDC_ISSUER is not https, so the client secret would cross the network in plaintext"
+        )
+    if settings.oidc_only and not oidc_configured():
+        problems.append(
+            "OIDC_ONLY is true but no single sign-on provider is configured, which "
+            "would leave nobody able to sign in; configure the provider or set "
+            "OIDC_ONLY=false"
+        )
+    return problems
+
+
 def check_startup_config() -> list[str]:
     """Configuration problems that must block boot; empty when there are none.
 
@@ -109,6 +150,7 @@ def check_startup_config() -> list[str]:
         problems.append(problem)
     if (problem := _database_password_problem()) is not None:
         problems.append(problem)
+    problems.extend(_oidc_problems())
     return problems
 
 

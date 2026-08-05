@@ -277,3 +277,135 @@ def test_enforce_is_a_noop_in_dev(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "cookies_secure", False)
     monkeypatch.setattr(settings, "app_key", None)
     enforce_startup_config()  # no raise
+
+
+# --- single sign-on -------------------------------------------------------
+#
+# Three invariants, and each is silent without a boot check: a half-configured provider
+# would fail on somebody's first sign-in attempt rather than at deploy time, a plaintext
+# issuer would put the client secret on the wire, and OIDC_ONLY with no provider is a
+# lockout. Note conftest's autouse `_reset_oidc` clears the whole group, so "no SSO at
+# all" is the default state here and a case that wants a provider sets one explicitly.
+
+_ISSUER = "https://auth.example.com/application/o/isachore/"
+
+
+def _with_oidc(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    issuer: str | None = _ISSUER,
+    client_id: str | None = "isachore-client",
+    client_secret: str | None = "not-a-real-secret",
+) -> None:
+    monkeypatch.setattr(settings, "oidc_issuer", issuer)
+    monkeypatch.setattr(settings, "oidc_client_id", client_id)
+    monkeypatch.setattr(settings, "oidc_client_secret", client_secret)
+
+
+def test_no_oidc_at_all_is_fine(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The ordinary deployment: SSO is optional and its absence is not a problem.
+    _prod_config(monkeypatch)
+    assert check_startup_config() == []
+
+
+def test_a_fully_configured_provider_is_fine(monkeypatch: pytest.MonkeyPatch) -> None:
+    _prod_config(monkeypatch)
+    _with_oidc(monkeypatch)
+    assert check_startup_config() == []
+
+
+@pytest.mark.parametrize(
+    ("field", "named"),
+    [
+        ("oidc_issuer", "OIDC_ISSUER"),
+        ("oidc_client_id", "OIDC_CLIENT_ID"),
+        ("oidc_client_secret", "OIDC_CLIENT_SECRET"),
+    ],
+)
+def test_a_partly_configured_provider_is_reported(
+    monkeypatch: pytest.MonkeyPatch, field: str, named: str
+) -> None:
+    _prod_config(monkeypatch)
+    _with_oidc(monkeypatch)
+    monkeypatch.setattr(settings, field, None)
+
+    problems = check_startup_config()
+
+    assert len(problems) == 1
+    assert "partly configured" in problems[0]
+    # Names the one that is missing, so an operator does not have to diff the group.
+    assert named in problems[0]
+
+
+def test_an_empty_string_counts_as_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    # `OIDC_CLIENT_SECRET=` in a .env arrives as "" rather than None, and a deploy with an
+    # empty secret is exactly as broken as one with no secret line at all.
+    _prod_config(monkeypatch)
+    _with_oidc(monkeypatch, client_secret="")
+
+    problems = check_startup_config()
+
+    assert len(problems) == 1
+    assert "OIDC_CLIENT_SECRET" in problems[0]
+
+
+def test_all_three_unset_is_not_reported_as_partial(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Pins the `len(missing) != len(present)` half of that condition. Simplify it to
+    # `if missing:` and EVERY deployment without SSO refuses to boot - both suites stay
+    # green, and the first symptom is a prod container crash-looping on a config that was
+    # valid yesterday.
+    _prod_config(monkeypatch)
+    _with_oidc(monkeypatch, issuer=None, client_id=None, client_secret=None)
+    assert check_startup_config() == []
+
+
+@pytest.mark.parametrize(
+    "issuer",
+    [
+        "http://auth.example.com/application/o/isachore/",
+        "HTTP://auth.example.com/o/x/",
+        "auth.example.com/o/x/",
+    ],
+)
+def test_a_non_https_issuer_is_reported(monkeypatch: pytest.MonkeyPatch, issuer: str) -> None:
+    _prod_config(monkeypatch)
+    _with_oidc(monkeypatch, issuer=issuer)
+
+    problems = check_startup_config()
+
+    assert len(problems) == 1
+    assert "not https" in problems[0]
+
+
+def test_an_https_issuer_is_accepted_whatever_its_case(monkeypatch: pytest.MonkeyPatch) -> None:
+    _prod_config(monkeypatch)
+    _with_oidc(monkeypatch, issuer="HTTPS://auth.example.com/o/x/")
+    assert check_startup_config() == []
+
+
+def test_oidc_only_without_a_provider_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The lockout guard: password sign-in off, and nothing to sign in with instead.
+    _prod_config(monkeypatch)
+    monkeypatch.setattr(settings, "oidc_only", True)
+
+    problems = check_startup_config()
+
+    assert len(problems) == 1
+    assert "OIDC_ONLY" in problems[0]
+
+
+def test_oidc_only_with_a_provider_is_fine(monkeypatch: pytest.MonkeyPatch) -> None:
+    _prod_config(monkeypatch)
+    _with_oidc(monkeypatch)
+    monkeypatch.setattr(settings, "oidc_only", True)
+    assert check_startup_config() == []
+
+
+def test_a_dev_environment_skips_the_oidc_checks(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A dev environment may legitimately point at a provider over plain http (the stack ships
+    # none, so whatever you point it at is yours), so none of the above may fire there.
+    monkeypatch.setattr(settings, "environment", "dev")
+    monkeypatch.setattr(settings, "cookies_secure", False)
+    _with_oidc(monkeypatch, issuer="http://oidc.localhost:9100/default", client_secret=None)
+    monkeypatch.setattr(settings, "oidc_only", True)
+    assert check_startup_config() == []

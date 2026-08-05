@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AuthToken, ConfirmationToken, TwoFactorChallenge
+from app.models import AuthToken, ConfirmationToken, OidcLoginState, TwoFactorChallenge
 
 
 async def purge_expired_tokens(session: AsyncSession) -> None:
@@ -30,4 +30,18 @@ async def purge_expired_two_factor_challenges(session: AsyncSession) -> None:
     opportunistic sweep; called when a new challenge is issued at login."""
     await session.execute(
         delete(TwoFactorChallenge).where(TwoFactorChallenge.expires_at < datetime.now(UTC))
+    )
+
+
+async def purge_expired_oidc_states(session: AsyncSession) -> None:
+    """Delete in-flight SSO login states whose short TTL has elapsed. Same
+    opportunistic sweep; called when a new flow is started.
+
+    This one is the only sweep the table has: unlike the others there is no user_id
+    on the row, so nothing cascades into it when an account is deleted. Every
+    abandoned flow (anyone who clicks the button and then closes the tab) leaves a
+    row, so without this it grows on failed sign-ins rather than successful ones.
+    """
+    await session.execute(
+        delete(OidcLoginState).where(OidcLoginState.expires_at < datetime.now(UTC))
     )

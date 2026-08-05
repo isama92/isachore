@@ -1,3 +1,4 @@
+from app.schemas.auth import AuthMethodsRead
 from app.schemas.chore import ChoreCreate, ChoreListRead, ChoreRead, ChoreUpdate
 from app.schemas.completion import HistoryEntryRead, HistoryFilterOptions
 from app.schemas.home import (
@@ -41,6 +42,7 @@ from app.schemas.user import (
 )
 
 __all__ = [
+    "AuthMethodsRead",
     "ChoreCreate",
     "ChoreListRead",
     "ChoreRead",

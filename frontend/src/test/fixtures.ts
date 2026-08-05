@@ -44,6 +44,14 @@ export function makeServerSettings(overrides: Partial<ServerSettings> = {}): Ser
     smtp_host: 'smtp.example.com',
     smtp_port: 587,
     smtp_from: 'isachore <no-reply@example.com>',
+    // Single sign-on off by default, which is what an ordinary deployment looks like.
+    // Tests about the SSO panel override these.
+    oidc_configured: false,
+    oidc_provider_name: 'SSO',
+    oidc_issuer: null,
+    oidc_client_id: null,
+    oidc_redirect_uri: 'http://localhost:5173/api/v1/auth/oidc/callback',
+    oidc_only: false,
     ...overrides,
   }
 }

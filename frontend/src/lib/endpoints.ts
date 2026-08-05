@@ -21,6 +21,14 @@ export const endpoints = {
     verifyTwoFactor: `${V1}/auth/verify-2fa`,
     logout: `${V1}/auth/logout`,
     stopImpersonating: `${V1}/auth/stop-impersonating`,
+    // Which ways in to offer. Public, and the only endpoint the login page calls.
+    methods: `${V1}/auth/methods`,
+    // Not an `api` wrapper call: the browser NAVIGATES here, and the backend answers
+    // with a redirect to the provider. That is what keeps the flow clear of the prod
+    // CSP, which forbids both fetch (connect-src 'self') and form posts
+    // (form-action 'self') to another origin but does not govern navigations. The
+    // `?return_to=` goes on at the call site, per the header comment above.
+    oidcStart: `${V1}/auth/oidc/start`,
   },
 
   home: `${V1}/home`,

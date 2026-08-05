@@ -14,6 +14,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.api.v1 import auth as auth_module
+from app.core import oidc as oidc_core
 from app.core import security
 from app.core.assignment import initial_assignee
 from app.core.chores import RecurrenceRule, first_occurrence
@@ -223,6 +224,48 @@ def totp(monkeypatch: pytest.MonkeyPatch) -> str:
     key = Fernet.generate_key().decode()
     monkeypatch.setattr(settings, "app_key", key)
     return key
+
+
+@pytest.fixture(autouse=True)
+def _reset_oidc(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hermetic default: no single sign-on provider, whatever the container's env says.
+
+    Necessary rather than tidy. The suite runs inside the dev container with
+    `env_file: .env`, so uncommenting the OIDC group in .env.example.dev to try the flow
+    by hand would otherwise turn the sign-in button on for every test and make
+    POST /auth/login 403 under OIDC_ONLY. Tests that want a provider opt in via the
+    `oidc` fixture, which runs after this one.
+
+    The cache clear is the other half: core/oidc.py memoises discovery documents and key
+    sets per issuer, and a document cached by one test must not be served to the next.
+    """
+    monkeypatch.setattr(settings, "oidc_issuer", None)
+    monkeypatch.setattr(settings, "oidc_client_id", None)
+    monkeypatch.setattr(settings, "oidc_client_secret", None)
+    monkeypatch.setattr(settings, "oidc_provider_name", "SSO")
+    monkeypatch.setattr(settings, "oidc_scopes", "openid email profile")
+    monkeypatch.setattr(settings, "oidc_only", False)
+    oidc_core.reset_caches()
+
+
+@pytest.fixture
+def oidc(monkeypatch: pytest.MonkeyPatch) -> str:
+    """Configure a single sign-on provider. Returns the issuer.
+
+    https, so a case that also pins a non-dev environment cannot trip the startup check's
+    plaintext-issuer refusal. (The startup-check tests themselves build their own config,
+    since they assert on `check_startup_config()` directly rather than through an endpoint.)
+
+    Nothing here reaches the network: the endpoint tests stub oidc_core.begin /
+    oidc_core.complete, the verification tests stub the key set, and the provider-facing
+    tests stub the httpx client.
+    """
+    issuer = "https://idp.example.com/application/o/isachore"
+    monkeypatch.setattr(settings, "oidc_issuer", issuer)
+    monkeypatch.setattr(settings, "oidc_client_id", "isachore-client")
+    monkeypatch.setattr(settings, "oidc_client_secret", "shh-client-secret")
+    monkeypatch.setattr(settings, "oidc_provider_name", "Authentik")
+    return issuer
 
 
 @pytest.fixture

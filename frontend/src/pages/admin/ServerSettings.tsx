@@ -5,6 +5,7 @@ import { useAuth } from '../../auth/useAuth'
 import { api, ApiError } from '../../lib/api'
 import { endpoints } from '../../lib/endpoints'
 import type { ServerSettings as ServerSettingsData } from '../../lib/types'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
@@ -18,11 +19,13 @@ export default function ServerSettings() {
   const { user } = useAuth()
   const { t } = useTranslation()
 
+  // The payload as it came, for everything read-only. One slice rather than one per
+  // field: the read-only half of this page is now SMTP plus single sign-on, and eleven
+  // useState calls to mirror one object earns nothing.
+  const [settings, setSettings] = useState<ServerSettingsData | null>(null)
+  // The exception, because it is the one value this page mutates: it needs its own state
+  // to be toggled optimistically and rolled back independently of the rest.
   const [requireConfirmation, setRequireConfirmation] = useState(false)
-  const [smtpConfigured, setSmtpConfigured] = useState(false)
-  const [smtpHost, setSmtpHost] = useState<string | null>(null)
-  const [smtpPort, setSmtpPort] = useState<number | null>(null)
-  const [smtpFrom, setSmtpFrom] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -36,11 +39,8 @@ export default function ServerSettings() {
       api
         .get<ServerSettingsData>(endpoints.settings.root)
         .then((s) => {
+          setSettings(s)
           setRequireConfirmation(s.require_confirmation)
-          setSmtpConfigured(s.smtp_configured)
-          setSmtpHost(s.smtp_host)
-          setSmtpPort(s.smtp_port)
-          setSmtpFrom(s.smtp_from)
         })
         .catch((err: unknown) => {
           setLoadError(err instanceof ApiError ? err.message : t('serverSettings.loadError'))
@@ -74,11 +74,8 @@ export default function ServerSettings() {
       const s = await api.patch<ServerSettingsData>(endpoints.settings.root, {
         require_confirmation: next,
       })
+      setSettings(s)
       setRequireConfirmation(s.require_confirmation)
-      setSmtpConfigured(s.smtp_configured)
-      setSmtpHost(s.smtp_host)
-      setSmtpPort(s.smtp_port)
-      setSmtpFrom(s.smtp_from)
       toast.success(t('serverSettings.saved'))
     } catch (err) {
       setRequireConfirmation(prev)
@@ -149,7 +146,7 @@ export default function ServerSettings() {
                 </p>
               </div>
             </div>
-            {!smtpConfigured && (
+            {!settings?.smtp_configured && (
               <p className="mt-4 text-[13px] font-medium text-warning">
                 {t('serverSettings.smtpNotConfigured')}
               </p>
@@ -167,19 +164,19 @@ export default function ServerSettings() {
                 {t('serverSettings.serverAddress')}
               </span>
               <span className="font-semibold">
-                {smtpHost ?? t('serverSettings.notConfiguredValue')}
+                {settings?.smtp_host ?? t('serverSettings.notConfiguredValue')}
               </span>
               <span className="font-medium text-muted-foreground">
                 {t('serverSettings.serverPort')}
               </span>
               <span className="font-semibold">
-                {smtpPort ?? t('serverSettings.notConfiguredValue')}
+                {settings?.smtp_port ?? t('serverSettings.notConfiguredValue')}
               </span>
               <span className="font-medium text-muted-foreground">
                 {t('serverSettings.fromAddress')}
               </span>
               <span className="font-semibold">
-                {smtpFrom ?? t('serverSettings.notConfiguredValue')}
+                {settings?.smtp_from ?? t('serverSettings.notConfiguredValue')}
               </span>
               <span className="font-medium text-muted-foreground">
                 {t('serverSettings.sendTestEmailLabel')}
@@ -188,7 +185,7 @@ export default function ServerSettings() {
                 <Button
                   type="button"
                   size="sm"
-                  disabled={!smtpConfigured || sendingTest || testCooldown > 0}
+                  disabled={!settings?.smtp_configured || sendingTest || testCooldown > 0}
                   onClick={() => void sendTestEmail()}
                 >
                   {sendingTest
@@ -200,6 +197,62 @@ export default function ServerSettings() {
               </span>
             </div>
             {testError && <p className="mt-4 text-[13px] font-bold text-danger">{testError}</p>}
+          </section>
+
+          {/* Single sign-on: read-only status, since the whole group is env-driven. The
+              redirect URI row is the one an operator needs most - it is derived from
+              APP_BASE_URL rather than configured, so it is the value to register with the
+              provider and there is nowhere else to read it off. */}
+          <section className="rounded-2xl border border-line bg-card p-6">
+            <h2 className="mb-4 font-display text-lg font-bold tracking-tight">
+              {t('serverSettings.ssoHeading')}
+            </h2>
+            <div className="grid grid-cols-[auto_1fr] items-center gap-x-8 gap-y-3 text-sm">
+              <span className="font-medium text-muted-foreground">
+                {t('serverSettings.ssoStatus')}
+              </span>
+              <span>
+                <Badge variant={settings?.oidc_configured ? 'default' : 'outline'}>
+                  {settings?.oidc_configured
+                    ? t('serverSettings.ssoConfigured')
+                    : t('serverSettings.ssoUnconfigured')}
+                </Badge>
+              </span>
+              <span className="font-medium text-muted-foreground">
+                {t('serverSettings.ssoProvider')}
+              </span>
+              <span className="font-semibold">
+                {settings?.oidc_configured
+                  ? settings.oidc_provider_name
+                  : t('serverSettings.notConfiguredValue')}
+              </span>
+              <span className="font-medium text-muted-foreground">
+                {t('serverSettings.ssoIssuer')}
+              </span>
+              <span className="font-semibold break-all">
+                {settings?.oidc_issuer ?? t('serverSettings.notConfiguredValue')}
+              </span>
+              <span className="font-medium text-muted-foreground">
+                {t('serverSettings.ssoClientId')}
+              </span>
+              <span className="font-semibold break-all">
+                {settings?.oidc_client_id ?? t('serverSettings.notConfiguredValue')}
+              </span>
+              <span className="font-medium text-muted-foreground">
+                {t('serverSettings.ssoRedirectUri')}
+              </span>
+              <span className="font-semibold break-all">{settings?.oidc_redirect_uri}</span>
+            </div>
+            {!settings?.oidc_configured && (
+              <p className="mt-4 text-[13px] font-medium text-warning">
+                {t('serverSettings.ssoNotConfigured')}
+              </p>
+            )}
+            {settings?.oidc_only && (
+              <p className="mt-4 text-[13px] font-medium text-warning">
+                {t('serverSettings.ssoOnly')}
+              </p>
+            )}
           </section>
         </div>
       )}

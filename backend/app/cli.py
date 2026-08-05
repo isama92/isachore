@@ -113,6 +113,16 @@ async def _restore_admin(session: AsyncSession, user: User, password: str) -> No
             delete(TwoFactorChallenge).where(TwoFactorChallenge.user_id == user.id)
         )
         changes.append("two-factor enrolment cleared")
+    if user.oidc_subject is not None or user.oidc_issuer is not None:
+        # Unlinking looks like it removes a way in rather than restoring one, and it is
+        # here for the case where the link is precisely the problem: if the wrong
+        # provider account got linked to this address, that identity signs in as this
+        # admin and the rightful owner cannot, because the callback refuses to re-link
+        # an address that already points elsewhere (already_linked). Clearing it lets
+        # the next SSO sign-in link afresh, exactly like a first one.
+        user.oidc_subject = None
+        user.oidc_issuer = None
+        changes.append("single sign-on link cleared")
     await session.execute(delete(AuthToken).where(AuthToken.user_id == user.id))
     await session.execute(delete(ConfirmationToken).where(ConfirmationToken.user_id == user.id))
     changes.append("sessions and pending confirmation links revoked")

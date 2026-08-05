@@ -193,6 +193,110 @@ password in the create form and the user is active immediately. Confirmation
 needs SMTP configured (see the env table below); in dev, compose already points
 SMTP at mailpit and captured mail shows at http://localhost:8025.
 
+### Single sign-on (optional)
+
+People can sign in through an OpenID Connect provider (Authentik, Authelia,
+Keycloak, anything that speaks OIDC) instead of with a password. Set three
+environment variables and a **Sign in with _provider_** button appears on the
+login page; leave them unset and nothing changes.
+
+```
+OIDC_ISSUER=https://auth.example.com/application/o/isachore/
+OIDC_CLIENT_ID=...
+OIDC_CLIENT_SECRET=...
+OIDC_PROVIDER_NAME=Authentik      # the button label; defaults to "SSO"
+```
+
+There is **no redirect-uri setting**: it is derived as
+`<APP_BASE_URL>/api/v1/auth/oidc/callback`, and that is the value to register
+with your provider. **Admin > Server settings** shows it, along with whether the
+provider is configured, so you can copy it from there.
+
+How accounts match up:
+
+- **There is still no self-registration.** An admin creates the account, exactly
+  as before. The first SSO sign-in **links** the provider identity to the local
+  account with the same email address; after that, sign-ins match on the
+  provider's stable subject, so somebody who changes their email at the provider
+  keeps their account.
+- If no local account has that address, the sign-in is refused with a message
+  saying to ask an admin. Nothing is created.
+- **An address already linked to a different provider identity is refused**
+  ("already linked"), so a provider cannot claim somebody's account by asserting
+  their address. That guard has no in-app override, which matters if your provider
+  ever changes the subject it reports for the same person: recreating the
+  Authentik application, switching providers, or turning on pairwise subject
+  identifiers all do that, and every already-linked user then hits the refusal.
+  Clearing the link lets the next sign-in re-link from scratch:
+
+  ```bash
+  docker compose exec db psql -U isachore -d isachore \
+      -c "UPDATE users SET oidc_issuer = NULL, oidc_subject = NULL WHERE email = 'person@example.com'"
+  ```
+
+  Drop the `WHERE` clause to unlink everybody, which is what a provider migration
+  wants. Nothing else is lost: the link is the only thing those two columns hold.
+  (`python -m app.cli init` also clears it, but only for the account it recovers
+  and only while no active admin exists, so it is not the tool for this.)
+- An account still *waiting confirmation* becomes active on its first SSO
+  sign-in: the provider has vouched for the address, which is what the
+  confirmation email was there to prove. A *deactivated* account is always
+  refused.
+- **Email verification is only required when you require it.** With
+  **Require user confirmation** on, the provider must report the address as
+  verified; with it off, the check is skipped. Worth knowing if you turn it off:
+  the local path still needs an admin to set a password, so with the check
+  skipped the SSO path is the more permissive of the two, and an account left
+  *waiting confirmation* from when the setting was on can then be claimed and
+  activated on an unverified address.
+
+**Two-factor authentication does not apply to SSO sign-ins.** The provider owns
+authentication, including whatever MFA it enforces, so isachore does not ask for
+a second code on top. Local two-step verification still applies in full to
+email + password sign-in, which is where it is offered.
+
+To turn **password sign-in** off, set `OIDC_ONLY=true`. That hides the credential
+form and makes `POST /api/v1/auth/login` return 403, with no exemption for
+admins. There is no in-app way back: recovering from a broken provider means
+setting `OIDC_ONLY=false` and restarting the backend, so confirm SSO works before
+turning it on. The backend refuses to boot if `OIDC_ONLY` is on with no provider
+configured, or if the OIDC group is only half filled in, or if the issuer is not
+HTTPS.
+
+> It switches off password *sign-in*, not every route that can open a session: an
+> account confirmation link still sets a password and signs that person in, which
+> is how an admin-created account gets set up. Nobody can reach it without a live
+> emailed token, so leave **Require user confirmation** off if you want SSO to be
+> the only path in practice.
+
+#### Setting it up in Authentik
+
+1. **Applications > Providers > Create > OAuth2/OpenID Provider.** Client type
+   *Confidential*, authorization flow *implicit consent* (or explicit, if you
+   want the consent screen).
+2. Add the redirect URI shown on **Admin > Server settings** as a *strict*
+   match.
+3. Leave the default scopes: `openid`, `email`, `profile`. The email scope is
+   what accounts are matched on, so it is not optional.
+4. **Applications > Create**, pick that provider, and note the slug: the issuer
+   is `https://<your-authentik>/application/o/<slug>/`, shown on the provider's
+   page.
+5. Copy the client ID and secret into `.env`, restart the backend.
+
+#### Trying it locally
+
+The dev stack ships no identity provider, so point `.env` at a real one: either
+your own Authentik, or a throwaway provider you run yourself. Two things to watch
+if you do:
+
+- The **browser and the backend have to reach the provider at the same URL**, or
+  the `iss` claim in its tokens will not match `OIDC_ISSUER` and verification
+  fails. `localhost` does not qualify: inside the backend container it means the
+  backend. A hostname that resolves to loopback in the browser and to the
+  provider on the compose network works for both.
+- `OIDC_ISSUER` may be plain HTTP in dev. The HTTPS requirement is a startup
+  check, and dev environments are exempt from all of them.
+
 ## Production
 
 Production runs the same two services (a FastAPI backend and an nginx image that
@@ -336,7 +440,15 @@ path did not move. Anything of that kind is listed here.
   the household embedded in a chore, due, unscheduled, history or filter-options
   response; `completed_timezone` on a history entry, which is the zone that closure's
   lateness was judged in (`null` for closures predating it - fall back to the
-  household's `timezone`).
+  household's `timezone`); the `oidc_*` group on `GET /api/v1/settings`.
+- **New single sign-on endpoints.** `GET /api/v1/auth/methods` is public and reports
+  which ways in exist (`password_enabled`, `oidc_enabled`, `oidc_provider_name`).
+  `GET /api/v1/auth/oidc/start` and `GET /api/v1/auth/oidc/callback` are the flow
+  itself: both are browser redirects rather than JSON, and both 404 when no provider
+  is configured. A non-browser client should keep using `POST /auth/login`.
+- **`POST /api/v1/auth/login` can now return 403.** Only when `OIDC_ONLY=true` with a
+  provider configured, meaning password sign-in is switched off server-wide. Distinct
+  from the 401 for bad credentials: retrying with a different password will not help.
 
 One more consequence of migrating before serving: the backend now needs the
 database at startup, where before it would come up and answer 503s until Postgres
@@ -387,8 +499,14 @@ Then set:
   still the placeholder, if you are generating the key before setting the
   password. The real password would then never authenticate, and only wiping
   `./volumes/db` would clear it. `generate-key` needs no database at all.
-- `APP_BASE_URL` to your real public HTTPS origin (used to build email links).
+- `APP_BASE_URL` to your real public HTTPS origin (used to build email links, and
+  the OIDC redirect URI is derived from it).
 - SMTP values if you want account confirmation or the test-email button.
+- `OIDC_ISSUER`, `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` if you want single
+  sign-on (see [Single sign-on](#single-sign-on-optional)). All three or none:
+  a partly filled group refuses boot, as does a non-HTTPS issuer, and so does
+  `OIDC_ONLY=true` with no provider configured. Register the redirect URI shown
+  on **Admin > Server settings** with your provider.
 
 The prod stack forces `ENVIRONMENT=prod`, `COOKIES_SECURE=true`, and
 `TRUST_FORWARDED_FOR=true` regardless of `.env`, so cookies are HTTPS-only and
@@ -525,6 +643,10 @@ container entrypoint, before Python starts.
 | `MAX_REQUEST_BYTES` | `6291456` | App-level cap on any request body (~6 MB, 413 past it). Defence in depth behind nginx's `client_max_body_size`; keep the two in sync. |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM` | unset / `587` | SMTP for confirmation and test emails. Confirmation and the test button need at least a host and from address. |
 | `SMTP_STARTTLS` / `SMTP_USE_TLS` | `true` / `false` | STARTTLS (port 587) vs implicit TLS (port 465); mutually exclusive. |
+| `OIDC_ISSUER` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | unset | Single sign-on provider. **boot-checked**: all three or none, and the issuer must be HTTPS. The redirect URI is derived from `APP_BASE_URL`, not configured. |
+| `OIDC_PROVIDER_NAME` | `SSO` | Name on the sign-in button ("Sign in with Authentik"). Cosmetic. |
+| `OIDC_SCOPES` | `openid email profile` | Scopes requested. `openid` is required and `email` is what accounts are matched on, so only widen this. |
+| `OIDC_ONLY` | `false` | Turn password sign-in off: hides the credential form and makes `POST /auth/login` 403. Does not gate confirmation links (see the SSO section). **boot-checked** against having no provider configured, which would lock everyone out. |
 
 ## Commands
 
@@ -580,7 +702,9 @@ prod compose files run; behind several, gate them with a lock (Redis is already 
 **Clearing a lockout:** repeated failed logins lock out both the attempted email
 and the client IP for the window. `clear-login-throttle` with a user id clears
 only that user's per-email counter (a user maps to an email, never to an IP);
-with no argument it clears every counter, per-email and per-IP.
+with no argument it clears every sign-in counter: the password ones, the
+two-factor ones, and the two single sign-on ones (all per-email, per-user or
+per-IP as appropriate).
 
 ### Lost admin access
 
@@ -683,3 +807,5 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
 ### Todo
 
 - [ ] Live updates when a housemate completes a chore (websocket)
+- [ ] In statistics, add a list of 5 most skipped chores (only show chores with skip > 0, a maximum of 5) (maybe a chart similar to Completions per person)
+- [ ] Api to fetch today chores for paper display (api key should bypass oidc login form restriction)
