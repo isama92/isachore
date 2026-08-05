@@ -30,6 +30,8 @@ and can keep its own error vocabulary (the ``sso_error`` codes) separate from th
 provider's.
 """
 
+import base64
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -305,6 +307,49 @@ def _claim_is_true(value: Any) -> bool:
     return False
 
 
+def describe_token(id_token: str) -> str:
+    """How a token was put together, for a log line when it will not verify.
+
+    A bare `id_token did not verify: DecodeError` says only that something is wrong, and the
+    five things it could be (an unsigned token, a symmetric one, an encrypted one, a key id we
+    do not hold, a mangled string) each need a different fix on the provider. This turns that
+    into `3 segments, alg=RS256 kid=abc123` and names the keys we had to check it against, so
+    the answer is in the log instead of in a bisect.
+
+    **Only the header, never the payload.** The JOSE header describes how the token was made -
+    algorithm, key id, media types - and is public by construction. The payload is the
+    identity: `sub`, `email`, and whatever else the provider was asked for, so it is exactly
+    what must not end up in a log that ships off-box under someone else's retention. The
+    signature is left out too, being the one part an attacker would want.
+    """
+    segments = id_token.split(".")
+    shape = f"{len(segments)} segments"
+    if len(segments) < 2:
+        return shape
+    try:
+        # A compact JOSE header is base64url with the padding stripped; put it back.
+        raw = segments[0]
+        header = json.loads(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)))
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return f"{shape}, unreadable header"
+    if not isinstance(header, dict):
+        return f"{shape}, header is not an object"
+    # `enc` only appears on an encrypted token, and five segments is the other half of that
+    # tell, so an operator who set an Encryption Key on the provider by mistake reads it here
+    # rather than wondering why a working provider produces garbage.
+    named = " ".join(f"{k}={header[k]}" for k in ("alg", "enc", "kid", "typ", "cty") if k in header)
+    return f"{shape}, {named}" if named else shape
+
+
+def describe_keys(key_set: KeySet) -> str:
+    """The key ids we were checking against, so a `kid` mismatch is visible on one line."""
+    try:
+        kids = [key.kid or "<no kid>" for key in key_set.keys]
+    except Exception:  # pragma: no cover - defensive, a KeySet always has .keys
+        return "unknown"
+    return ", ".join(kids) if kids else "none published"
+
+
 def build_identity(
     claims: dict[str, Any], userinfo: dict[str, Any], *, issuer: str
 ) -> OidcIdentity:
@@ -374,7 +419,11 @@ async def _verify_id_token(
             break
         except JoseError as exc:
             if force:
-                raise OidcError(f"id_token did not verify: {type(exc).__name__}") from exc
+                raise OidcError(
+                    f"id_token did not verify: {type(exc).__name__} "
+                    f"({describe_token(id_token)}; provider keys: {describe_keys(key_set)}; "
+                    f"algorithms tried: {', '.join(algorithms)})"
+                ) from exc
     if token is None:  # pragma: no cover - the loop either breaks or raises
         raise OidcError("id_token did not verify")
 
