@@ -487,6 +487,36 @@ async def test_create_household_requires_a_known_timezone(
     assert good.json()["timezone"] == "Europe/Amsterdam"
 
 
+async def test_a_zone_that_is_not_a_place_is_refused(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    """`available_timezones()` is a superset of what a browser can format with - 599 names against
+    `Intl.supportedValuesOf`'s 418 here - and two of the extras are not places at all.
+    `new Intl.DateTimeFormat('en-GB', {timeZone: 'localtime'})` throws `RangeError`, as does
+    `Factory`, so storing either put a value in the database that every page rendering a household
+    timestamp would crash on.
+
+    The frontend degrades an unformattable zone rather than throwing (`renderableZone`), so this
+    is about keeping the stored value honest rather than about the crash. `localtime` is wrong on
+    its own terms too: it resolves to the *container's* zone, so it would move with a base-image
+    bump.
+    """
+    user = await make_user()
+    household = await make_household(members=[user], admin=user)
+    client = await auth_client(user)
+
+    for bad in ("localtime", "Factory"):
+        created = await client.post("/api/v1/households", json={"name": "X", "timezone": bad})
+        assert created.status_code == 422, bad
+        patched = await client.patch(f"/api/v1/households/{household.id}", json={"timezone": bad})
+        assert patched.status_code == 422, bad
+    # A real place with the same shape still goes through, so this is a two-name exclusion rather
+    # than a narrower allowlist.
+    assert (
+        await client.patch(f"/api/v1/households/{household.id}", json={"timezone": "Asia/Tokyo"})
+    ).status_code == 200
+
+
 async def test_chores_created_in_a_household_use_its_zone(
     make_user: MakeUser,
     make_household: MakeHousehold,

@@ -37,12 +37,14 @@ export function TimezoneSelect({ value, onChange, labelledBy, id, className }: P
   // the household's own zone rather than wherever the last search left the cursor.
   const [highlighted, setHighlighted] = useState(value)
 
-  // Offsets are only computed for the rows that exist, once per open rather than per
-  // keystroke: `zoneOffsetLabel` builds an Intl.DateTimeFormat each call, and 420 of those on
-  // every character typed is enough to feel it.
+  // Built on first open rather than on mount, and not per keystroke either: `zoneOffsetLabel`
+  // constructs an `Intl.DateTimeFormat` per call, so 418 of them is ~34ms - fine as the cost of
+  // opening the picker, needless jank on every mount of the form around it. Keyed on `open` also
+  // keeps the offsets honest across a DST transition in a long-lived tab, which a module-level
+  // cache would not.
   const zones = useMemo(
-    () => timezoneNames().map((zone) => ({ zone, offset: zoneOffsetLabel(zone) })),
-    [],
+    () => (open ? timezoneNames().map((zone) => ({ zone, offset: zoneOffsetLabel(zone) })) : []),
+    [open],
   )
   // The trigger's own offset, memoised for the same reason as the list: `zoneOffsetLabel` builds
   // an `Intl.DateTimeFormat` per call, and the trigger re-renders on every keystroke in the form

@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { browserTimezone, timezoneNames, zoneLabel, zoneOffsetLabel } from './timezones'
+import {
+  browserTimezone,
+  renderableZone,
+  timezoneNames,
+  zoneLabel,
+  zoneOffsetLabel,
+} from './timezones'
 
 describe('timezoneNames', () => {
   it('offers the browser list, including the zones the app cares about', () => {
@@ -64,5 +70,28 @@ describe('zoneOffsetLabel', () => {
     // Only reachable if the browser's own list and its formatter disagree. A throw here would
     // take out the whole household form, which is a far worse outcome than a missing offset.
     expect(zoneOffsetLabel('Mars/Olympus_Mons')).toBe('')
+  })
+})
+
+describe('renderableZone', () => {
+  it('passes through a zone the browser can format with', () => {
+    expect(renderableZone('Europe/Amsterdam')).toBe('Europe/Amsterdam')
+    expect(renderableZone('UTC')).toBe('UTC')
+  })
+
+  it('drops a zone Intl rejects, so a formatter falls back instead of throwing', () => {
+    // Python's `available_timezones()` reports both of these and the backend used to accept
+    // them; `new Intl.DateTimeFormat('en-GB', {timeZone: 'localtime'})` throws RangeError. An
+    // uncaught throw here happens inside a table cell renderer, so main.tsx's ErrorBoundary
+    // replaces the whole app with the reload screen - including the Households page that could
+    // set the value back. undefined is what Intl options take to mean "the viewer's zone".
+    expect(renderableZone('localtime')).toBeUndefined()
+    expect(renderableZone('Factory')).toBeUndefined()
+    expect(renderableZone('Mars/Olympus_Mons')).toBeUndefined()
+  })
+
+  it('treats no zone as no zone', () => {
+    expect(renderableZone(undefined)).toBeUndefined()
+    expect(renderableZone('')).toBeUndefined()
   })
 })

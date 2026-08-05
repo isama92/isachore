@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import i18n from '../i18n/i18n'
-import { assignmentOptions, formatDate, repeatLabel, repeatOptions, weekdayKeys } from './chores'
+import {
+  assignmentOptions,
+  formatDate,
+  repeatLabel,
+  repeatOptions,
+  todayISO,
+  weekdayKeys,
+} from './chores'
 import type { Chore, RepeatPeriod } from './types'
 
 // Just the fields repeatLabel reads, so a case reads as the schedule it describes.
@@ -106,5 +113,13 @@ describe('repeatLabel', () => {
     expect(repeatLabel(it_, schedule('weekly', 1, [1, 4]))).not.toBe(
       repeatLabel(t, schedule('weekly', 1, [1, 4])),
     )
+  })
+})
+
+describe('todayISO with an unformattable zone', () => {
+  it("falls back to the viewer's zone rather than throwing", () => {
+    // Reached from ChoreForm, so a throw here takes out the create/edit page.
+    expect(() => todayISO('localtime')).not.toThrow()
+    expect(todayISO('localtime')).toMatch(/^\d{4}-\d{2}-\d{2}$/)
   })
 })

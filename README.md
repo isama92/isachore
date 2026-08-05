@@ -326,6 +326,17 @@ path did not move. Anything of that kind is listed here.
   `has_description: bool` instead; fetch `GET /api/v1/chores/{id}` for the markup.
   `POST /chores`, `GET /chores/{id}` and `PATCH /chores/{id}` are unchanged and
   still carry the full description.
+- **`POST /api/v1/households` now requires `timezone`**, an IANA name such as
+  `Europe/Amsterdam`. Deliberately with no default: falling back to UTC would let a
+  client that has not been updated create households that silently reckon days in the
+  wrong place, which is the bug per-household timezones exist to fix. A missing field
+  is a 422 naming it. `PATCH /households/{id}` takes it optionally, and omitting it
+  leaves the zone alone.
+- **New response fields, all additive.** `timezone` on every household payload and on
+  the household embedded in a chore, due, unscheduled, history or filter-options
+  response; `completed_timezone` on a history entry, which is the zone that closure's
+  lateness was judged in (`null` for closures predating it - fall back to the
+  household's `timezone`).
 
 One more consequence of migrating before serving: the backend now needs the
 database at startup, where before it would come up and answer 503s until Postgres

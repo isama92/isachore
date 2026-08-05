@@ -142,12 +142,24 @@ def downgrade() -> None:
     # Put the slots back on midnight UTC, mirroring the upgrade's transform. This has to run
     # BEFORE the column is dropped: it reads h.timezone, so dropping first would leave the
     # rows re-anchored with nothing left to reverse them by.
+    #
+    # This is the ONE place a zone the *user* chose reaches Postgres. `upgrade()` is safe because
+    # every row holds BACKFILL_ZONE by then; here the values are whatever owners have picked
+    # since, and Postgres carries its own tz database - so a name it does not share ("time zone
+    # ... not recognized") would abort the rollback part-way through. Hence the
+    # `pg_timezone_names` guard rather than a bare `AT TIME ZONE h.timezone`: an unrecognised
+    # zone falls back to UTC, which reverses that household's rows to exactly where a
+    # pre-timezone database had them. Wrong for that household in the same way the whole
+    # downgrade is (see the docstring), and vastly better than a migration that stops half-done.
     op.execute(
         """
         UPDATE chore_occurrences o
-        SET scheduled_for = (o.scheduled_for AT TIME ZONE h.timezone) AT TIME ZONE 'UTC'
+        SET scheduled_for = (
+            o.scheduled_for AT TIME ZONE COALESCE(pg_tz.name, 'UTC')
+        ) AT TIME ZONE 'UTC'
         FROM chores c
         JOIN households h ON h.id = c.household_id
+        LEFT JOIN pg_timezone_names pg_tz ON pg_tz.name = h.timezone
         WHERE o.chore_id = c.id
           AND c.repeats <> 'manual'
         """

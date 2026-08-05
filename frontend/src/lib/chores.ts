@@ -1,6 +1,7 @@
 import type { TFunction } from 'i18next'
 import i18n from '../i18n/i18n'
 import { localeFor } from '../i18n/languages'
+import { renderableZone } from './timezones'
 import type { AssignmentType, Chore, RepeatPeriod } from './types'
 
 // Option values in display order. The human labels live in the translation
@@ -82,7 +83,7 @@ export function repeatLabel(
 // recomputed slot lands on an occurrence the chore has already completed.
 export function todayISO(timeZone?: string): string {
   const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
+    timeZone: renderableZone(timeZone),
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -120,6 +121,6 @@ export function formatDateTime(iso: string, timeZone?: string): string {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-    timeZone,
+    timeZone: renderableZone(timeZone),
   })
 }

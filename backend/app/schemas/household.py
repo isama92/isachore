@@ -7,9 +7,25 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 from app.models.household import HouseholdRole
 from app.models.household_invitation import HouseholdInvitationStatus
 
-# Every IANA name this Python knows. Resolved once at import: `available_timezones()` walks
-# the tz database directory, which is far too much work to repeat per request.
-_KNOWN_ZONES = frozenset(available_timezones())
+# Two names `available_timezones()` reports that are not places a household can be in, and that
+# every browser rejects: `new Intl.DateTimeFormat('en-GB', {timeZone: 'localtime'})` throws
+# `RangeError`, as does `Factory`. Accepting them stored a value the frontend could not format
+# with, which took out every page rendering a household timestamp - the ErrorBoundary in
+# `main.tsx` replaced the whole app with the reload screen, including the Households page that
+# could have set it back. `localtime` is wrong on its own terms too: it resolves to the
+# *container's* zone, so it would move with a base-image bump.
+#
+# The frontend degrades unknown zones rather than throwing (`renderableZone`), so this narrowing
+# is not what prevents the crash - it is what keeps the stored value honest, and it is why the
+# closed set here is narrower than "whatever tzdata ships".
+_NOT_A_PLACE = frozenset({"localtime", "Factory"})
+
+# Every IANA name this Python knows, less the two above. Resolved once at import:
+# `available_timezones()` walks the tz database directory, which is far too much work to repeat
+# per request. Note this is still a superset of the browser's `Intl.supportedValuesOf('timeZone')`
+# (599 against 418 in this container), which lists canonical zones only - so a valid stored value
+# can still be one the picker cannot offer back. That is what `renderableZone`'s fallback is for.
+_KNOWN_ZONES = frozenset(available_timezones()) - _NOT_A_PLACE
 
 
 def _known_timezone(value: str) -> str:

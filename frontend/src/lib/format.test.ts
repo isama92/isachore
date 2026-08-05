@@ -49,3 +49,14 @@ describe('formatDateTimeFull', () => {
     expect(formatDateTimeFull('nope')).toBe('nope')
   })
 })
+
+describe('an unformattable zone', () => {
+  it("degrades to the viewer's zone rather than throwing", () => {
+    // The whole app is inside an ErrorBoundary, so a throw from a date cell is a reload screen.
+    // These must return a formatted date, not blow up.
+    expect(() => formatDateTime('2026-06-15T12:00:00Z', 'localtime')).not.toThrow()
+    expect(formatDateTime('2026-06-15T12:00:00Z', 'localtime')).toMatch(/Jun/)
+    expect(() => formatDateTimeFull('2026-06-15T12:00:00Z', 'Factory')).not.toThrow()
+    expect(formatDateTimeFull('2026-06-15T12:00:00Z', 'Factory')).toMatch(/\d{1,2}:\d{2}/)
+  })
+})

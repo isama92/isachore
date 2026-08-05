@@ -50,6 +50,10 @@ async def get_home(
     # per zone. Nearly always an `or_` of one, since a user's households are nearly always in
     # the same place. See `local_day_bounds` for why this is Python rather than SQL.
     zones = await zones_in_scope(session, user.id, household_id)
+    # Precomputed rather than derived inside the comprehension below, matching how stats.py
+    # shapes the same thing: a one-element `for ... in [local_day_bounds(...)]` used as a `let`
+    # reads as a mistake even when it is not.
+    windows = {tz: local_day_bounds(now, tz) for tz in zones}
 
     # Unscheduled chores are deliberately absent from both queries below: they carry no due
     # date, so they can be neither overdue nor due today, and counting them in today's
@@ -134,12 +138,11 @@ async def get_home(
             *[
                 and_(
                     Chore.household_id.in_(ids),
-                    ChoreOccurrence.completed_at >= day_start,
-                    ChoreOccurrence.completed_at < day_end,
-                    ChoreOccurrence.scheduled_for < day_end,
+                    ChoreOccurrence.completed_at >= windows[tz][0],
+                    ChoreOccurrence.completed_at < windows[tz][1],
+                    ChoreOccurrence.scheduled_for < windows[tz][1],
                 )
                 for tz, ids in zones.items()
-                for day_start, day_end in [local_day_bounds(now, tz)]
             ],
         ),
     ]

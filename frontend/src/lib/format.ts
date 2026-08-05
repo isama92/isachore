@@ -1,5 +1,6 @@
 import i18n from '../i18n/i18n'
 import { localeFor } from '../i18n/languages'
+import { renderableZone } from './timezones'
 
 // Format a full ISO datetime string (e.g. "2026-01-01T00:00:00Z") in the active
 // language's locale (en -> en-GB, it -> it-IT). Unlike formatDate in
@@ -18,7 +19,7 @@ export function formatDateTime(iso: string, timeZone?: string): string {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
-    timeZone,
+    timeZone: renderableZone(timeZone),
   })
 }
 
@@ -33,6 +34,6 @@ export function formatDateTimeFull(iso: string, timeZone?: string): string {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-    timeZone,
+    timeZone: renderableZone(timeZone),
   })
 }

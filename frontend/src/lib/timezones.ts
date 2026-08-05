@@ -58,6 +58,36 @@ export function browserTimezone(): string {
   return detected && timezoneNames().includes(detected) ? detected : 'UTC'
 }
 
+// Zones already checked against `Intl`, so a formatter called per table row pays the probe once
+// rather than per render. Bounded by the number of distinct zones a session actually sees.
+const renderable = new Map<string, boolean>()
+
+// `timeZone` if the browser can format with it, else undefined - which is what `Intl` options
+// take to mean "the viewer's own zone".
+//
+// Load-bearing rather than defensive. Python's `available_timezones()` is a *superset* of
+// `Intl.supportedValuesOf('timeZone')`: 599 names against 418 here, and two of the extras
+// (`localtime`, `Factory`) throw `RangeError` in every browser. The backend now refuses those on
+// write, but a household stored one before that, or a zone newer than this browser's tz database,
+// reaches the same place - and an uncaught throw inside a cell renderer hits `main.tsx`'s
+// ErrorBoundary and replaces the whole app with the reload screen, including the Households page
+// that could set the value back. Degrading to the viewer's zone is what the app did before
+// household zones existed, so it is the right floor.
+export function renderableZone(timeZone?: string): string | undefined {
+  if (!timeZone) return undefined
+  let ok = renderable.get(timeZone)
+  if (ok === undefined) {
+    try {
+      new Intl.DateTimeFormat('en-GB', { timeZone })
+      ok = true
+    } catch {
+      ok = false
+    }
+    renderable.set(timeZone, ok)
+  }
+  return ok ? timeZone : undefined
+}
+
 // The current UTC offset of a zone, as the browser writes it ("GMT+2", "GMT-11:30").
 // Recomputed rather than cached because it changes with DST, and a picker showing a
 // half-year-old offset would be actively misleading.
