@@ -570,10 +570,14 @@ pre-commit run --all-files                           # what the git hook runs
     - **Re-anchoring the done `scheduled_for` is not the alternative either.** It looks like it
       works on the case you first try and does not generalise: a completion at 23:30 local on its
       due day reads 0 days late in Amsterdam and 1 after the same move, re-anchored or not.
-    - **Only historical judgements read the snapshot**: `days_late` (History and stats) and the
-      stats bucket key. `days_since` on Unscheduled and Home's "done today" window are anchored
-      to *now*, so they stay in the household's current zone - pairing a snapshot operand with a
-      live one compares two calendars.
+    - **Only historical judgements read the snapshot**: `days_late` (History and stats), the
+      stats bucket key, and History's rendering of `completed_at` - which is on the wire as
+      `HistoryEntryRead.completed_timezone` for exactly that. A row must not render its timestamp
+      in a different zone from the one its lateness was computed in: a closure at 21:00Z reads
+      "5 Jul, 23:00 / on time" in Amsterdam and "6 Jul, 11:00 / on time" against a 5 July due date
+      once the household moves to Kiritimati. `days_since` on Unscheduled and Home's "done today"
+      window are the other side of the line - anchored to *now*, so they stay in the household's
+      current zone, and pairing a snapshot operand with a live one compares two calendars.
     - NULL means "not judged yet" (every open row) or "closed before the column existed", where
       the fallback is the household's current zone: the old behaviour, and all the migration's
       backfill can honestly reconstruct. Note the timezone migration re-anchors done rows too (it

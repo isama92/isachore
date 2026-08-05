@@ -675,7 +675,14 @@ async def test_lateness_survives_a_move_because_the_closure_snapshots_its_zone(
     assert resp.status_code == 200
 
     # Still 0. Without the snapshot this reads 1.
-    assert (await client.get("/api/v1/completions")).json()["items"][0]["days_late"] == 0
+    row = (await client.get("/api/v1/completions")).json()["items"][0]
+    assert row["days_late"] == 0
+    # And the snapshot is on the wire, still naming where the closure happened rather than where
+    # the household now is - which is what lets the client render `completed_at` in the same zone
+    # `days_late` was computed in. Rendered in the household's current zone instead, this row
+    # would show a completion date that contradicts its own lateness badge.
+    assert row["completed_timezone"] == "Europe/Amsterdam"
+    assert row["household"]["timezone"] == "Pacific/Niue"
 
 
 async def test_a_stats_bucket_survives_a_move_for_the_same_reason(

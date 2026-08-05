@@ -248,7 +248,15 @@ export default function History() {
       id: 'created_at',
       accessorFn: (e) => e.completed_at,
       header: t('history.headers.completed'),
-      cell: ({ row }) => formatDateTime(row.original.completed_at, row.original.household.timezone),
+      // The zone the closure was judged in, falling back to the household's current one for
+      // rows closed before that was recorded - mirroring `closure_zone` on the server. NOT
+      // `household.timezone` outright: `days_late` in the next column is computed from the
+      // snapshot, so this would drift away from it the moment the household moved.
+      cell: ({ row }) =>
+        formatDateTime(
+          row.original.completed_at,
+          row.original.completed_timezone ?? row.original.household.timezone,
+        ),
       meta: { cellClassName: 'font-medium text-muted-foreground' },
     },
     {

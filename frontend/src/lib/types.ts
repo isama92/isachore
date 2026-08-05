@@ -164,6 +164,12 @@ export type HistoryEntry = {
   title: string
   scheduled_for: string
   completed_at: string
+  // The zone this closure was judged in. `completed_at` renders in it, not in the household's
+  // current zone: `days_late` is computed from it server-side, so rendering the timestamp
+  // anywhere else lets a row show a completion date that contradicts its own lateness badge
+  // after the household moves. null for closures written before the column existed, where
+  // `household.timezone` is the fallback.
+  completed_timezone: string | null
   skipped: boolean
   days_late: number | null
   completed_by: HouseholdMember | null

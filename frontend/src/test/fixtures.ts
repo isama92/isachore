@@ -187,6 +187,9 @@ export function makeHistoryEntry(overrides: Partial<HistoryEntry> = {}): History
     title: 'Clean the bathroom',
     scheduled_for: '2026-07-16T00:00:00Z',
     completed_at: '2026-07-16T14:30:00Z',
+    // The zone the closure was judged in. UTC by default like the household fixture, so the
+    // existing History date assertions keep meaning what they did.
+    completed_timezone: 'UTC',
     skipped: false,
     days_late: 0,
     completed_by: makeHouseholdMember(),

@@ -173,6 +173,7 @@ async def list_completions(
             title=occ.title,
             scheduled_for=occ.scheduled_for,
             completed_at=occ.completed_at,
+            completed_timezone=occ.completed_timezone,
             skipped=occ.skipped,
             # An unscheduled chore has no deadline, so it can be neither late nor on time.
             # Nor can a skip: it had a deadline, but nothing was done to be punctual about,
