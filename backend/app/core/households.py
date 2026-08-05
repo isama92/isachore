@@ -190,6 +190,11 @@ async def zones_in_scope(
     of one day-window clause per zone rather than a single global window. A user's households
     are nearly always in one zone, so that is nearly always an `or_` of one.
 
+    Keyed by `ZoneInfo`, so two names for the same place (`UTC` and `Etc/UTC`) are separate keys
+    and produce two identical ORed windows. Harmless duplication, and deliberate: keying by the
+    resolved offset instead would merge zones that agree today and diverge at the next DST
+    transition, which is exactly the bug this whole feature is about.
+
     `household_id` and `min_role` mirror the caller's own scope so the grouping cannot include
     a household the surrounding query excludes - a stats window keyed on a household the
     deputy scope drops would widen nothing, but it would be a lie waiting to be relied on.

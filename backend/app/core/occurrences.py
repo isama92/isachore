@@ -7,7 +7,7 @@ household one, which re-anchors slots when a household moves timezone - and the 
 already imports from the household router, so the reverse would be a cycle.
 """
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -67,9 +67,17 @@ async def free_slot_from(
     to step, since a candidate only exists when there is a start date (never `manual`), and it
     terminates because every step strictly advances while the done set is finite.
 
-    The `taken` set holds UTC-aware rows straight from Postgres while `candidate` is anchored
-    in the household's zone, and that mismatch is fine: aware datetimes hash and compare by
-    the instant they name, not by how it is written, so membership is representation-blind.
+    The `taken` set holds UTC-aware rows straight from Postgres while `candidate` is anchored in
+    the household's zone, so **the membership test normalises to UTC first**. That is not
+    belt-and-braces: aware datetimes hash by the instant they name, but inter-zone `==` is *not
+    reflexive for a local time inside a DST gap* (PEP 495), and local midnight is exactly such a
+    time in the zones whose transition is at 24:00 (`America/Santiago` among them). So on that one
+    day a year `slot in taken` matched the hash bucket, compared unequal, and reported a taken slot
+    as free - handing back the unclearable 409 this function exists to prevent. Verified:
+
+        taken = {2026-09-06T04:00Z};  candidate = 2026-09-06T00:00 America/Santiago
+        candidate.astimezone(UTC) in taken -> True
+        candidate in taken                -> False
 
     Note this is one of the two queries that deliberately does NOT filter out skipped rows
     (see `ChoreOccurrence.skipped`). The question here is which slots are *occupied*, not
@@ -90,7 +98,7 @@ async def free_slot_from(
         .all()
     )
     slot = candidate
-    while slot in taken:
+    while slot.astimezone(UTC) in taken:
         slot = next_slot_after(slot, rule, tz)
     return slot
 
@@ -108,9 +116,20 @@ async def reanchor_open_occurrences(
 
     Three deliberate exclusions:
 
-    - **Done rows.** History is a record of when things actually happened; re-anchoring it
-      would rewrite the past to match a decision made afterwards. `completed_at` is untouched
-      everywhere for the same reason.
+    - **Done rows**, which is a trade rather than a clean win and should not be read as "history
+      is immutable". `completed_at` genuinely is, but `days_late` is derived at read time from the
+      household's *current* zone, so leaving a done slot alone lets a closure that was on time
+      start reporting a day late (History's badge, `punctuality`, `on_time_rate`). The
+      confirmation dialog says so rather than promising otherwise.
+
+      The timezone migration re-anchors done rows and is right to: it is one statement applying a
+      uniform downward shift to rows that all sit at midnight UTC, so no intermediate state
+      collides. Row-by-row through the ORM is different - a uniform *forward* shift can put one
+      row onto a slot the next has not vacated, which `uq_occurrence_chore_scheduled` rejects
+      mid-transaction. Reachable for a chore that was once `manual`, whose done rows sit at
+      arbitrary completion times rather than a day apart. Doing it here would mean ordering the
+      updates by shift direction; the durable fix is to snapshot the zone at closing time, as
+      `title` already is (README todo).
     - **Unscheduled (`manual`) chores.** Their slot is the moment the chore was last completed
       ("available since"), not a calendar anchor, so it is already a correct instant.
     - **Soft-deleted chores.** Nothing shows them and nothing can complete them, so moving

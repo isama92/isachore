@@ -7,6 +7,7 @@ from sqlalchemy import ColumnElement, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, SessionDep
+from app.core import clock
 from app.core.config import settings
 from app.core.households import (
     HOUSEHOLD_SORT_COLUMNS,
@@ -494,7 +495,7 @@ async def update_household(
 async def delete_household(household_id: int, user: CurrentUser, session: SessionDep) -> None:
     household = await _get_owned_household(session, user.id, household_id)
     # Soft delete: hide the household but leave its chores untouched.
-    household.deleted_at = datetime.now(UTC)
+    household.deleted_at = clock.now()
     await session.commit()
 
 

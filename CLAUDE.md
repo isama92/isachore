@@ -551,7 +551,24 @@ pre-commit run --all-files                           # what the git hook runs
     which validates against `available_timezones()` on write.
   - **Changing a household's zone re-anchors its OPEN slots** (`apply_timezone_change` ->
     `reanchor_open_occurrences`), reinterpreting each wall-clock reading in the new zone so
-    "due 5 August" still says 5 August. Done rows stay put - history records what happened.
+    "due 5 August" still says 5 August. Done rows stay put, and that is a **trade rather than a
+    clean win**, so do not read "history records what happened" as the whole story. `completed_at`
+    is genuinely immutable, but `days_late` is derived at read time from the household's *current*
+    zone, so a closure that was on time can start reporting a day late: a slot at 22:00Z with a
+    completion at 21:00Z the next day is 0 days late in Amsterdam and 1 in Pacific/Niue. History's
+    badge, `punctuality` and `on_time_rate` all move with it, and the confirmation dialog says so.
+
+    Note the **migration makes the opposite choice** - it has no `status` filter, so it re-anchors
+    done rows too, which is what keeps historical lateness readings intact across the one-time
+    UTC-to-local reinterpretation. That asymmetry is deliberate and is about *how* each one
+    writes, not about what history means. The migration is a single statement applying a uniform
+    downward shift to rows that all sit at midnight UTC, so no intermediate state can collide.
+    The runtime path writes row by row through the ORM, where a uniform *forward* shift can put
+    one row onto the slot the next one has not vacated yet - reachable for a chore that was once
+    `manual`, whose done rows sit at arbitrary completion times. Re-anchoring history there would
+    need the updates ordered by shift direction. The durable answer is neither: snapshot the zone
+    (or the lateness) onto the occurrence at closing time, the way `title` is already snapshotted
+    so history survives a rename. Tracked in README's todo.
     Every candidate goes through `free_slot_from`, because the new instant can land on a slot
     the chore has already completed, and the select takes `FOR UPDATE OF chore_occurrences` so a
     concurrent `POST /complete` cannot flip a row to `done` between the read and the write - the

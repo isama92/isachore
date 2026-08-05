@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.households import apply_timezone_change
@@ -36,6 +36,7 @@ from app.core.chores import (
     next_slot_after,
 )
 from app.core.households import household_zone
+from app.core.occurrences import free_slot_from
 from app.models import Chore, ChoreOccurrence, Household, OccurrenceStatus, RepeatPeriod, User
 
 MakeUser = Callable[..., Awaitable[User]]
@@ -47,6 +48,8 @@ AuthClient = Callable[[User], Awaitable[AsyncClient]]
 AMSTERDAM = ZoneInfo("Europe/Amsterdam")
 KIRITIMATI = ZoneInfo("Pacific/Kiritimati")  # UTC+14, always
 NIUE = ZoneInfo("Pacific/Niue")  # UTC-11, always
+# Springs forward at 24:00, so local midnight does not exist on the transition date.
+SANTIAGO = ZoneInfo("America/Santiago")
 UTC_ZONE = ZoneInfo("UTC")
 
 DAILY = RecurrenceRule.of(RepeatPeriod.daily)
@@ -196,6 +199,101 @@ def test_local_day_bounds_stretch_across_a_dst_transition() -> None:
     # `test_the_transition_day_really_is_short` for why a same-zone subtraction cannot see it.
     start, end = local_day_bounds(datetime(2026, 10, 25, 12, 0, tzinfo=UTC), AMSTERDAM)
     assert end.astimezone(UTC) - start.astimezone(UTC) == timedelta(hours=25)
+
+
+async def test_free_slot_from_sees_a_taken_slot_at_a_nonexistent_local_midnight(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    db_session: AsyncSession,
+) -> None:
+    """A gap-local candidate must still find a done row at the same instant.
+
+    `America/Santiago` springs forward at 24:00, so local midnight on 6 September 2026 does not
+    exist. Python resolves it under `fold=0` to a real instant - but inter-zone `==` is not
+    reflexive for a time in a gap (PEP 495), so the household-zone candidate compared *unequal*
+    to the identical UTC instant Postgres returns, while hashing to the same bucket. The set
+    lookup therefore reported an occupied slot as free and handed back the unclearable 409
+    `free_slot_from` exists to prevent.
+
+    Revert the `.astimezone(UTC)` in the membership test and this returns the collision instead
+    of stepping past it.
+    """
+    user = await make_user()
+    household = await make_household(members=[user], timezone="America/Santiago")
+    chore = await make_chore(
+        household=household,
+        start_date=date(2026, 9, 6),
+        repeats=RepeatPeriod.daily,
+        with_occurrence=False,
+    )
+    candidate = first_occurrence(date(2026, 9, 6), DAILY, SANTIAGO)
+    # The slot is occupied by a completed row at exactly that instant.
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=candidate,
+        status=OccurrenceStatus.done,
+        completed_at=candidate,
+        completed_by=user,
+    )
+
+    slot = await free_slot_from(db_session, chore.id, candidate, DAILY, SANTIAGO)
+
+    assert slot.astimezone(UTC) != candidate.astimezone(UTC), "walked past nothing"
+    assert slot.astimezone(SANTIAGO).date() == date(2026, 9, 7)
+
+
+# --- the two implementations of one transform -------------------------------
+
+
+async def test_the_sql_and_python_reanchor_transforms_agree(db_session: AsyncSession) -> None:
+    """The timezone migration re-anchors slots in SQL (`AT TIME ZONE` twice) and
+    `reanchor_open_occurrences` does the same thing in Python. Two implementations of one rule,
+    in two languages, with two tz databases behind them - the pair in this change most likely to
+    drift, and nothing else compares them (pytest never executes a migration).
+
+    Both express "read this instant's wall clock in one zone, then call that reading local to
+    another". The migration's `from` zone is always UTC; the runtime's is whatever the household
+    was in, so UTC is just the case they share.
+
+    The cases are the ones that could disagree: either side of both DST transitions in a zone
+    that has them, the date line in both directions, a half-hour offset, and a zone whose
+    transition is at midnight (`America/Santiago`), where local midnight does not exist on the
+    spring date and Python resolves it under `fold=0`.
+    """
+    moments = [
+        datetime(2026, 8, 5, tzinfo=UTC),  # summer
+        datetime(2026, 1, 5, tzinfo=UTC),  # winter
+        datetime(2026, 3, 29, tzinfo=UTC),  # EU spring-forward date
+        datetime(2026, 10, 25, tzinfo=UTC),  # EU fall-back date
+        datetime(2026, 9, 6, tzinfo=UTC),  # Santiago springs forward at 24:00
+        datetime(2026, 8, 5, 13, 45, tzinfo=UTC),  # a non-midnight slot (ex-`manual` chore)
+    ]
+    zones = [
+        "Europe/Amsterdam",
+        "Pacific/Kiritimati",
+        "Pacific/Niue",
+        "Asia/Kathmandu",  # +05:45
+        "America/Santiago",
+        "UTC",
+    ]
+    for zone in zones:
+        for moment in moments:
+            sql = await db_session.scalar(
+                text("SELECT (:ts AT TIME ZONE 'UTC') AT TIME ZONE :zone").bindparams(
+                    ts=moment, zone=zone
+                )
+            )
+            python = moment.astimezone(UTC).replace(tzinfo=ZoneInfo(zone))
+            # Both sides normalised to UTC before comparing, which is load-bearing rather than
+            # tidiness: inter-zone `==` is not reflexive for a local time inside a DST gap
+            # (PEP 495), so the `America/Santiago` case below compares unequal to its own
+            # instant if you skip this. That is the same trap `free_slot_from`'s set membership
+            # had to be fixed for, and the reason this case is in the list at all.
+            assert sql == python.astimezone(UTC), (
+                f"{zone} at {moment.isoformat()}: SQL {sql} != Python {python}"
+            )
 
 
 # --- household_zone ---------------------------------------------------------

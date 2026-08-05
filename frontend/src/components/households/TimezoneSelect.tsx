@@ -44,6 +44,10 @@ export function TimezoneSelect({ value, onChange, labelledBy, id, className }: P
     () => timezoneNames().map((zone) => ({ zone, offset: zoneOffsetLabel(zone) })),
     [],
   )
+  // The trigger's own offset, memoised for the same reason as the list: `zoneOffsetLabel` builds
+  // an `Intl.DateTimeFormat` per call, and the trigger re-renders on every keystroke in the form
+  // around it.
+  const selectedOffset = useMemo(() => zoneOffsetLabel(value), [value])
 
   return (
     <Popover
@@ -65,7 +69,7 @@ export function TimezoneSelect({ value, onChange, labelledBy, id, className }: P
         >
           <span className="truncate">
             {zoneLabel(value)}
-            <span className="ml-2 text-muted-foreground">{zoneOffsetLabel(value)}</span>
+            <span className="ml-2 text-muted-foreground">{selectedOffset}</span>
           </span>
           <ChevronsUpDownIcon className="size-4 shrink-0 text-muted-foreground" />
         </button>
@@ -83,8 +87,10 @@ export function TimezoneSelect({ value, onChange, labelledBy, id, className }: P
         <Command
           value={highlighted}
           onValueChange={setHighlighted}
-          filter={(value, search, keywords) =>
-            [value, ...(keywords ?? [])].join(' ').toLowerCase().includes(search.toLowerCase())
+          filter={(itemValue, search, keywords) =>
+            // Named `itemValue`, not `value`: this is cmdk's per-row value and shadowing the
+            // component's `value` prop here would be one rename away from a silent bug.
+            [itemValue, ...(keywords ?? [])].join(' ').toLowerCase().includes(search.toLowerCase())
               ? 1
               : 0
           }

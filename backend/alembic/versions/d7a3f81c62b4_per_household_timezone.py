@@ -87,10 +87,18 @@ def upgrade() -> None:
     # assignee or re-date the slot - so `created_at` alone no longer answers "is this what it
     # was".
     #
-    # `server_default now()` plus NOT NULL fills every existing row in one pass (the same shape
-    # as chore_occurrences.skipped in 5c15efc03a8c), and the UPDATE then walks them back to
-    # `created_at`: a row nothing has touched should report when it was made, not when this
-    # migration ran.
+    # `server_default now()` plus NOT NULL makes every existing row valid without a follow-up
+    # NULL sweep, the same shape as chore_occurrences.skipped in 5c15efc03a8c. Note `now()` is
+    # volatile, so unlike a constant default this cannot use Postgres's metadata-only fast path:
+    # the ADD COLUMN rewrites the table and the UPDATE below rewrites it again. Fine at household
+    # scale, but it is two passes rather than one.
+    #
+    # The backfill sets every row to `created_at`, *including* the ones this revision just
+    # re-anchored, which looks like a contradiction and is a deliberate choice: there is no edit
+    # history to reconstruct, `created_at` is the only honest approximation available for a
+    # pre-existing row, and re-anchoring changed how a slot is *represented* rather than anything
+    # a member did. Stamping the migration's own clock instead would tell every reader that
+    # somebody edited every occurrence the day this deployed, which is worse.
     op.add_column(
         "chore_occurrences",
         sa.Column(

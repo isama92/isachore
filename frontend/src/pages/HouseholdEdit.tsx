@@ -57,7 +57,15 @@ export default function HouseholdEdit() {
   }, [id, t])
 
   async function save({ name, timezone }: HouseholdFormValues) {
-    await api.patch<Household>(endpoints.households.byId(id), { name, timezone })
+    await api.patch<Household>(endpoints.households.byId(id), {
+      name,
+      // The zone is omitted when it has not moved, which makes this a genuine partial update.
+      // Round-tripping it unconditionally couples renaming to the zone still being valid: a row
+      // holding a name Python no longer knows - the exact case `household_zone`'s UTC fallback
+      // exists for - would 422 on every save, and TimezoneSelect cannot offer it back either, so
+      // the household would become unrenameable with no in-app way out.
+      ...(timezone !== household?.timezone ? { timezone } : {}),
+    })
     toast.success(t('households.toastUpdated'))
     await navigate(routes.households.list)
   }

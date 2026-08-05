@@ -3,7 +3,7 @@ import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router'
 import ChoreCreate from './ChoreCreate'
-import { todayISO } from '../lib/chores'
+import { formatDate, todayISO } from '../lib/chores'
 import { mockFetch, renderWithProviders, membershipsFor } from '../test/utils'
 import { makeChore, makeHousehold, makeHouseholdMember, makeTag, makeUser } from '../test/fixtures'
 import type { Page } from '../lib/types'
@@ -48,6 +48,25 @@ function singleHouseholdMocks() {
       body: page([makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })]),
     },
     { path: TAGS, method: 'GET', body: page([makeTag({ id: 3, name: 'deep-clean' })]) },
+    { path: '/api/v1/chores', method: 'POST', status: 201, body: makeChore() },
+  ])
+}
+
+// Two households whose local dates can never agree: +14 and -11 are 25 hours apart, so they sit
+// on different calendar days at every instant. That is what lets the household-switch test below
+// assert a change without pinning a clock.
+function twoZoneMocks() {
+  return mockFetch([
+    {
+      path: /\/api\/v1\/households(\?|$)/,
+      method: 'GET',
+      body: page([
+        makeHousehold({ id: 1, name: 'East', timezone: 'Pacific/Kiritimati' }),
+        makeHousehold({ id: 2, name: 'West', timezone: 'Pacific/Niue' }),
+      ]),
+    },
+    { path: MEMBERS, method: 'GET', body: page([]) },
+    { path: TAGS, method: 'GET', body: page([]) },
     { path: '/api/v1/chores', method: 'POST', status: 201, body: makeChore() },
   ])
 }
@@ -666,5 +685,34 @@ describe('ChoreCreate', () => {
 
     await screen.findByText('chores-list')
     expect(postBody(fetchMock)).toMatchObject({ household_id: 2 })
+  })
+
+  it('re-derives the start date when the household changes zone', async () => {
+    // `start_date` is a calendar date the backend reads in the household's zone, so an
+    // untouched one has to follow a household switch. It used to be frozen at mount from
+    // whichever household happened to load first, which is a silent day out for anyone whose
+    // households straddle midnight.
+    const fetchMock = twoZoneMocks()
+    withRoutes()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    await user.type(await screen.findByLabelText('Title'), 'Bins')
+    // Household 1 (Kiritimati) is the default: lowest id.
+    expect(screen.getByRole('button', { name: /Start date/ })).toHaveTextContent(
+      formatDate(todayISO('Pacific/Kiritimati')),
+    )
+
+    await user.click(screen.getByRole('combobox', { name: 'Household' }))
+    await user.click(await screen.findByRole('option', { name: 'West' }))
+
+    expect(screen.getByRole('button', { name: /Start date/ })).toHaveTextContent(
+      formatDate(todayISO('Pacific/Niue')),
+    )
+    await user.click(screen.getByRole('button', { name: 'Add chore' }))
+    await screen.findByText('chores-list')
+    expect(postBody(fetchMock)).toMatchObject({
+      household_id: 2,
+      start_date: todayISO('Pacific/Niue'),
+    })
   })
 })

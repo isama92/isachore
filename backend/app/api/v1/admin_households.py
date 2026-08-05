@@ -1,4 +1,3 @@
-from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -17,6 +16,7 @@ from app.api.v1.households import (
     set_household_admin,
     set_member_role,
 )
+from app.core import clock
 from app.core.households import add_member
 from app.models import Household, HouseholdRole
 from app.schemas import (
@@ -110,7 +110,7 @@ async def update_household(
 async def delete_household(household_id: int, _: AdminUser, session: SessionDep) -> None:
     household = await _get_household_or_404(session, household_id)
     if household.deleted_at is None:
-        household.deleted_at = datetime.now(UTC)
+        household.deleted_at = clock.now()
         await session.commit()
 
 

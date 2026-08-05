@@ -320,6 +320,37 @@ describe('HouseholdEdit', () => {
     await waitFor(() => expect(value.refresh).toHaveBeenCalled())
   })
 
+  it('still sends the timezone when it did move, after confirming', async () => {
+    // The other half of the partial-update guard above: omitting an unchanged zone must not
+    // become omitting a changed one, which would silently drop the whole point of the field.
+    const fetchMock = stubFetch({
+      household: makeHousehold({ id: 5, name: 'Flat', timezone: 'UTC' }),
+      members: [],
+      mutate: () => jsonBody(makeHousehold({ id: 5, name: 'Flat', timezone: 'Europe/Amsterdam' })),
+    })
+    renderEdit(fetchMock)
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    await screen.findByDisplayValue('Flat')
+    await user.click(screen.getByLabelText('Timezone'))
+    await user.type(await screen.findByPlaceholderText('Search timezones'), 'Amsterdam')
+    await user.click(within(await screen.findByRole('dialog')).getByText('Europe / Amsterdam'))
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    // Moving the zone re-dates scheduled chores, so it goes through the confirmation.
+    await user.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', {
+        name: 'Change timezone',
+      }),
+    )
+
+    expect(await screen.findByText('households-list')).toBeInTheDocument()
+    const patch = fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')
+    expect(JSON.parse(String(patch![1]?.body))).toEqual({
+      name: 'Flat',
+      timezone: 'Europe/Amsterdam',
+    })
+  })
+
   it('patches the name and navigates back', async () => {
     let patched: string | null = null
     const fetchMock = stubFetch({
@@ -341,8 +372,10 @@ describe('HouseholdEdit', () => {
     expect(await screen.findByText('households-list')).toBeInTheDocument()
     expect(patched).toContain('/api/v1/households/5')
     const patch = fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')
-    // The stored zone rides along unchanged; the fixture household is on UTC.
-    expect(JSON.parse(String(patch![1]?.body))).toEqual({ name: 'New', timezone: 'UTC' })
+    // No `timezone` key at all: it did not move, so the PATCH is a genuine partial update.
+    // Sending it back unconditionally would make a household whose stored zone the backend no
+    // longer accepts impossible to rename.
+    expect(JSON.parse(String(patch![1]?.body))).toEqual({ name: 'New' })
   })
 
   it('removes a member after confirmation', async () => {

@@ -42,7 +42,10 @@ hour or two ahead of it saw yesterday's chores after midnight.
 
 Moving a household to a different zone re-dates its scheduled chores so they keep the dates they
 already showed - a chore due on 5 August still says 5 August - and asks for confirmation first.
-Completed history is never touched.
+
+Past completions keep the times they were done at, but how late each one was is worked out
+against the household's current timezone, so a few can read a day differently after a move. That
+is the one thing a move changes about history, and the confirmation says so.
 
 ### Household roles
 
@@ -669,4 +672,9 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
 ### Todo
 
 - [x] Per-household timezone, so due dates follow the household's day rather than UTC
+- [ ] Snapshot a completion's timezone (or its lateness) onto the occurrence, so moving a
+      household stops re-measuring how late its past chores were. Today `days_late` is derived
+      from the household's current zone, so a closure that was on time can later report a day
+      late; the timezone confirmation dialog warns about it. `chore_occurrences.title` is the
+      precedent, snapshotted so history survives a chore rename. (or migrate completed_at time)
 - [ ] Live updates when a housemate completes a chore (websocket)
