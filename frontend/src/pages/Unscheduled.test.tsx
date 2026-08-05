@@ -13,14 +13,14 @@ const FILTERS = '/api/v1/completions/filters'
 
 // One household, one member: the filter bar has nothing to offer and stays hidden.
 const SOLO_OPTIONS: HistoryFilterOptions = {
-  households: [{ id: 1, name: 'Flat' }],
+  households: [{ id: 1, name: 'Flat', timezone: 'UTC' }],
   members: [makeHouseholdMember({ id: 1, first_name: 'Alex', last_name: 'Kim' })],
 }
 
 const MULTI_OPTIONS: HistoryFilterOptions = {
   households: [
-    { id: 1, name: 'Flat' },
-    { id: 2, name: 'Cottage' },
+    { id: 1, name: 'Flat', timezone: 'UTC' },
+    { id: 2, name: 'Cottage', timezone: 'UTC' },
   ],
   members: [
     makeHouseholdMember({ id: 1, first_name: 'Alex', last_name: 'Kim' }),

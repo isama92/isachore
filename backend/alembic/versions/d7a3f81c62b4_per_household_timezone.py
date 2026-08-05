@@ -104,7 +104,31 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Downgrade schema."""
+    """Downgrade schema.
+
+    **Reversal is only faithful while every household still holds BACKFILL_ZONE.** The slot
+    transform below is a true inverse, but it is the only half that is: this drops the column
+    that records where each household is, and `upgrade()` then sets every row back to
+    BACKFILL_ZONE unconditionally, because a re-added column cannot tell "never had a zone"
+    from "had Pacific/Niue".
+
+    Traced on a household that had moved to Pacific/Niue, for a slot due 25 July:
+
+        stored 2026-07-25T11:00Z  ->  downgrade 2026-07-25T00:00Z  ->  re-upgrade 2026-07-24T22:00Z
+
+    Note what does and does not survive. The slot moves by 13 hours but its local date is
+    still the 25th, because it is now local midnight in Amsterdam instead of in Niue - so the
+    chore still *reads* as due on the 25th. What is lost is the household's zone, and from then
+    on it reckons "today" against a place it is not in, which is precisely the bug this
+    revision exists to fix.
+
+    So before rolling this back for real, snapshot the choices:
+
+        SELECT id, name, timezone FROM households;
+
+    and restore them afterwards. There is no way for the migration to do it: the values are
+    gone by the time the re-upgrade runs.
+    """
     op.drop_column("chore_occurrences", "updated_at")
 
     # Put the slots back on midnight UTC, mirroring the upgrade's transform. This has to run

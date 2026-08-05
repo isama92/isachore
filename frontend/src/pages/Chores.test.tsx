@@ -407,8 +407,8 @@ describe('Chores', () => {
     const fetchMock = stubFetch({
       chores: [makeChoreRow({ id: 7, title: 'Scrub the tub' })],
       households: [
-        makeHousehold({ id: 1, name: 'Flat 3B' }),
-        makeHousehold({ id: 2, name: 'Beach House' }),
+        makeHousehold({ id: 1, name: 'Flat 3B', timezone: 'UTC' }),
+        makeHousehold({ id: 2, name: 'Beach House', timezone: 'UTC' }),
       ],
     })
     renderWithProviders(<Chores />, {
@@ -440,8 +440,8 @@ describe('Chores', () => {
     const fetchMock = stubFetch({
       chores: [makeChoreRow({ id: 7, title: 'Scrub the tub' })],
       households: [
-        makeHousehold({ id: 1, name: 'Flat 3B' }),
-        makeHousehold({ id: 2, name: 'Beach House' }),
+        makeHousehold({ id: 1, name: 'Flat 3B', timezone: 'UTC' }),
+        makeHousehold({ id: 2, name: 'Beach House', timezone: 'UTC' }),
       ],
     })
     renderWithProviders(<Chores />, { authValue: { user: me } })
@@ -455,8 +455,8 @@ describe('Chores', () => {
     const fetchMock = stubFetch({
       chores: [makeChoreRow({ id: 7, title: 'Scrub the tub' })],
       households: [
-        makeHousehold({ id: 1, name: 'Flat 3B' }),
-        makeHousehold({ id: 2, name: 'Beach House' }),
+        makeHousehold({ id: 1, name: 'Flat 3B', timezone: 'UTC' }),
+        makeHousehold({ id: 2, name: 'Beach House', timezone: 'UTC' }),
       ],
     })
     renderWithProviders(<Chores />, {
@@ -474,7 +474,7 @@ describe('Chores', () => {
   it('hides the household filter when the user has a single household', async () => {
     stubFetch({
       chores: [makeChoreRow({ title: 'Scrub the tub' })],
-      households: [makeHousehold({ id: 1, name: 'Flat 3B' })],
+      households: [makeHousehold({ id: 1, name: 'Flat 3B', timezone: 'UTC' })],
     })
     renderWithProviders(<Chores />, { authValue: { user: me } })
 
@@ -498,7 +498,7 @@ describe('Chores', () => {
   it('shows the title filter even when the user has a single household', async () => {
     stubFetch({
       chores: [makeChoreRow({ title: 'Scrub the tub' })],
-      households: [makeHousehold({ id: 1, name: 'Flat 3B' })],
+      households: [makeHousehold({ id: 1, name: 'Flat 3B', timezone: 'UTC' })],
     })
     renderWithProviders(<Chores />, { authValue: { user: me } })
 
@@ -580,8 +580,8 @@ describe('Chores', () => {
     const fetchMock = stubFetch({
       chores: [makeChoreRow({ id: 7, title: 'Scrub the tub' })],
       households: [
-        makeHousehold({ id: 1, name: 'Flat 3B' }),
-        makeHousehold({ id: 2, name: 'Beach House' }),
+        makeHousehold({ id: 1, name: 'Flat 3B', timezone: 'UTC' }),
+        makeHousehold({ id: 2, name: 'Beach House', timezone: 'UTC' }),
       ],
     })
     renderWithProviders(<Chores />, {

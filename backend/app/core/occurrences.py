@@ -121,6 +121,13 @@ async def reanchor_open_occurrences(
     a slot the chore has already completed, which `uq_occurrence_chore_scheduled` would turn
     into a 409 the caller cannot clear by retrying. Only `session.add` semantics here - the
     caller commits, matching `record_log_entry` and `record_event`.
+
+    Deliberately N+1: one `free_slot_from` SELECT per open occurrence, all of them inside the
+    lock. A conscious trade, not an oversight - a household has tens of chores, not thousands,
+    and this runs when somebody edits a setting rather than on any read path. Collapsible to one
+    query if it ever matters (fetch every `done` slot for the household's non-manual chores at or
+    after `min(candidates)`, group by `chore_id`, then walk in memory), at the cost of
+    duplicating the walk `free_slot_from` already owns.
     """
     rows = (
         (

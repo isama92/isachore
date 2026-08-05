@@ -68,7 +68,7 @@ describe('Households', () => {
 
   it('links to the create and edit pages when the user owns the household', async () => {
     // makeHousehold defaults admin_id to 1, the signed-in user's id.
-    stubFetch({ households: [makeHousehold({ id: 7, name: 'Flat 3B' })] })
+    stubFetch({ households: [makeHousehold({ id: 7, name: 'Flat 3B', timezone: 'UTC' })] })
     renderWithProviders(<Households />, { authValue: { user: me } })
 
     await screen.findByText('Flat 3B')
@@ -131,7 +131,7 @@ describe('Households', () => {
   it('soft-deletes a household after confirmation', async () => {
     let deleted = ''
     const fetchMock = stubFetch({
-      households: [makeHousehold({ id: 3, name: 'Flat 3B' })],
+      households: [makeHousehold({ id: 3, name: 'Flat 3B', timezone: 'UTC' })],
       mutate: (method, url) => {
         if (method === 'DELETE') deleted = url
         return jsonBody(undefined, 204)

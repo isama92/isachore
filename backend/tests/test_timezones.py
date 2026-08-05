@@ -451,6 +451,50 @@ async def test_changing_the_timezone_keeps_open_chores_on_their_local_date(
     assert slot.astimezone(NIUE).date() == date(2026, 8, 5)
 
 
+async def test_the_admin_surface_re_anchors_too(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    """Both PATCH handlers call the same helper, but the whole point of sharing it is that
+    neither surface can silently skip the re-anchor - so drive the admin one end to end. A
+    household whose zone moved from Admin > Households and did not re-date would leave chores a
+    day off depending on which page the change was made from."""
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    household = await make_household(members=[admin], timezone="Europe/Amsterdam")
+    chore = await make_chore(
+        household=household, start_date=date(2026, 8, 5), repeats=RepeatPeriod.yearly
+    )
+    client = await auth_client(admin)
+
+    resp = await client.patch(
+        f"/api/v1/admin/households/{household.id}", json={"timezone": "Pacific/Niue"}
+    )
+    assert resp.status_code == 200
+    slot = await db_session.scalar(
+        select(ChoreOccurrence.scheduled_for).where(
+            ChoreOccurrence.chore_id == chore.id,
+            ChoreOccurrence.status == OccurrenceStatus.open,
+        )
+    )
+    assert slot == datetime(2026, 8, 5, 11, 0, tzinfo=UTC)  # local midnight on the 5th in Niue
+
+
+async def test_the_admin_surface_rejects_an_unknown_timezone(
+    make_user: MakeUser, make_household: MakeHousehold, auth_client: AuthClient
+) -> None:
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    household = await make_household(members=[admin])
+    client = await auth_client(admin)
+
+    resp = await client.patch(
+        f"/api/v1/admin/households/{household.id}", json={"timezone": "Mars/Olympus_Mons"}
+    )
+    assert resp.status_code == 422
+
+
 async def test_changing_the_timezone_leaves_history_alone(
     make_user: MakeUser,
     make_household: MakeHousehold,

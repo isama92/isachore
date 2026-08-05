@@ -30,7 +30,7 @@ function jsonBody(data: unknown, status = 200): Response {
 
 function stubFetch(opts: { entries: HistoryEntry[]; options?: HistoryFilterOptions }): FetchMock {
   const options = opts.options ?? {
-    households: [{ id: 1, name: 'Test Household' }],
+    households: [{ id: 1, name: 'Test Household', timezone: 'UTC' }],
     members: [me],
   }
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -137,7 +137,7 @@ describe('History', () => {
     const fetchMock = stubFetch({
       entries: [makeHistoryEntry({ id: 7, title: 'Scrub the tub' })],
       options: {
-        households: [{ id: 1, name: 'Test Household' }],
+        households: [{ id: 1, name: 'Test Household', timezone: 'UTC' }],
         members: [me, makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })],
       },
     })
@@ -156,8 +156,8 @@ describe('History', () => {
       entries: [makeHistoryEntry({ id: 7, title: 'Scrub the tub' })],
       options: {
         households: [
-          { id: 1, name: 'Flat 3B' },
-          { id: 2, name: 'Beach House' },
+          { id: 1, name: 'Flat 3B', timezone: 'UTC' },
+          { id: 2, name: 'Beach House', timezone: 'UTC' },
         ],
         members: [me],
       },
@@ -188,8 +188,8 @@ describe('History', () => {
       entries: [makeHistoryEntry({ id: 7, title: 'Scrub the tub' })],
       options: {
         households: [
-          { id: 1, name: 'Flat 3B' },
-          { id: 2, name: 'Beach House' },
+          { id: 1, name: 'Flat 3B', timezone: 'UTC' },
+          { id: 2, name: 'Beach House', timezone: 'UTC' },
         ],
         members: [me, makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })],
       },
@@ -208,7 +208,7 @@ describe('History', () => {
   it('hides the person filter when there is a single member', async () => {
     stubFetch({
       entries: [makeHistoryEntry({ title: 'Scrub the tub' })],
-      options: { households: [{ id: 1, name: 'Flat 3B' }], members: [me] },
+      options: { households: [{ id: 1, name: 'Flat 3B', timezone: 'UTC' }], members: [me] },
     })
     renderWithProviders(<History />)
 
@@ -329,8 +329,8 @@ describe('History', () => {
       ],
       options: {
         households: [
-          { id: 1, name: 'Test Household' },
-          { id: 2, name: 'Beach House' },
+          { id: 1, name: 'Test Household', timezone: 'UTC' },
+          { id: 2, name: 'Beach House', timezone: 'UTC' },
         ],
         members: [me, jo],
       },
@@ -400,8 +400,8 @@ describe('History', () => {
       entries: [makeHistoryEntry({ id: 1, title: 'Scrub the tub' })],
       options: {
         households: [
-          { id: 1, name: 'Flat 3B' },
-          { id: 2, name: 'Beach House' },
+          { id: 1, name: 'Flat 3B', timezone: 'UTC' },
+          { id: 2, name: 'Beach House', timezone: 'UTC' },
         ],
         members: [me],
       },
@@ -428,8 +428,8 @@ describe('History', () => {
       entries: [makeHistoryEntry({ id: 1, title: 'Scrub the tub' })],
       options: {
         households: [
-          { id: 1, name: 'Flat 3B' },
-          { id: 2, name: 'Beach House' },
+          { id: 1, name: 'Flat 3B', timezone: 'UTC' },
+          { id: 2, name: 'Beach House', timezone: 'UTC' },
         ],
         members: [me, makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })],
       },

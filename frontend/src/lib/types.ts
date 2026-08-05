@@ -173,7 +173,7 @@ export type HistoryEntry = {
 // Option lists for the History filters: GET /api/v1/completions/filters. Also reused by
 // Statistics and by Logs, each narrowing the household list client-side.
 export type HistoryFilterOptions = {
-  households: { id: number; name: string }[]
+  households: ChoreHousehold[]
   members: HouseholdMember[]
 }
 

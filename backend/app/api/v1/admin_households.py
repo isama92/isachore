@@ -101,8 +101,8 @@ async def update_household(
         household.name = payload.name
     if payload.admin_id is not None:
         await set_household_admin(session, household, payload.admin_id)
-    await apply_timezone_change(session, household, payload.timezone)
-    await commit_household_update(session)
+    rescheduled = await apply_timezone_change(session, household, payload.timezone)
+    await commit_household_update(session, rescheduled=rescheduled)
     return await load_household_read(session, household.id)
 
 

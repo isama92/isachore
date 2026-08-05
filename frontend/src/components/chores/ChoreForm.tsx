@@ -95,6 +95,13 @@ type Props = {
   tags: Tag[]
   // The chosen household's IANA zone. `start_date` is a calendar date the backend reads in
   // it, so "today" has to mean the household's today, not the viewer's.
+  //
+  // Known limitation: this drives the manual -> recurring refill below, but NOT a date already
+  // populated at mount. Switching household on the create page therefore keeps the first
+  // household's "today", which where the two zones straddle midnight is a day out. Left alone
+  // deliberately: refilling it would need a setState in an effect (banned here, see the eslint
+  // note in CLAUDE.md) or a remount that discards whatever the user has typed, and the field is
+  // visible and editable, so the wrong value is on screen rather than hidden.
   timezone?: string
   initial: ChoreFormValues
   submitLabel: string

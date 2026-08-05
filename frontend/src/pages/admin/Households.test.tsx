@@ -83,7 +83,7 @@ describe('AdminHouseholds', () => {
   })
 
   it('links to create and edit under the admin path', async () => {
-    stubFetch({ households: [makeHousehold({ id: 7, name: 'Active One' })] })
+    stubFetch({ households: [makeHousehold({ id: 7, name: 'Active One', timezone: 'UTC' })] })
     renderWithProviders(<AdminHouseholds />, { authValue: { user: admin } })
 
     await screen.findByText('Active One')

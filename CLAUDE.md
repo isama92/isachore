@@ -532,7 +532,13 @@ pre-commit run --all-files                           # what the git hook runs
     distinct zone - seeded with `false()`, which is both the right answer for a user in no
     household and what keeps it off SQLAlchemy's deprecated argument-less `or_()`. Statistics
     additionally buckets each completion by *its* household's local day and seeds its chart
-    axis over the union of the per-zone ranges.
+    axis over the union of the per-zone ranges. Two things there are easy to get wrong: the
+    per-row zone is read off a **joined `Household.timezone`** rather than a dict keyed from
+    `zones`, because the session is READ COMMITTED and a membership changing between the two
+    statements would make a subscript 500 the page; and the axis falls back to a UTC window when
+    the zone set is empty (`axis_windows`), because a **helper-only** caller reaches deputy
+    nowhere and still gets a 200 - without the floor their chart is `[]`, which recharts renders
+    as blank space rather than a flat line.
   - **Never `AT TIME ZONE <column>` at runtime.** Postgres carries its own copy of the tz
     database, so a name Python and Postgres do not share raises *inside the query* - a 500 from
     SQL rather than a 422 from a validator. The zone maths is Python's, which is also why

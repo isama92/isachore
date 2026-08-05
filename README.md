@@ -5,8 +5,9 @@ today, or coming up, shared between the people in a household, with a JSON API s
 mobile clients can join later.
 
 Features: multi-user households with invitations, ownership transfer, per-member
-roles and a per-household timezone, chores with four assignment strategies (manual, alphabetical, least-done,
-random) and turn-taking rotation, a My Chores due view with one-tap completion and daily
+roles and a per-household timezone, chores with four assignment strategies
+(manual, alphabetical, least-done, random) and turn-taking rotation, a My Chores
+due view with one-tap completion and daily
 progress, a separate Unscheduled Chores view for the ones you do whenever you feel
 like it (never due, repeatable on demand, showing how long since each was last
 done), completion history, per-household tags, a Statistics page, admin user and
@@ -288,6 +289,20 @@ docker compose -f compose.prod.tls.yml run --rm backend alembic downgrade -1   #
 Setting `RUN_MIGRATIONS=false` in `.env` is the other way out: it gets you a
 bootable container to work from, at the cost of running on the old schema until
 you migrate by hand.
+
+> **Snapshot household timezones before rolling back past `d7a3f81c62b4`.** That
+> revision's `downgrade()` drops `households.timezone`, and re-upgrading sets every
+> household back to `Europe/Amsterdam`, because a re-added column cannot tell "never
+> had a zone" from "had the one its owner picked". The chores still read as due on the
+> days they did, but the household then reckons "today" against a place it is not in.
+> So take the choices first and put them back afterwards:
+>
+> ```bash
+> docker compose -f compose.prod.tls.yml exec db \
+>     psql -U isachore -d isachore -c 'SELECT id, name, timezone FROM households'
+> ```
+>
+> Rolling back *to* that revision is unaffected; this is only about going below it.
 
 > **One instance may migrate, and only one.** If you run more than one backend
 > against the same database, set `RUN_MIGRATIONS=false` in every instance's

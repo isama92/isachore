@@ -21,15 +21,15 @@ function homeBody(done: number, total: number, items: DueChore[]) {
 // A single household + member keeps the filter bar hidden (it only renders when
 // there is more than one of either).
 const SOLO_OPTIONS: HistoryFilterOptions = {
-  households: [{ id: 1, name: 'Test Household' }],
+  households: [{ id: 1, name: 'Test Household', timezone: 'UTC' }],
   members: [makeHouseholdMember({ id: 1 })],
 }
 
 // Two of each so both filters render.
 const MULTI_OPTIONS: HistoryFilterOptions = {
   households: [
-    { id: 1, name: 'Flat A' },
-    { id: 2, name: 'Flat B' },
+    { id: 1, name: 'Flat A', timezone: 'UTC' },
+    { id: 2, name: 'Flat B', timezone: 'UTC' },
   ],
   members: [
     makeHouseholdMember({ id: 1, first_name: 'Me', last_name: 'Myself' }),

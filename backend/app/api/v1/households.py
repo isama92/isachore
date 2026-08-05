@@ -261,15 +261,23 @@ async def apply_timezone_change(
     )
 
 
-async def commit_household_update(session: SessionDep) -> None:
+async def commit_household_update(session: SessionDep, *, rescheduled: int) -> None:
     """Commit a household PATCH, mapping a slot collision to a 409 rather than a 500.
 
-    Only reachable through `apply_timezone_change`, which is the one thing on this endpoint
-    that writes occurrence rows. `free_slot_from` already walks each candidate past the slots
-    the chore has completed, so what is left is a genuine race - a completion landing between
-    that walk and this commit and taking the slot - which is exactly the shape `update_chore`
-    maps to a 409. Shared by both PATCH handlers so the two cannot drift.
+    `rescheduled` is what `apply_timezone_change` reported, and gating on it is what keeps the
+    message honest: a name-only save touches no occurrence row, so nothing on that path can
+    raise this and a caller who somehow saw it would be told a chore was completed when none
+    was. No other constraint on this endpoint can realistically raise today, which makes the
+    mislabel latent rather than live - but the fix is a branch, so there is no reason to carry it.
+
+    The collision itself needs a genuine race: `free_slot_from` already walks each candidate past
+    the slots the chore has completed, so what is left is a completion landing between that walk
+    and this commit, which is exactly the shape `update_chore` maps to a 409. Shared by both
+    PATCH handlers so the two cannot drift.
     """
+    if not rescheduled:
+        await session.commit()
+        return
     try:
         await session.commit()
     except IntegrityError:
@@ -477,8 +485,8 @@ async def update_household(
         household.name = payload.name
     if payload.admin_id is not None:
         await set_household_admin(session, household, payload.admin_id)
-    await apply_timezone_change(session, household, payload.timezone)
-    await commit_household_update(session)
+    rescheduled = await apply_timezone_change(session, household, payload.timezone)
+    await commit_household_update(session, rescheduled=rescheduled)
     return await load_household_read(session, household.id)
 
 
