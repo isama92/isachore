@@ -19,7 +19,6 @@
 
 const SSO_ERRORS = [
   'no_account',
-  'email_unverified',
   'account_disabled',
   'already_linked',
   'state',

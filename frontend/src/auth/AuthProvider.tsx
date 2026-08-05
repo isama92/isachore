@@ -18,6 +18,9 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   // service-worker-cached shell can outlive the API build it was written against, and an
   // absent list should cost the user some nav items rather than a blank screen.
   const [memberships, setMemberships] = useState<Membership[]>([])
+  // Server-wide, and adopted alongside `memberships` on every path that sets a user, so
+  // the Profile badge cannot be reading one account's state against another's server.
+  const [emailConfirmationRequired, setEmailConfirmationRequired] = useState(false)
   const [loading, setLoading] = useState(true)
   const { setTheme, setAccent } = useTheme()
   // Mirrors `user` for the 401 handler so it can read the live session without
@@ -55,6 +58,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         setUser(me)
         setImpersonating(me.impersonating)
         setMemberships(me.memberships ?? [])
+        setEmailConfirmationRequired(me.email_confirmation_required ?? false)
         syncAppearance(me)
       })
       .catch(() => {
@@ -62,6 +66,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null)
         setImpersonating(false)
         setMemberships([])
+        setEmailConfirmationRequired(false)
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -89,6 +94,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
     setImpersonating(false)
     setMemberships([])
+    setEmailConfirmationRequired(false)
     // Same reason as logout: this is a session ending, and on a shared device it is
     // the likeliest way one ends, since it takes no action from the user at all.
     clearTableSettings()
@@ -107,6 +113,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       setUser(me)
       setImpersonating(me.impersonating)
       setMemberships(me.memberships ?? [])
+      setEmailConfirmationRequired(me.email_confirmation_required ?? false)
       syncAppearance(me)
     } catch {
       // Deliberately clears nothing. A 401 here is already handled centrally: `lib/api.ts`
@@ -138,6 +145,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       setUser(res.user)
       setImpersonating(false)
       setMemberships(res.user.memberships ?? [])
+      setEmailConfirmationRequired(res.user.email_confirmation_required ?? false)
       syncAppearance(res.user)
       return { twoFactorRequired: false }
     },
@@ -151,6 +159,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       setUser(me)
       setImpersonating(false)
       setMemberships(me.memberships ?? [])
+      setEmailConfirmationRequired(me.email_confirmation_required ?? false)
       syncAppearance(me)
     },
     [syncAppearance],
@@ -161,6 +170,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
     setImpersonating(false)
     setMemberships([])
+    setEmailConfirmationRequired(false)
     // Remembered table filters name colleagues and households, so they must not
     // outlive the session on a shared device. Theme and language deliberately do
     // survive: they are this browser's preferences, not one account's data.
@@ -168,8 +178,28 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const value = useMemo(
-    () => ({ user, impersonating, memberships, loading, login, verifyTwoFactor, logout, refresh }),
-    [user, impersonating, memberships, loading, login, verifyTwoFactor, logout, refresh],
+    () => ({
+      user,
+      impersonating,
+      memberships,
+      emailConfirmationRequired,
+      loading,
+      login,
+      verifyTwoFactor,
+      logout,
+      refresh,
+    }),
+    [
+      user,
+      impersonating,
+      memberships,
+      emailConfirmationRequired,
+      loading,
+      login,
+      verifyTwoFactor,
+      logout,
+      refresh,
+    ],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

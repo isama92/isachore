@@ -39,7 +39,15 @@ export type HouseholdRole = (typeof HOUSEHOLD_ROLES)[number]
 // the Logs page is gated on.
 export type Membership = { household_id: number; role: HouseholdRole; owned: boolean }
 
-export type Me = User & { impersonating: boolean; memberships: Membership[] }
+// Whether this server asks new accounts to confirm their address. Server-wide rather than
+// personal, and on this payload because it is what tells the Profile page how to read the
+// `confirmed_at` beside it: a null means nothing on a server that never asks, and "not
+// proved" on one that does.
+export type Me = User & {
+  impersonating: boolean
+  memberships: Membership[]
+  email_confirmation_required: boolean
+}
 
 // From GET /api/v1/auth/methods, the login page's one request. Public and
 // unauthenticated, because the page that asks has nobody signed in yet.

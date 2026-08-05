@@ -499,35 +499,27 @@ pre-commit run --all-files                           # what the git hook runs
     migration is the SQL in README's single sign-on section. `cli init` clears the link too
     but only for the account it recovers and only during an admin lockout, so it is not that
     tool.
-  - **`email_verified` is only enforced when `app_settings.require_confirmation` is on**,
-    read from `get_app_settings(session)` inside the callback. With confirmation off,
-    accounts are created active without anyone proving an address, so demanding proof here
-    would make SSO stricter than every other way into the same account and would refuse
-    providers that simply omit the claim. Both directions are pinned, and they have to be:
-    a test for only the refusal also passes if the code ignores the setting and always
-    refuses. The check gates *linking*, not every sign-in, so an already-linked account is
-    not re-checked - a provider that later stops sending the claim cannot lock people out.
+  - **Verification is isachore's own question, answered by `users.confirmed_at`.** The
+    provider's `email_verified` claim is not read at all, and `OidcIdentity` has no field for
+    it. Two reasons, and the second is what settled it: the account already exists because an
+    admin created it, so the provider's job here is to prove who is at the keyboard rather
+    than to re-assert something this app already tracks; and the claim varies enough between
+    providers to be a poor gate - Authentik's default scope mapping omits it entirely, others
+    stringify it, others always send true. Gating on it turned a correctly configured
+    Authentik away with advice about verifying an address it had never made a claim about.
 
-    **What turning confirmation off actually buys an attacker, stated properly.** With the
-    check skipped, anyone who can self-assert an address inside the directory can link to and
-    sign in as the local account holding it. That is the whole exposure, and the valuable
-    target is an ordinary *active* colleague - not, as an earlier version of this note
-    implied, only an account left in `waiting_confirmation`. The pending-account case is a
-    second-order variant of the same thing (a first SSO sign-in both links *and* activates
-    it, so `waiting_confirmation` -> `active` also happens on an unverified claim), and it is
-    the narrower one, since such an account has to exist and the setting has to have been
-    turned off after it was created.
+    So the exposure is exactly this: anybody who can self-assert an address inside the
+    directory can link to and sign in as the local account holding it. Admin-created accounts
+    plus a trusted directory is what stands in for the claim. That is a deliberate product
+    decision, reaffirmed after being raised; if it ever needs closing, the narrow fix is to
+    gate *linking* on `email_verified` and accept that providers omitting the claim stop
+    working.
 
-    The rule is a deliberate product decision, reaffirmed, so this is documented rather than
-    tightened. Two narrowings if it ever needs closing: require `email_verified` on the
-    `waiting_confirmation` -> `active` transition specifically, where proof that the address
-    reaches the person is the entire point; or gate linking on it unconditionally and accept
-    that providers omitting the claim stop working.
-
-    One related wording trap: "SSO is never stricter than the rest of the app" is the
-    justification in the code and the README, and it is true, but with confirmation off the
-    local path still needs an admin to set a password, so SSO is *looser* than the local one
-    rather than merely not stricter.
+    `confirmed_at` is surfaced instead, on Profile, as a badge beside the address - shown only
+    where the server asks for confirmation at all, since a null means nothing on a server that
+    never asks. `MeRead.email_confirmation_required` is what tells a client which of those two
+    readings applies; it rides on the me payload rather than /settings because that endpoint
+    is admin-only and this is a fact every user's own page needs.
   - **`totp_enabled` is deliberately not consulted in the callback.** The provider owns
     authentication including its own MFA, so re-challenging for a local code asks the same
     person to prove themselves twice for nothing. It reads like an omission, which is why
@@ -1219,7 +1211,7 @@ the negative paths (401/403/400/404/409), not just the happy one.
     without the second, every signature check in the feature is mocked out, and that
     function is the only thing between a stranger and a session.
   - **Every guard reachable from a test was mutation-checked** (delete it, watch a test fail):
-    the conditional `email_verified` in both directions, the state cookie comparison, the
+    the state cookie comparison, the
     issuer half of the identity lookup, the `already_linked` takeover guard, the
     disabled-account refusal, the open-redirect guard on `return_to` including its length
     clause, the algorithm allowlist and its non-list guard, the non-object claims guard, both

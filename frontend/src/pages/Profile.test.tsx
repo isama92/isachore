@@ -340,3 +340,78 @@ describe('Profile', () => {
     expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument()
   })
 })
+
+describe('Profile personal data', () => {
+  it('shows the email address, read-only', () => {
+    renderWithProviders(<Profile />, {
+      authValue: { user: makeUser({ email: 'jo@example.com' }) },
+    })
+
+    expect(screen.getByText('jo@example.com')).toBeInTheDocument()
+    // Read-only: there is no field to type into, unlike the name beside it.
+    expect(screen.queryByLabelText('Email')).not.toBeInTheDocument()
+  })
+
+  it('says nothing about confirmation when the server does not ask for it', () => {
+    // A null `confirmed_at` means nothing was ever asked of this person, so a badge either
+    // way would be reporting on a process that does not run on this deployment.
+    renderWithProviders(<Profile />, {
+      authValue: {
+        user: makeUser({ confirmed_at: null }),
+        emailConfirmationRequired: false,
+      },
+    })
+
+    expect(screen.queryByText('Confirmed')).not.toBeInTheDocument()
+    expect(screen.queryByText('Not confirmed')).not.toBeInTheDocument()
+  })
+
+  it('marks a confirmed address', () => {
+    renderWithProviders(<Profile />, {
+      authValue: {
+        user: makeUser({ confirmed_at: '2026-07-25T13:06:32Z' }),
+        emailConfirmationRequired: true,
+      },
+    })
+
+    expect(screen.getByText('Confirmed')).toBeInTheDocument()
+    expect(screen.queryByText('Not confirmed')).not.toBeInTheDocument()
+  })
+
+  it('marks an unconfirmed address', () => {
+    renderWithProviders(<Profile />, {
+      authValue: {
+        user: makeUser({ confirmed_at: null }),
+        emailConfirmationRequired: true,
+      },
+    })
+
+    expect(screen.getByText('Not confirmed')).toBeInTheDocument()
+    expect(screen.queryByText('Confirmed')).not.toBeInTheDocument()
+  })
+
+  it('uses the accent for confirmed and the danger colour for unconfirmed', () => {
+    // Two states have to be told apart at a glance, so the variant carries meaning here
+    // rather than only decoration - hence asserting it rather than just the text.
+    const { unmount } = renderWithProviders(<Profile />, {
+      authValue: {
+        user: makeUser({ confirmed_at: '2026-07-25T13:06:32Z' }),
+        emailConfirmationRequired: true,
+      },
+    })
+    expect(screen.getByText('Confirmed')).toHaveAttribute('data-variant', 'default')
+    unmount()
+
+    renderWithProviders(<Profile />, {
+      authValue: { user: makeUser({ confirmed_at: null }), emailConfirmationRequired: true },
+    })
+    expect(screen.getByText('Not confirmed')).toHaveAttribute('data-variant', 'destructive')
+  })
+
+  it('reaches the section from the side menu', () => {
+    renderWithProviders(<Profile />, { authValue: { user: makeUser() } })
+
+    expect(screen.getByRole('button', { name: 'Personal data' })).toBeInTheDocument()
+    expect(document.getElementById('personal')).toBeInTheDocument()
+  })
+})

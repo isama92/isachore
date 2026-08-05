@@ -3,16 +3,12 @@ import en from '../i18n/locales/en.json'
 import { ssoErrorKey } from './sso'
 
 describe('ssoErrorKey', () => {
-  it.each([
-    'no_account',
-    'email_unverified',
-    'account_disabled',
-    'already_linked',
-    'state',
-    'provider',
-  ])('maps the %s code to its own key', (code) => {
-    expect(ssoErrorKey(code)).toBe(`login.ssoError.${code}`)
-  })
+  it.each(['no_account', 'account_disabled', 'already_linked', 'state', 'provider'])(
+    'maps the %s code to its own key',
+    (code) => {
+      expect(ssoErrorKey(code)).toBe(`login.ssoError.${code}`)
+    },
+  )
 
   it.each(['something_new', '', 'NO_ACCOUNT', '../../etc/passwd', 'fallback'])(
     'degrades %j to the fallback',
@@ -28,7 +24,6 @@ describe('ssoErrorKey', () => {
     // listed but not translated would render as a raw missing-key string.
     const codes = [
       'no_account',
-      'email_unverified',
       'account_disabled',
       'already_linked',
       'state',

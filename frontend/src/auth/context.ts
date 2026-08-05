@@ -17,6 +17,12 @@ export type AuthContextValue = {
   // changed your role mid-session) shows or hides the wrong nav item until the next
   // /auth/me and grants nothing.
   memberships: Membership[]
+  // Whether this server asks new accounts to confirm their address. A sibling for the same
+  // reason as the two above: it is a property of the deployment, not of the user account,
+  // and putting it on `user` would imply it varies per person. It is what tells the Profile
+  // page how to read that account's `confirmed_at` - a null means nothing on a server that
+  // never asks, and "not proved" on one that does.
+  emailConfirmationRequired: boolean
   loading: boolean
   login: (email: string, password: string, remember: boolean) => Promise<LoginResult>
   // Second login step: submit a TOTP or recovery code to finish signing in.

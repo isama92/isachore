@@ -103,6 +103,14 @@ class MeRead(UserRead):
     # stale copy (someone changed your role mid-session) hides or shows the wrong nav
     # item until the next /auth/me, and grants nothing.
     memberships: list[MembershipRead] = []
+    # Whether this server asks new accounts to confirm their address
+    # (`app_settings.require_confirmation`). Server-wide rather than personal, and here
+    # because it is what tells a client how to read this payload's own `confirmed_at`: a
+    # null on a server that never asks for confirmation means nothing, while on one that
+    # does it means the address has not been proved. The Profile page shows the badge only
+    # when this is true. Admins read the same flag from /settings, which is where it is
+    # editable; this copy is read-only and carries no other server configuration.
+    email_confirmation_required: bool = False
 
 
 class UserCreate(BaseModel):

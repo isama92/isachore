@@ -43,6 +43,9 @@ export function makeAuthValue(overrides: Partial<AuthContextValue> = {}): AuthCo
     // subject instead of turning into assertions about hidden nav and redirects; tests about a
     // role pass their own `memberships`.
     memberships: [{ household_id: 1, role: 'organiser', owned: true }],
+    // Off by default, matching the server default: the Profile confirmation badge is
+    // opt-in for the tests that are about it.
+    emailConfirmationRequired: false,
     loading: false,
     login: vi.fn(async () => ({ twoFactorRequired: false })),
     verifyTwoFactor: vi.fn(async () => {}),

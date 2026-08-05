@@ -376,7 +376,6 @@ describe('Login', () => {
 
     it.each([
       ['no_account', 'No isachore account exists for that address.'],
-      ['email_unverified', 'Your email address has not been verified'],
       ['account_disabled', 'This isachore account has been deactivated.'],
       ['already_linked', 'That address is already linked to a different sign-in account.'],
       ['state', 'That sign-in attempt expired or could not be verified.'],

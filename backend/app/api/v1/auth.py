@@ -13,6 +13,7 @@ from app.api.deps import (
     get_request_token,
     get_user_by_token,
 )
+from app.core.app_settings import get_app_settings
 from app.core.audit import record_event
 from app.core.config import settings
 from app.core.crypto import crypto_configured
@@ -140,8 +141,15 @@ async def _me_read(session: SessionDep, user: User, *, impersonating: bool = Fal
         MembershipRead(household_id=m.household_id, role=m.role, owned=m.owned)
         for m in await memberships_for(session, user.id)
     ]
+    # Costs no query in practice: the single settings row is identity-mapped, so the three
+    # callers of this function each read it at most once per request.
+    app_settings = await get_app_settings(session)
     return MeRead.model_validate(user).model_copy(
-        update={"impersonating": impersonating, "memberships": memberships}
+        update={
+            "impersonating": impersonating,
+            "memberships": memberships,
+            "email_confirmation_required": app_settings.require_confirmation,
+        }
     )
 
 
