@@ -511,9 +511,19 @@ pre-commit run --all-files                           # what the git hook runs
     So the exposure is exactly this: anybody who can self-assert an address inside the
     directory can link to and sign in as the local account holding it. Admin-created accounts
     plus a trusted directory is what stands in for the claim. That is a deliberate product
-    decision, reaffirmed after being raised; if it ever needs closing, the narrow fix is to
-    gate *linking* on `email_verified` and accept that providers omitting the claim stop
-    working.
+    decision, reaffirmed after being raised. Three narrowings if it ever needs closing,
+    cheapest first:
+    - **Refuse only when the claim is present and false** (`bool | None`, refuse on `False`).
+      Authentik omitting it keeps working, providers that always send true are unaffected, and
+      a directory actively reporting an unverified address is caught. The cost is real though:
+      it brings back both the tri-state read *and* per-source selection in `build_identity`,
+      since a verdict from one mapping must not be paired with the other's address.
+    - **Gate the `waiting_confirmation` -> `active` transition** on the claim when present,
+      leaving linking alone. The best-targeted of the three, because that transition is the
+      one place this app writes `confirmed_at` on the strength of a provider sign-in, and the
+      Profile badge then reports it as proved.
+    - **Gate linking unconditionally**, and accept that providers omitting the claim stop
+      working. What this app did before, and what turned a correct Authentik away.
 
     `confirmed_at` is surfaced instead, on Profile, as a badge beside the address - shown only
     where the server asks for confirmation at all, since a null means nothing on a server that

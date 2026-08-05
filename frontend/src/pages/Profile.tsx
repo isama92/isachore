@@ -330,7 +330,7 @@ export default function Profile() {
             {avatarError && <p className="mt-4 text-[13px] font-bold text-danger">{avatarError}</p>}
           </section>
 
-          {/* Name */}
+          {/* Personal data: the address, read-only, then the editable name. */}
           <section
             id="personal"
             className="scroll-mt-20 rounded-2xl border border-line bg-card p-6"
@@ -343,9 +343,16 @@ export default function Profile() {
                 is an admin's to change, so it is shown rather than edited. */}
             <div className="mb-6 flex flex-col gap-1.5">
               <Label asChild>
-                <span>{t('profile.emailLabel')}</span>
+                <span id="profile-email-label">{t('profile.emailLabel')}</span>
               </Label>
-              <div className="flex flex-wrap items-center gap-2.5">
+              {/* aria-labelledby rather than relying on adjacency: there is no control here
+                  for a <label for> to point at, so without it a screen reader reads the
+                  address with no idea what it is. */}
+              <div
+                className="flex flex-wrap items-center gap-2.5"
+                role="group"
+                aria-labelledby="profile-email-label"
+              >
                 <span className="text-sm font-semibold break-all">{user.email}</span>
                 {/* Only where the server asks for confirmation. Everywhere else a null
                     `confirmed_at` means nothing was ever asked of this person, so a badge

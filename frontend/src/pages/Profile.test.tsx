@@ -347,9 +347,10 @@ describe('Profile personal data', () => {
       authValue: { user: makeUser({ email: 'jo@example.com' }) },
     })
 
-    expect(screen.getByText('jo@example.com')).toBeInTheDocument()
-    // Read-only: there is no field to type into, unlike the name beside it.
-    expect(screen.queryByLabelText('Email')).not.toBeInTheDocument()
+    // Labelled for assistive tech even though there is no control to point a <label for> at.
+    expect(screen.getByRole('group', { name: 'Email' })).toHaveTextContent('jo@example.com')
+    // Read-only: no field to type into, unlike the name beside it.
+    expect(screen.queryByRole('textbox', { name: 'Email' })).not.toBeInTheDocument()
   })
 
   it('says nothing about confirmation when the server does not ask for it', () => {

@@ -1582,6 +1582,30 @@ def test_the_id_token_fills_the_gaps_userinfo_leaves(oidc: str) -> None:
     assert identity.email == "from-token@example.com"
 
 
+@pytest.mark.parametrize(
+    "verified",
+    [
+        # Absent is Authentik's default scope mapping, and the shape that used to refuse a
+        # correctly configured provider. The other two are what other providers send.
+        {},
+        {"email_verified": False},
+        {"email_verified": "no"},
+        {"email_verified": True},
+    ],
+)
+def test_the_verified_claim_is_ignored_wherever_it_appears(oidc: str, verified: dict) -> None:
+    """`build_identity` is the only place the raw claim mappings are read, so it is the only
+    place a per-variant test of "the claim is not consulted" means anything."""
+    identity = oidc_core.build_identity(
+        {"sub": "subject-1", "email": "jo@example.com", **verified},
+        {"sub": "subject-1", **verified},
+        issuer=ISSUER,
+    )
+
+    assert identity.email == "jo@example.com"
+    assert not hasattr(identity, "email_verified")
+
+
 def test_an_address_is_normalised_the_way_the_column_stores_it(oidc: str) -> None:
     # Local addresses are stored lower-cased, so a provider sending mixed case must still
     # find the account rather than reporting "no account".
@@ -2004,7 +2028,6 @@ async def test_a_verification_failure_says_what_it_saw(
 # --- verification is isachore's own question -----------------------------
 
 
-@pytest.mark.parametrize("claims", [{}, {"email_verified": False}, {"email_verified": "no"}])
 async def test_the_providers_view_of_the_address_does_not_gate_the_sign_in(
     client: AsyncClient,
     db_session: AsyncSession,
@@ -2012,26 +2035,22 @@ async def test_the_providers_view_of_the_address_does_not_gate_the_sign_in(
     oidc: str,
     smtp: list,
     monkeypatch: pytest.MonkeyPatch,
-    claims: dict,
 ) -> None:
     """Whether an address is verified is answered by `users.confirmed_at`, not by the
     provider, and that holds with confirmation switched on - the setting that used to be half
     of this decision.
 
-    Parametrised over absent, false and stringified because providers differ: Authentik's
-    default scope mapping omits the claim entirely, which is what makes gating on it a poor
-    idea rather than merely a strict one.
+    Deliberately runs with confirmation ON, since that is the only configuration a provider
+    gate could ever have fired in. Reinstating one would not merely fail this: `OidcIdentity`
+    has no such field, so reading it is an AttributeError.
     """
     user = await make_user(email="member@example.com")
     app_settings = await get_app_settings(db_session)
     app_settings.require_confirmation = True
     await db_session.commit()
 
-    async def _complete(**kwargs: object) -> OidcIdentity:
-        return OidcIdentity(subject="subject-1", issuer=ISSUER, email="member@example.com")
-
     stub_begin(monkeypatch)
-    monkeypatch.setattr(oidc_core, "complete", _complete)
+    stub_complete(monkeypatch)
     state = await start_flow(client)
 
     resp = await callback(client, state)

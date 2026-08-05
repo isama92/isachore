@@ -19,7 +19,9 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   // absent list should cost the user some nav items rather than a blank screen.
   const [memberships, setMemberships] = useState<Membership[]>([])
   // Server-wide, and adopted alongside `memberships` on every path that sets a user, so
-  // the Profile badge cannot be reading one account's state against another's server.
+  // the Profile badge cannot be reading one account's state against another's server. Read
+  // with `?? false` at each site for the same reason memberships uses `?? []`: an installed
+  // PWA can run a shell older than the API it is talking to.
   const [emailConfirmationRequired, setEmailConfirmationRequired] = useState(false)
   const [loading, setLoading] = useState(true)
   const { setTheme, setAccent } = useTheme()

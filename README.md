@@ -239,9 +239,11 @@ How accounts match up:
   (`python -m app.cli init` also clears it, but only for the account it recovers
   and only while no active admin exists, so it is not the tool for this.)
 - An account still *waiting confirmation* becomes active on its first SSO
-  sign-in, and its outstanding confirmation link is revoked with it: signing in
-  through the provider settles the same thing that link was there to settle. A
-  *deactivated* account is always refused.
+  sign-in, and its outstanding confirmation link is revoked with it. Note what
+  that stands on: the emailed link proves the mailbox, while a provider sign-in
+  proves the directory account an admin pointed at that address, so this is your
+  directory being trusted rather than the address being proved. The account is
+  marked confirmed either way. A *deactivated* account is always refused.
 - **Whether an address is verified is isachore's own question.** It is answered by
   the account's own confirmation (shown on **Profile** as a badge beside the
   address, where the server asks for confirmation at all), not by the provider's

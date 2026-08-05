@@ -344,9 +344,13 @@ async def callback(
 
     if user.status == UserStatus.waiting_confirmation:
         # An admin created them and the confirmation email never landed, or they never
-        # clicked it. Signing in through the provider proves the same thing that link
-        # was there to prove - that the address reaches them - so it finishes the job
-        # rather than leaving them stuck behind an SMTP relay they cannot fix.
+        # clicked it. A provider sign-in stands in for that link: it proves control of the
+        # directory account an admin pointed at this address, which is what a deployment
+        # running SSO has already decided to trust. Be precise about the difference, because
+        # `confirmed_at` is stamped here and the Profile badge reads it: the emailed link
+        # proves the *mailbox*, this proves the *directory identity*. They coincide only for
+        # a directory that verifies addresses, which is the assumption behind not reading
+        # `email_verified` at all - see the account-matching comment above.
         user.status = UserStatus.active
         user.confirmed_at = datetime.now(UTC)
         # ...and the outstanding link has to go with it, which every other path that

@@ -578,3 +578,48 @@ describe('AuthProvider email confirmation flag', () => {
     )
   })
 })
+
+describe('AuthProvider email confirmation flag, on refresh', () => {
+  it('re-adopts it on refresh', async () => {
+    // Worth its own case beyond the memberships parity: Profile calls refresh() after every
+    // save it offers, so a dropped adoption here blanks the badge on the very page that owns
+    // it, mid-session and with nothing on screen explaining why.
+    let required = true
+    mockFetch([
+      {
+        path: '/api/v1/auth/me',
+        body: () => makeMe({ email_confirmation_required: required }),
+      },
+    ])
+    renderProvider()
+    await waitFor(() =>
+      expect(screen.getByTestId('confirmation-required')).toHaveTextContent('true'),
+    )
+
+    required = false
+    await userEvent.click(screen.getByText('refresh'))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('confirmation-required')).toHaveTextContent('false'),
+    )
+  })
+
+  it('adopts it from the second step of a two-step login', async () => {
+    mockFetch([
+      { path: '/api/v1/auth/me', status: 401, body: { detail: 'Not authenticated' } },
+      {
+        path: '/api/v1/auth/verify-2fa',
+        method: 'POST',
+        body: makeMe({ email_confirmation_required: true }),
+      },
+    ])
+    renderProvider()
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'))
+
+    await userEvent.click(screen.getByText('verify'))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('confirmation-required')).toHaveTextContent('true'),
+    )
+  })
+})

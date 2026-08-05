@@ -347,6 +347,15 @@ def build_identity(
     # userinfo wins where it carries an address, the id_token fills in otherwise. Providers
     # that keep the id_token minimal send email only from userinfo, so preferring the token
     # would break them outright.
+    #
+    # This does let an *unsigned* body decide which local account a first sign-in links to,
+    # which is sound only because of what stands behind it: the response came from the
+    # provider's own endpoint over TLS, presented with an access token obtained moments
+    # earlier, and `_fetch_userinfo` refuses any body whose `sub` disagrees with the verified
+    # token. Weaken any of those and this precedence needs revisiting. It also means a second
+    # identity field read from these two mappings could not simply follow suit: two fields
+    # taken independently could pair one source's answer with the other's address, so a
+    # second one has to be selected per source rather than per field.
     email = userinfo.get("email") or claims.get("email")
     return OidcIdentity(
         subject=str(claims["sub"]),
