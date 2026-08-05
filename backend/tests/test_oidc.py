@@ -2096,3 +2096,100 @@ async def test_an_over_long_issuer_is_refused_too(
 
     assert sso_error(resp) == "provider"
     assert client.cookies.get("isachore_token") is None
+
+
+# --- diagnostics on a token that will not verify -------------------------
+
+
+def test_describe_token_names_how_it_was_signed(signing_key: RSAKey) -> None:
+    described = oidc_core.describe_token(make_id_token(signing_key))
+
+    assert "3 segments" in described
+    assert "alg=RS256" in described
+    assert f"kid={signing_key.kid}" in described
+
+
+def test_describe_token_never_includes_the_payload(signing_key: RSAKey) -> None:
+    """The header describes how the token was made and is public by construction. The payload
+    is the identity - `sub`, `email` - and is exactly what must not reach a log that ships
+    off-box under someone else's retention."""
+    token = make_id_token(signing_key, email="private@example.com", sub="secret-subject")
+
+    described = oidc_core.describe_token(token)
+
+    assert "private@example.com" not in described
+    assert "secret-subject" not in described
+    # ...nor the signature, the one part an attacker would want.
+    assert token.split(".")[2] not in described
+
+
+@pytest.mark.filterwarnings("ignore:JWS algorithm .none. is deprecated")
+def test_describe_token_names_an_unsigned_token(signing_key: RSAKey) -> None:
+    from joserfc import jws
+
+    unsigned = jws.serialize_compact(
+        {"alg": "none"}, b'{"sub":"x"}', signing_key, algorithms=["none"]
+    )
+
+    assert "alg=none" in oidc_core.describe_token(unsigned)
+
+
+def test_describe_token_spots_an_encrypted_token() -> None:
+    """Five segments plus an `enc` header is a JWE, which is what an Encryption Key set on the
+    provider produces. We do not decrypt, so an operator needs to read that off the log rather
+    than guess why a working provider suddenly emits garbage."""
+    described = oidc_core.describe_token("aaa.bbb.ccc.ddd.eee")
+
+    assert "5 segments" in described
+
+
+@pytest.mark.parametrize(
+    ("token", "expected"),
+    [
+        ("", "1 segments"),
+        ("only-one-part", "1 segments"),
+        ("!!!not-base64!!!.body.sig", "unreadable header"),
+        # Valid base64url, but the header is not a JSON object.
+        ("WyJhIl0.body.sig", "header is not an object"),
+    ],
+)
+def test_describe_token_survives_junk(token: str, expected: str) -> None:
+    # It runs on the failure path, so it must never raise and mask the real error.
+    assert expected in oidc_core.describe_token(token)
+
+
+def test_describe_keys_lists_the_key_ids(signing_key: RSAKey) -> None:
+    key_set = KeySet.import_key_set({"keys": [signing_key.as_dict(private=False)]})
+
+    assert oidc_core.describe_keys(key_set) == signing_key.kid
+
+
+def test_describe_keys_says_so_when_there_are_no_keys() -> None:
+    """Note an empty JWKS never reaches this: `KeySet.import_key_set({"keys": []})` raises
+    MissingKeyError, which `_key_set` already reports as "could not fetch signing keys". So the
+    empty branch is for a KeySet built some other way, and the distinct wording is what tells
+    those two situations apart in a log."""
+    assert oidc_core.describe_keys(KeySet([])) == "none published"
+
+
+async def test_a_verification_failure_says_what_it_saw(
+    oidc: str, signing_key: RSAKey, metadata: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The whole point: the OidcError the router logs has to carry enough to act on.
+
+    Before this, a real deployment produced `id_token did not verify: DecodeError` and nothing
+    else - which does not distinguish an unsigned token from an encrypted one from a key we do
+    not hold, and each needs a different change on the provider.
+    """
+    impostor = RSAKey.generate_key(2048, parameters={"kid": "not-ours"}, private=True)
+    stub_key_set(monkeypatch, signing_key)
+
+    with pytest.raises(OidcError) as caught:
+        await oidc_core._verify_id_token(
+            make_id_token(impostor), nonce="the-nonce", metadata=metadata
+        )
+
+    message = str(caught.value)
+    assert "kid=not-ours" in message
+    assert f"provider keys: {signing_key.kid}" in message
+    assert "algorithms tried: RS256" in message

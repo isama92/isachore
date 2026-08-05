@@ -283,6 +283,23 @@ HTTPS.
    page.
 5. Copy the client ID and secret into `.env`, restart the backend.
 
+#### When a sign-in is refused
+
+`?sso_error=provider` means verification failed, and the backend log names the
+reason. The error type narrows it to one cause:
+
+| In the log | What it means |
+| --- | --- |
+| `DecodeError` | The token is not a signed JWT. Five segments means it is **encrypted** - clear the provider's *Encryption Key*, which we do not decrypt. |
+| `UnsupportedAlgorithmError` | Signed with an algorithm we reject, usually HS256 because the provider has **no Signing Key** selected. Pick a signing certificate. |
+| `InvalidKeyIdError` | Signed with a key that is not in the published JWKS, after a forced re-fetch. |
+| `BadSignatureError` | The key id matched but the signature did not. |
+| `InvalidClaimError` | A claim was rejected - most often `iss` not matching `OIDC_ISSUER`, or `aud` not matching the client id. |
+
+The same line reports the token's header (`alg`, `kid`, and `enc` when it is
+encrypted), the key ids the provider published, and the algorithms tried. It never
+reports the payload or the signature.
+
 #### Trying it locally
 
 The dev stack ships no identity provider, so point `.env` at a real one: either
