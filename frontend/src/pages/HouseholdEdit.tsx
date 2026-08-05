@@ -8,8 +8,9 @@ import { api, ApiError } from '../lib/api'
 import { hasRoleIn } from '../lib/permissions'
 import { endpoints } from '../lib/endpoints'
 import { routes } from '../lib/routes'
+import { zoneLabel } from '../lib/timezones'
 import type { Household } from '../lib/types'
-import { HouseholdForm } from '@/components/households/HouseholdForm'
+import { HouseholdForm, type HouseholdFormValues } from '@/components/households/HouseholdForm'
 import { HouseholdInvitations } from '@/components/households/HouseholdInvitations'
 import { HouseholdMembersTable } from '@/components/households/HouseholdMembersTable'
 import { HouseholdOwnerSelect } from '@/components/households/HouseholdOwnerSelect'
@@ -55,8 +56,16 @@ export default function HouseholdEdit() {
     }
   }, [id, t])
 
-  async function save(name: string) {
-    await api.patch<Household>(endpoints.households.byId(id), { name })
+  async function save({ name, timezone }: HouseholdFormValues) {
+    await api.patch<Household>(endpoints.households.byId(id), {
+      name,
+      // The zone is omitted when it has not moved, which makes this a genuine partial update.
+      // Round-tripping it unconditionally couples renaming to the zone still being valid: a row
+      // holding a name Python no longer knows - the exact case `household_zone`'s UTC fallback
+      // exists for - would 422 on every save, and TimezoneSelect cannot offer it back either, so
+      // the household would become unrenameable with no in-app way out.
+      ...(timezone !== household?.timezone ? { timezone } : {}),
+    })
     toast.success(t('households.toastUpdated'))
     await navigate(routes.households.list)
   }
@@ -99,6 +108,7 @@ export default function HouseholdEdit() {
         <>
           <HouseholdForm
             initialName={household.name}
+            initialTimezone={household.timezone}
             submitLabel={t('common.save')}
             cancelTo={routes.households.list}
             onSubmit={save}
@@ -141,6 +151,12 @@ export default function HouseholdEdit() {
           <div className="flex max-w-lg flex-col gap-1.5">
             <Label>{t('households.nameLabel')}</Label>
             <p className="font-semibold">{household.name}</p>
+          </div>
+          {/* Read-only alongside the name: only the owner may move the zone, but everyone
+              benefits from seeing which one their due dates are reckoned in. */}
+          <div className="mt-4 flex max-w-lg flex-col gap-1.5">
+            <Label>{t('households.timezoneLabel')}</Label>
+            <p className="font-semibold">{zoneLabel(household.timezone)}</p>
           </div>
           <div className="mt-6">
             <AlertDialog>

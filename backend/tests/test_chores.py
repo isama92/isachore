@@ -85,7 +85,11 @@ async def test_create_chore(
     assert body["description"] == "Replace the towels"
     assert body["repeats"] == "daily"
     assert body["assignment_type"] == "least_done"
-    assert body["household"] == {"id": household.id, "name": household.name}
+    assert body["household"] == {
+        "id": household.id,
+        "name": household.name,
+        "timezone": household.timezone,
+    }
     assert [a["id"] for a in body["assignees"]] == [user.id]
     assert [t["name"] for t in body["tags"]] == ["deep-clean"]
 
@@ -206,7 +210,7 @@ async def test_create_chore_in_chosen_household(
 
     resp = await client.post("/api/v1/chores", json=_payload(household_id=second.id))
     assert resp.status_code == 201
-    assert resp.json()["household"] == {"id": second.id, "name": "Second"}
+    assert resp.json()["household"] == {"id": second.id, "name": "Second", "timezone": "UTC"}
     # ...and not the lowest-id one.
     assert second.id != first.id
 
@@ -363,7 +367,11 @@ async def test_list_chores_with_assignees_and_tags(
     assert body["total"] == 1
     chore = body["items"][0]
     assert chore["title"] == "Scrub the tub"
-    assert chore["household"] == {"id": household.id, "name": household.name}
+    assert chore["household"] == {
+        "id": household.id,
+        "name": household.name,
+        "timezone": household.timezone,
+    }
     assert [a["id"] for a in chore["assignees"]] == [user.id]
     assert [t["name"] for t in chore["tags"]] == ["deep-clean"]
     assert chore["repeats"] == "weekly"
@@ -722,7 +730,11 @@ async def test_get_chore(
     assert resp.status_code == 200
     body = resp.json()
     assert body["title"] == "Vacuum"
-    assert body["household"] == {"id": household.id, "name": household.name}
+    assert body["household"] == {
+        "id": household.id,
+        "name": household.name,
+        "timezone": household.timezone,
+    }
 
 
 async def test_get_chore_other_household(
@@ -792,7 +804,11 @@ async def test_update_chore(
     assert [a["id"] for a in body["assignees"]] == [other_member.id]
     assert [t["name"] for t in body["tags"]] == ["urgent"]
     # The household is unchanged and not part of the update payload.
-    assert body["household"] == {"id": household.id, "name": household.name}
+    assert body["household"] == {
+        "id": household.id,
+        "name": household.name,
+        "timezone": household.timezone,
+    }
 
 
 async def test_update_chore_recomputes_current_assignee_when_dropped_from_pool(

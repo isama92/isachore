@@ -5,7 +5,15 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Chore, ChoreOccurrence, Household, OccurrenceStatus, RepeatPeriod, User
+from app.models import (
+    Chore,
+    ChoreOccurrence,
+    Household,
+    HouseholdRole,
+    OccurrenceStatus,
+    RepeatPeriod,
+    User,
+)
 
 MakeUser = Callable[..., Awaitable[User]]
 MakeHousehold = Callable[..., Awaitable[Household]]
@@ -42,6 +50,32 @@ async def test_stats_invalid_range_422(
     client = await auth_client(user)
     resp = await client.get("/api/v1/stats?range=year")
     assert resp.status_code == 422
+
+
+async def test_stats_seeds_the_axis_for_a_caller_who_is_a_deputy_nowhere(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    auth_client: AuthClient,
+) -> None:
+    """A helper-only caller gets a 200 with nothing in it ("reads narrow, writes 403"), and
+    must still get a zero-seeded axis rather than an empty array.
+
+    The day windows are per household now, so a caller whose deputy scope is empty has no zone
+    to build an axis from - and `completions_over_time` is handed straight to recharts, which
+    renders `[]` as blank space instead of a flat line. `local_day_bounds(now, UTC)` is the
+    floor for exactly this case; it shapes only the axis, never which rows are counted.
+
+    `test_stats_empty` does not cover it: that caller is an organiser, so their scope is
+    non-empty and the axis comes from their own household's zone.
+    """
+    user = await make_user()
+    await make_household(members=[user], roles={user.id: HouseholdRole.helper})
+    client = await auth_client(user)
+
+    body = (await client.get("/api/v1/stats?range=7d")).json()
+    assert [b["bucket"] for b in body["completions_over_time"]] != []
+    assert len(body["completions_over_time"]) == 7
+    assert all(b["count"] == 0 and b["skipped"] == 0 for b in body["completions_over_time"])
 
 
 async def test_stats_empty(

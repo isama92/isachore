@@ -110,7 +110,7 @@ export default function Logs() {
       id: 'created_at',
       accessorFn: (e) => e.created_at,
       header: t('logs.headers.when'),
-      cell: ({ row }) => formatDateTime(row.original.created_at),
+      cell: ({ row }) => formatDateTime(row.original.created_at, row.original.household.timezone),
       meta: { cellClassName: 'font-medium text-muted-foreground' },
     },
     {

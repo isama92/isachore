@@ -26,7 +26,10 @@ function stubFetch(opts: {
   options?: HistoryFilterOptions
   status?: number
 }): FetchMock {
-  const options = opts.options ?? { households: [{ id: 1, name: 'Test Household' }], members: [me] }
+  const options = opts.options ?? {
+    households: [{ id: 1, name: 'Test Household', timezone: 'UTC' }],
+    members: [me],
+  }
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const path = String(input).split('?')[0]
     if (path.endsWith('/api/v1/completions/filters')) return jsonBody(options)
@@ -58,7 +61,7 @@ describe('Logs', () => {
           id: 7,
           action: 'chore_deleted',
           chore_title: 'Scrub the tub',
-          household: { id: 1, name: 'Beach House' },
+          household: { id: 1, name: 'Beach House', timezone: 'UTC' },
           actor: jo,
         }),
       ],
@@ -217,7 +220,10 @@ describe('Logs', () => {
   it('filters by the person who acted and pushes the choice into the query', async () => {
     const fetchMock = stubFetch({
       entries: [makeLogEntry({ chore_title: 'Bins' })],
-      options: { households: [{ id: 1, name: 'Test Household' }], members: [me, jo] },
+      options: {
+        households: [{ id: 1, name: 'Test Household', timezone: 'UTC' }],
+        members: [me, jo],
+      },
     })
     renderWithProviders(<Logs />, asOwner)
     const user = userEvent.setup({ pointerEventsCheck: 0 })
@@ -234,8 +240,8 @@ describe('Logs', () => {
       entries: [makeLogEntry({ chore_title: 'Bins' })],
       options: {
         households: [
-          { id: 1, name: 'Flat 3B' },
-          { id: 2, name: 'Beach House' },
+          { id: 1, name: 'Flat 3B', timezone: 'UTC' },
+          { id: 2, name: 'Beach House', timezone: 'UTC' },
         ],
         members: [me],
       },
@@ -259,8 +265,8 @@ describe('Logs', () => {
       entries: [makeLogEntry({ chore_title: 'Bins' })],
       options: {
         households: [
-          { id: 1, name: 'Flat 3B' },
-          { id: 2, name: 'Beach House' },
+          { id: 1, name: 'Flat 3B', timezone: 'UTC' },
+          { id: 2, name: 'Beach House', timezone: 'UTC' },
         ],
         members: [me],
       },

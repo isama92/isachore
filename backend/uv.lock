@@ -616,6 +616,7 @@ dependencies = [
     { name = "qrcode" },
     { name = "redis", extra = ["hiredis"] },
     { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "tzdata" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -647,6 +648,7 @@ requires-dist = [
     { name = "qrcode", specifier = ">=7.4.2" },
     { name = "redis", extras = ["hiredis"], specifier = ">=8.0.1" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.51,<2.1" },
+    { name = "tzdata", specifier = ">=2025.2" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.51.0" },
 ]
 

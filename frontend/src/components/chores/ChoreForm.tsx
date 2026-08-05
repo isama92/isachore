@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from 'react'
+import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { format } from 'date-fns'
@@ -93,6 +93,16 @@ type Props = {
   // swaps these when the household select changes.
   members: HouseholdMember[]
   tags: Tag[]
+  // The chosen household's IANA zone. `start_date` is a calendar date the backend reads in it,
+  // so "today" has to mean the household's today, not the viewer's. `startDate` below derives an
+  // untouched date from this, which is what makes it follow a household switch on the create page
+  // rather than freezing whichever household loaded first.
+  //
+  // The one case it does not follow is a date the form was *given*: cloning a scheduled chore
+  // carries that chore's start date, and switching household then keeps it. Deliberate - the date
+  // came from the thing being cloned rather than from a default - and it reads as such on screen,
+  // since the field shows exactly the date it will submit.
+  timezone?: string
   initial: ChoreFormValues
   submitLabel: string
   cancelTo: string
@@ -115,6 +125,7 @@ type Props = {
 export function ChoreForm({
   members,
   tags,
+  timezone,
   initial,
   submitLabel,
   cancelTo,
@@ -150,6 +161,17 @@ export function ChoreForm({
   // "Take turns" only applies to the auto-rotating strategies; manual instead lets
   // you pick the current person (from the selected pool). Derived so switching
   // strategy or dropping the current assignee can't submit a stale value.
+  // The date the form is actually working with: whatever the user picked, else today in the
+  // household's zone. Derived rather than stored, which is what makes switching household on the
+  // create page follow the new zone instead of keeping the first one's "today" - and it removes
+  // the period select's refill branch, since an empty value now resolves on its own.
+  // `todayISO` constructs an `Intl.DateTimeFormat`, and this runs on every keystroke in the form
+  // otherwise; the deps are exactly what it reads.
+  const startDate = useMemo(
+    () => values.start_date || todayISO(timezone),
+    [values.start_date, timezone],
+  )
+
   const isManual = values.assignment_type === 'manual'
   const currentAssigneeId =
     values.current_assignee_id !== null && selectedAssignees.includes(values.current_assignee_id)
@@ -191,7 +213,7 @@ export function ChoreForm({
         description: values.description || null,
         // An unscheduled chore has no start date: its field is hidden above and the API
         // would drop the value anyway, so send the null explicitly.
-        start_date: manualRepeat ? null : values.start_date,
+        start_date: manualRepeat ? null : startDate,
         repeats: values.repeats,
         assignment_type: values.assignment_type,
         // A whole number >= 2 when taking turns, otherwise 1 (hand off every completion).
@@ -292,16 +314,7 @@ export function ChoreForm({
             value={values.repeats}
             onValueChange={(v) => {
               const repeats = v as RepeatPeriod
-              setValues({
-                ...values,
-                repeats,
-                // Leaving "unscheduled" reveals the start-date field, which is required
-                // from here on and may be empty (an unscheduled chore stores no start
-                // date). Default it to today so the field can never render blank and the
-                // payload can never be rejected for a missing date.
-                start_date:
-                  repeats !== 'manual' && !values.start_date ? todayISO() : values.start_date,
-              })
+              setValues({ ...values, repeats })
             }}
           >
             <SelectTrigger id="repeats" aria-labelledby="repeats-label" className="w-full">
@@ -451,9 +464,9 @@ export function ChoreForm({
 
       {/* An unscheduled chore starts nothing: it has no first due date to seed and never
           becomes due, so the field would be dead config on screen. Hidden rather than
-          disabled, matching how the recurrence detail above disappears. The period select
-          refills an empty date on the way back out, so `values.start_date` is always set
-          whenever this block renders (the Calendar below would choke on an empty one). */}
+          disabled, matching how the recurrence detail above disappears. `startDate` above is
+          what this block renders, never `values.start_date`: an unscheduled chore stores no
+          start date, so the raw value can be empty and the Calendar would choke on it. */}
       {!manualRepeat && (
         <div className="flex flex-col gap-1.5">
           <Label id="start-date-label" htmlFor="start-date">
@@ -467,7 +480,7 @@ export function ChoreForm({
                 aria-labelledby="start-date-label start-date-value"
                 className="flex h-10 w-full items-center justify-between rounded-input border border-input bg-transparent px-3 text-base outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30"
               >
-                <span id="start-date-value">{formatDate(values.start_date)}</span>
+                <span id="start-date-value">{formatDate(startDate)}</span>
                 <CalendarIcon className="size-4 text-muted-foreground" />
               </button>
             </PopoverTrigger>
@@ -475,7 +488,7 @@ export function ChoreForm({
               <Calendar
                 mode="single"
                 required
-                selected={new Date(`${values.start_date}T00:00:00`)}
+                selected={new Date(`${startDate}T00:00:00`)}
                 onSelect={(d) => {
                   if (d) setValues({ ...values, start_date: format(d, 'yyyy-MM-dd') })
                   setDateOpen(false)

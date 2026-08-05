@@ -71,12 +71,21 @@ def _normalised_schedule(
 class ChoreHouseholdRead(BaseModel):
     """The household a chore belongs to, embedded in both chore reads (it sits on
     ChoreReadBase) so the list column and the read-only edit header can show its name
-    without a second request."""
+    without a second request.
+
+    Also embedded in `DueChoreRead`, `UnscheduledChoreRead`, `HistoryEntryRead` and the
+    History filter options, which is what makes `timezone` here reach every household-scoped
+    surface at once."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     name: str
+    # The zone this household's due dates are anchored to. On the wire so the frontend renders
+    # a timestamp in the same zone the server judged it in - otherwise a slot stored at 22:00Z
+    # shows as "4 Aug" beside a server-computed "Due today" that means the 5th. A plain `str`
+    # for the same reason as on HouseholdListRead: read models do not re-validate.
+    timezone: str
 
 
 class ChoreReadBase(BaseModel):

@@ -23,7 +23,7 @@ function stubFetch(opts: {
   statsStatus?: number
 }): FetchMock {
   const options = opts.options ?? {
-    households: [{ id: 1, name: 'Test Household' }],
+    households: [{ id: 1, name: 'Test Household', timezone: 'UTC' }],
     members: [makeHouseholdMember()],
   }
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -150,7 +150,7 @@ describe('Statistics', () => {
   it('filters by person and pushes the choice into the query', async () => {
     const fetchMock = stubFetch({
       options: {
-        households: [{ id: 1, name: 'Test Household' }],
+        households: [{ id: 1, name: 'Test Household', timezone: 'UTC' }],
         members: [
           makeHouseholdMember({ id: 1, first_name: 'Me', last_name: 'Here' }),
           makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' }),
@@ -169,7 +169,10 @@ describe('Statistics', () => {
 
   it('hides the filters when there is a single member and household', async () => {
     stubFetch({
-      options: { households: [{ id: 1, name: 'Flat 3B' }], members: [makeHouseholdMember()] },
+      options: {
+        households: [{ id: 1, name: 'Flat 3B', timezone: 'UTC' }],
+        members: [makeHouseholdMember()],
+      },
     })
     renderWithProviders(<Statistics />)
 
@@ -192,8 +195,8 @@ describe('Statistics', () => {
     const fetchMock = stubFetch({
       options: {
         households: [
-          { id: 1, name: 'Flat 3B' },
-          { id: 2, name: 'Beach House' },
+          { id: 1, name: 'Flat 3B', timezone: 'UTC' },
+          { id: 2, name: 'Beach House', timezone: 'UTC' },
         ],
         members: [makeHouseholdMember()],
       },

@@ -30,7 +30,7 @@ function jsonBody(data: unknown, status = 200): Response {
 
 function stubFetch(opts: { entries: HistoryEntry[]; options?: HistoryFilterOptions }): FetchMock {
   const options = opts.options ?? {
-    households: [{ id: 1, name: 'Test Household' }],
+    households: [{ id: 1, name: 'Test Household', timezone: 'UTC' }],
     members: [me],
   }
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -65,7 +65,7 @@ describe('History', () => {
         makeHistoryEntry({
           id: 7,
           title: 'Scrub the tub',
-          household: { id: 4, name: 'Beach House' },
+          household: { id: 4, name: 'Beach House', timezone: 'UTC' },
           completed_by: makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' }),
         }),
       ],
@@ -75,6 +75,49 @@ describe('History', () => {
     const row = (await screen.findByText('Scrub the tub')).closest('tr')!
     expect(within(row).getByText('Beach House')).toBeInTheDocument()
     expect(within(row).getByText('Jo Ng')).toBeInTheDocument()
+  })
+
+  it("renders completed_at in the zone the closure was judged in, not the household's now", async () => {
+    // `days_late` is computed server-side from the snapshot, so the timestamp beside it has to
+    // use the same zone. This row is a closure judged in Amsterdam whose household has since
+    // moved to Kiritimati (+14): 21:00Z is 23:00 on the 5th there and 11:00 on the 6th here, so
+    // rendering in the household's current zone would show "6 Jul" next to "On time" against a
+    // 5 July due date.
+    stubFetch({
+      entries: [
+        makeHistoryEntry({
+          title: 'Moved household',
+          completed_at: '2026-07-05T21:00:00Z',
+          completed_timezone: 'Europe/Amsterdam',
+          days_late: 0,
+          household: { id: 1, name: 'Flat', timezone: 'Pacific/Kiritimati' },
+        }),
+      ],
+    })
+    renderWithProviders(<History />)
+
+    const row = (await screen.findByText('Moved household')).closest('tr')!
+    expect(row).toHaveTextContent('5 Jul 2026')
+    expect(row).not.toHaveTextContent('6 Jul 2026')
+  })
+
+  it('falls back to the household zone for a closure with no snapshot', async () => {
+    // NULL is what a closure written before the column existed holds; the client then uses the
+    // household's current zone, which is the same fallback `closure_zone` applies server-side.
+    stubFetch({
+      entries: [
+        makeHistoryEntry({
+          title: 'Old closure',
+          completed_at: '2026-07-05T21:00:00Z',
+          completed_timezone: null,
+          household: { id: 1, name: 'Flat', timezone: 'Pacific/Kiritimati' },
+        }),
+      ],
+    })
+    renderWithProviders(<History />)
+
+    const row = (await screen.findByText('Old closure')).closest('tr')!
+    expect(row).toHaveTextContent('6 Jul 2026')
   })
 
   it('shows "N days late" when a completion was overdue', async () => {
@@ -137,7 +180,7 @@ describe('History', () => {
     const fetchMock = stubFetch({
       entries: [makeHistoryEntry({ id: 7, title: 'Scrub the tub' })],
       options: {
-        households: [{ id: 1, name: 'Test Household' }],
+        households: [{ id: 1, name: 'Test Household', timezone: 'UTC' }],
         members: [me, makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })],
       },
     })
@@ -156,8 +199,8 @@ describe('History', () => {
       entries: [makeHistoryEntry({ id: 7, title: 'Scrub the tub' })],
       options: {
         households: [
-          { id: 1, name: 'Flat 3B' },
-          { id: 2, name: 'Beach House' },
+          { id: 1, name: 'Flat 3B', timezone: 'UTC' },
+          { id: 2, name: 'Beach House', timezone: 'UTC' },
         ],
         members: [me],
       },
@@ -188,8 +231,8 @@ describe('History', () => {
       entries: [makeHistoryEntry({ id: 7, title: 'Scrub the tub' })],
       options: {
         households: [
-          { id: 1, name: 'Flat 3B' },
-          { id: 2, name: 'Beach House' },
+          { id: 1, name: 'Flat 3B', timezone: 'UTC' },
+          { id: 2, name: 'Beach House', timezone: 'UTC' },
         ],
         members: [me, makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })],
       },
@@ -208,7 +251,7 @@ describe('History', () => {
   it('hides the person filter when there is a single member', async () => {
     stubFetch({
       entries: [makeHistoryEntry({ title: 'Scrub the tub' })],
-      options: { households: [{ id: 1, name: 'Flat 3B' }], members: [me] },
+      options: { households: [{ id: 1, name: 'Flat 3B', timezone: 'UTC' }], members: [me] },
     })
     renderWithProviders(<History />)
 
@@ -324,13 +367,13 @@ describe('History', () => {
           id: 8,
           title: 'Theirs',
           completed_by: jo,
-          household: { id: 2, name: 'Beach House' },
+          household: { id: 2, name: 'Beach House', timezone: 'UTC' },
         }),
       ],
       options: {
         households: [
-          { id: 1, name: 'Test Household' },
-          { id: 2, name: 'Beach House' },
+          { id: 1, name: 'Test Household', timezone: 'UTC' },
+          { id: 2, name: 'Beach House', timezone: 'UTC' },
         ],
         members: [me, jo],
       },
@@ -400,8 +443,8 @@ describe('History', () => {
       entries: [makeHistoryEntry({ id: 1, title: 'Scrub the tub' })],
       options: {
         households: [
-          { id: 1, name: 'Flat 3B' },
-          { id: 2, name: 'Beach House' },
+          { id: 1, name: 'Flat 3B', timezone: 'UTC' },
+          { id: 2, name: 'Beach House', timezone: 'UTC' },
         ],
         members: [me],
       },
@@ -428,8 +471,8 @@ describe('History', () => {
       entries: [makeHistoryEntry({ id: 1, title: 'Scrub the tub' })],
       options: {
         households: [
-          { id: 1, name: 'Flat 3B' },
-          { id: 2, name: 'Beach House' },
+          { id: 1, name: 'Flat 3B', timezone: 'UTC' },
+          { id: 2, name: 'Beach House', timezone: 'UTC' },
         ],
         members: [me, makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' })],
       },

@@ -1,13 +1,24 @@
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Annotated, Literal
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Query
-from sqlalchemy import select
+from sqlalchemy import and_, false, or_, select
 
 from app.api.deps import CurrentUser, SessionDep
-from app.core.chores import DueStatus, days_late, days_until_due, due_status
-from app.core.households import member_household_ids
-from app.models import Chore, ChoreOccurrence, HouseholdRole, OccurrenceStatus, RepeatPeriod, User
+from app.core import clock
+from app.core.chores import DueStatus, days_late, days_until_due, due_status, local_day_bounds
+from app.core.households import household_zone, member_household_ids, zones_in_scope
+from app.core.occurrences import closure_zone
+from app.models import (
+    Chore,
+    ChoreOccurrence,
+    Household,
+    HouseholdRole,
+    OccurrenceStatus,
+    RepeatPeriod,
+    User,
+)
 from app.schemas.stats import (
     CompletionBucket,
     PersonStat,
@@ -24,6 +35,10 @@ RANGE_DAYS: dict[str, int] = {"7d": 7, "30d": 30, "90d": 90}
 # Ranges longer than this bucket the time chart by week instead of by day, so the
 # 90-day view stays ~13 bars rather than 90.
 WEEKLY_ABOVE_DAYS = 30
+
+# The floor the chart axis falls back to when the caller reaches deputy in no household, so the
+# series stays a zero-seeded range rather than an empty array. See `axis_windows` below.
+UTC_ZONE = ZoneInfo("UTC")
 
 
 def _week_start(day: date) -> date:
@@ -66,17 +81,26 @@ async def get_stats(
     `on_time_rate` deliberately does NOT count skips in its denominator, staying "of the work
     that was done, how much was punctual" - so the four buckets do not add up to that rate's
     base either."""
-    now = datetime.now(UTC)
-    today = now.date()
-    # UTC day bounds (not a ::date cast, which depends on the session TimeZone), matching
-    # the Home endpoint's convention.
-    today_start = datetime(now.year, now.month, now.day, tzinfo=UTC)
-    tomorrow_start = today_start + timedelta(days=1)
+    now = clock.now()
     range_days = RANGE_DAYS[time_range]
-    start_date = today - timedelta(days=range_days - 1)
-    range_start = datetime(start_date.year, start_date.month, start_date.day, tzinfo=UTC)
     weekly = range_days > WEEKLY_ABOVE_DAYS
     granularity = "week" if weekly else "day"
+
+    # A day starts at a different instant in each household, so both the range window and the
+    # bucket a completion lands in are per-household questions. The zones are collected once
+    # and drive three things below: the ORed range window, the per-row bucket key, and the
+    # width of the pre-seeded axis. `min_role` mirrors the `scope` predicate so the grouping
+    # cannot name a household the surrounding query drops.
+    zones = await zones_in_scope(session, user.id, household_id, HouseholdRole.deputy)
+
+    def range_window(tz: ZoneInfo) -> tuple[datetime, datetime]:
+        """(range start, tomorrow start) in one zone. `- timedelta(days=n)` on an aware datetime
+        is wall-clock arithmetic, so this really is n *local* days however many DST transitions
+        it spans."""
+        day_start, day_end = local_day_bounds(now, tz)
+        return day_start - timedelta(days=range_days - 1), day_end
+
+    windows = {tz: range_window(tz) for tz in zones}
 
     scope = Chore.household_id.in_(member_household_ids(user.id, HouseholdRole.deputy))
 
@@ -99,20 +123,27 @@ async def get_stats(
     if user_id is not None:
         # For the live view, "this person" means whose turn it is now (the assignee).
         open_filters.append(ChoreOccurrence.assignee_id == user_id)
+    # The household's zone rides along so each slot can be judged against its own household's
+    # day. Without it this query knew only *when* a chore was due, never *where*, which is not
+    # enough to say whether "due today" means today.
+    #
+    # Read off a joined row rather than looked up in a dict keyed from `zones`. The two sets are
+    # identical by construction, but only within one statement: the session is READ COMMITTED,
+    # so a caller promoted to deputy in another household between `zones_in_scope` and here
+    # would land an id the dict never saw, and a subscript would 500 the page. Joining makes the
+    # mismatch unrepresentable and matches what home.py and unscheduled.py already do.
     open_due = (
-        (
-            await session.execute(
-                select(ChoreOccurrence.scheduled_for)
-                .join(Chore, Chore.id == ChoreOccurrence.chore_id)
-                .where(*open_filters)
-            )
+        await session.execute(
+            select(ChoreOccurrence.scheduled_for, Household.timezone)
+            .join(Chore, Chore.id == ChoreOccurrence.chore_id)
+            .join(Household, Household.id == Chore.household_id)  # to-one: no row multiplication
+            .where(*open_filters)
         )
-        .scalars()
-        .all()
-    )
+    ).all()
     status_counts = {DueStatus.overdue: 0, DueStatus.today: 0, DueStatus.soon: 0}
-    for scheduled_for in open_due:
-        status_counts[due_status(days_until_due(scheduled_for, now))] += 1
+    for scheduled_for, zone_name in open_due:
+        tz = household_zone(zone_name)
+        status_counts[due_status(days_until_due(scheduled_for, now, tz))] += 1
     status_breakdown = StatusBreakdown(
         overdue=status_counts[DueStatus.overdue],
         today=status_counts[DueStatus.today],
@@ -123,11 +154,23 @@ async def get_stats(
     # Completions and skips come back in one pass (they are the same kind of row) and the loop
     # below splits them; only the punctuality breakdown needs them side by side, but a second
     # query for the sake of it would double the scan.
+    #
+    # One window per zone, ORed, as on Home: the last 30 days in Auckland is not the last 30
+    # days in Amsterdam. See there for why the `false()` seed rather than a bare `or_()`.
     done_filters = [
         scope,
         ChoreOccurrence.status == OccurrenceStatus.done,
-        ChoreOccurrence.completed_at >= range_start,
-        ChoreOccurrence.completed_at < tomorrow_start,
+        or_(
+            false(),
+            *[
+                and_(
+                    Chore.household_id.in_(ids),
+                    ChoreOccurrence.completed_at >= windows[tz][0],
+                    ChoreOccurrence.completed_at < windows[tz][1],
+                )
+                for tz, ids in zones.items()
+            ],
+        ),
     ]
     if household_id is not None:
         done_filters.append(Chore.household_id == household_id)
@@ -143,11 +186,19 @@ async def get_stats(
                 # Punctuality is only meaningful against a deadline, so the period rides
                 # along to exclude the unscheduled ones from it (see the loop below).
                 Chore.repeats,
+                # Which day this closure belongs to, for the bucket key and for lateness. Both
+                # are calendar judgements about the past, so both read the zone snapshotted when
+                # the row closed rather than wherever the household is now - otherwise moving a
+                # household re-buckets and re-scores work nobody touched. The household's zone
+                # rides along as the fallback for rows closed before that column existed.
+                ChoreOccurrence.completed_timezone,
+                Household.timezone,
                 User.id,
                 User.first_name,
                 User.last_name,
             )
             .join(Chore, Chore.id == ChoreOccurrence.chore_id)
+            .join(Household, Household.id == Chore.household_id)  # to-one: no row multiplication
             # Completer may be NULL (a hard-deleted user); such rows still count in the
             # totals but are dropped from the per-person breakdown below.
             .outerjoin(User, User.id == ChoreOccurrence.completed_by_user_id)
@@ -157,14 +208,37 @@ async def get_stats(
 
     # Pre-seed every bucket to 0 so the chart has a continuous axis over the range. Both
     # series get the same keys, so the stacked bars line up even where one of them is empty.
+    #
+    # Seeded over the union of the per-zone ranges rather than one of them, so a user whose
+    # households straddle the date line gets a continuous axis instead of a hole at whichever
+    # end the other zone reaches further. Usually one zone, so usually exactly `range_days`
+    # buckets.
+    #
+    # `windows` can legitimately be empty - a user in no household, but also a **helper-only**
+    # one, who reaches deputy nowhere and gets a 200 with nothing in it ("reads narrow, writes
+    # 403"). They must still get a zero-seeded axis rather than `[]`: the chart is handed
+    # straight to recharts, so an empty array renders as blank space instead of a flat line.
+    # UTC is the floor for that, chosen because it is the one zone that needs no household to
+    # justify it - it only ever shapes the axis, never which rows are counted, since the query
+    # above still matches nothing.
+    axis_windows = windows or {UTC_ZONE: range_window(UTC_ZONE)}
+    first_day = min(start.astimezone(tz).date() for tz, (start, _) in axis_windows.items())
+    # `axis_windows` holds the *exclusive* end (tomorrow's local midnight), so step back a day
+    # to get the last day the axis actually covers.
+    last_day = max(end.astimezone(tz).date() for tz, (_, end) in axis_windows.items()) - timedelta(
+        days=1
+    )
     bucket_keys: list[date] = []
     if weekly:
-        cursor, last = _week_start(start_date), _week_start(today)
+        cursor, last = _week_start(first_day), _week_start(last_day)
         while cursor <= last:
             bucket_keys.append(cursor)
             cursor += timedelta(days=7)
     else:
-        bucket_keys = [start_date + timedelta(days=offset) for offset in range(range_days)]
+        cursor = first_day
+        while cursor <= last_day:
+            bucket_keys.append(cursor)
+            cursor += timedelta(days=1)
     done_buckets: dict[date, int] = dict.fromkeys(bucket_keys, 0)
     skipped_buckets: dict[date, int] = dict.fromkeys(bucket_keys, 0)
 
@@ -172,8 +246,19 @@ async def get_stats(
     total = skipped_total = 0
     # user_id -> [first_name, last_name, count]
     person_counts: dict[int, list] = {}
-    for completed_at, scheduled_for, was_skipped, repeats, uid, first_name, last_name in done_rows:
-        completed_day = completed_at.astimezone(UTC).date()
+    for (
+        completed_at,
+        scheduled_for,
+        was_skipped,
+        repeats,
+        closed_in,
+        household_tz,
+        uid,
+        first_name,
+        last_name,
+    ) in done_rows:
+        tz = closure_zone(closed_in, household_tz)
+        completed_day = completed_at.astimezone(tz).date()
         key = _week_start(completed_day) if weekly else completed_day
         # A skip closed the slot but produced nothing, so it is kept out of every count that
         # measures work: the headline total, the done series, and the per-person ranking. It
@@ -198,7 +283,7 @@ async def get_stats(
             if was_skipped:
                 skipped += 1
             else:
-                late_by = days_late(scheduled_for, completed_at)
+                late_by = days_late(scheduled_for, completed_at, tz)
                 if late_by > 0:
                     late += 1
                 elif late_by < 0:

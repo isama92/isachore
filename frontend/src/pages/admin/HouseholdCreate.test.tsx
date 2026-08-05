@@ -5,6 +5,7 @@ import { Route, Routes } from 'react-router'
 import AdminHouseholdCreate from './HouseholdCreate'
 import { renderWithProviders } from '../../test/utils'
 import { makeHousehold, makeUser } from '../../test/fixtures'
+import { browserTimezone } from '@/lib/timezones'
 
 const admin = makeUser({ id: 1, is_admin: true })
 
@@ -38,6 +39,9 @@ describe('AdminHouseholdCreate', () => {
     expect(await screen.findByText('admin-households-list')).toBeInTheDocument()
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST')
     expect(String(post?.[0])).toContain('/api/v1/admin/households')
-    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ name: 'HQ' })
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({
+      name: 'HQ',
+      timezone: browserTimezone(),
+    })
   })
 })

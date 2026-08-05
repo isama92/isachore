@@ -4,9 +4,10 @@ Chore management for households. Track who does what, see what is overdue, due
 today, or coming up, shared between the people in a household, with a JSON API so
 mobile clients can join later.
 
-Features: multi-user households with invitations, ownership transfer and per-member
-roles, chores with four assignment strategies (manual, alphabetical, least-done,
-random) and turn-taking rotation, a My Chores due view with one-tap completion and daily
+Features: multi-user households with invitations, ownership transfer, per-member
+roles and a per-household timezone, chores with four assignment strategies
+(manual, alphabetical, least-done, random) and turn-taking rotation, a My Chores
+due view with one-tap completion and daily
 progress, a separate Unscheduled Chores view for the ones you do whenever you feel
 like it (never due, repeatable on demand, showing how long since each was last
 done), completion history, per-household tags, a Statistics page, admin user and
@@ -30,6 +31,21 @@ command (see below); every other user is created by an admin in the UI under
 
 A new account starts with no household. Creating one is the user's own first step,
 under **Households**, or they accept an invitation to somebody else's.
+
+### Household timezone
+
+Each household has a timezone, picked when it is created (prefilled from your browser) and
+editable afterwards by its owner. Everything about a chore's *day* is measured against it: when
+a chore is due, whether it is overdue, whether a completion counts towards today's progress, and
+how many days late it was. Without this the day boundary was UTC for everybody, so anyone an
+hour or two ahead of it saw yesterday's chores after midnight.
+
+Moving a household to a different zone re-dates its scheduled chores so they keep the dates they
+already showed - a chore due on 5 August still says 5 August - and asks for confirmation first.
+
+Completed history is not affected. Each closure records the timezone it was judged in, the same
+way it records the chore's title, so how late it was stays what it was however often the household
+moves afterwards.
 
 ### Household roles
 
@@ -277,6 +293,20 @@ Setting `RUN_MIGRATIONS=false` in `.env` is the other way out: it gets you a
 bootable container to work from, at the cost of running on the old schema until
 you migrate by hand.
 
+> **Snapshot household timezones before rolling back past `d7a3f81c62b4`.** That
+> revision's `downgrade()` drops `households.timezone`, and re-upgrading sets every
+> household back to `Europe/Amsterdam`, because a re-added column cannot tell "never
+> had a zone" from "had the one its owner picked". The chores still read as due on the
+> days they did, but the household then reckons "today" against a place it is not in.
+> So take the choices first and put them back afterwards:
+>
+> ```bash
+> docker compose -f compose.prod.tls.yml exec db \
+>     psql -U isachore -d isachore -c 'SELECT id, name, timezone FROM households'
+> ```
+>
+> Rolling back *to* that revision is unaffected; this is only about going below it.
+
 > **One instance may migrate, and only one.** If you run more than one backend
 > against the same database, set `RUN_MIGRATIONS=false` in every instance's
 > `.env` except one. Two containers starting at the same moment both run
@@ -296,6 +326,17 @@ path did not move. Anything of that kind is listed here.
   `has_description: bool` instead; fetch `GET /api/v1/chores/{id}` for the markup.
   `POST /chores`, `GET /chores/{id}` and `PATCH /chores/{id}` are unchanged and
   still carry the full description.
+- **`POST /api/v1/households` now requires `timezone`**, an IANA name such as
+  `Europe/Amsterdam`. Deliberately with no default: falling back to UTC would let a
+  client that has not been updated create households that silently reckon days in the
+  wrong place, which is the bug per-household timezones exist to fix. A missing field
+  is a 422 naming it. `PATCH /households/{id}` takes it optionally, and omitting it
+  leaves the zone alone.
+- **New response fields, all additive.** `timezone` on every household payload and on
+  the household embedded in a chore, due, unscheduled, history or filter-options
+  response; `completed_timezone` on a history entry, which is the zone that closure's
+  lateness was judged in (`null` for closures predating it - fall back to the
+  household's `timezone`).
 
 One more consequence of migrating before serving: the backend now needs the
 database at startup, where before it would come up and answer 503s until Postgres
@@ -642,4 +683,3 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
 ### Todo
 
 - [ ] Live updates when a housemate completes a chore (websocket)
-- [ ] The due below the chore in the "my chores" page doesn't consider timezone but only utc, so at 1am it still doesn't show today's task but yesterday's

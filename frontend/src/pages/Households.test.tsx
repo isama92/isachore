@@ -68,7 +68,7 @@ describe('Households', () => {
 
   it('links to the create and edit pages when the user owns the household', async () => {
     // makeHousehold defaults admin_id to 1, the signed-in user's id.
-    stubFetch({ households: [makeHousehold({ id: 7, name: 'Flat 3B' })] })
+    stubFetch({ households: [makeHousehold({ id: 7, name: 'Flat 3B', timezone: 'UTC' })] })
     renderWithProviders(<Households />, { authValue: { user: me } })
 
     await screen.findByText('Flat 3B')
@@ -131,7 +131,7 @@ describe('Households', () => {
   it('soft-deletes a household after confirmation', async () => {
     let deleted = ''
     const fetchMock = stubFetch({
-      households: [makeHousehold({ id: 3, name: 'Flat 3B' })],
+      households: [makeHousehold({ id: 3, name: 'Flat 3B', timezone: 'UTC' })],
       mutate: (method, url) => {
         if (method === 'DELETE') deleted = url
         return jsonBody(undefined, 204)
@@ -215,5 +215,35 @@ describe('Households', () => {
 
     expect(await screen.findByText('No results.')).toBeInTheDocument()
     expect(screen.queryByText('No households yet')).not.toBeInTheDocument()
+  })
+
+  it("renders created_at in the row's own household zone", async () => {
+    // These are the user's own households, so each row is a household surface and its timestamp
+    // reads in that household's zone - matching how Chores.tsx renders a chore's created_at.
+    // 22:00Z is the 5th in Amsterdam and still the 4th in Niue, so one instant proves both rows
+    // and a dropped zone cannot satisfy them together. (admin/Households.tsx deliberately does
+    // NOT do this: an operator there is looking at households they are not in.)
+    stubFetch({
+      households: [
+        makeHousehold({
+          id: 1,
+          name: 'East',
+          timezone: 'Europe/Amsterdam',
+          created_at: '2026-08-04T22:00:00Z',
+        }),
+        makeHousehold({
+          id: 2,
+          name: 'West',
+          timezone: 'Pacific/Niue',
+          created_at: '2026-08-04T22:00:00Z',
+        }),
+      ],
+    })
+    renderWithProviders(<Households />, { authValue: { user: me } })
+
+    const east = (await screen.findByText('East')).closest('tr')!
+    const west = screen.getByText('West').closest('tr')!
+    expect(east).toHaveTextContent('5 Aug 2026')
+    expect(west).toHaveTextContent('4 Aug 2026')
   })
 })

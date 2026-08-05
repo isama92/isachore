@@ -5,6 +5,7 @@ import { Route, Routes } from 'react-router'
 import HouseholdCreate from './HouseholdCreate'
 import { renderWithProviders } from '../test/utils'
 import { makeHousehold, makeUser } from '../test/fixtures'
+import { browserTimezone } from '@/lib/timezones'
 
 const me = makeUser({ id: 1 })
 
@@ -44,7 +45,13 @@ describe('HouseholdCreate', () => {
     expect(await screen.findByText('households-list')).toBeInTheDocument()
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST')
     expect(post).toBeTruthy()
-    expect(JSON.parse(String(post![1]?.body))).toEqual({ name: 'Beach House' })
+    // The zone is not hardcoded: it is whatever the form detected from this machine, which
+    // is exactly the contract ("create prefills the browser's zone"). Pinning a literal here
+    // would fail on any runner outside that zone.
+    expect(JSON.parse(String(post![1]?.body))).toEqual({
+      name: 'Beach House',
+      timezone: browserTimezone(),
+    })
   })
 
   it('surfaces a create error and stays on the form', async () => {

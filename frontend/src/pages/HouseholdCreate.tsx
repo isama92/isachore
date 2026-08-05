@@ -6,15 +6,15 @@ import { api } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
 import { routes } from '../lib/routes'
 import type { Household } from '../lib/types'
-import { HouseholdForm } from '@/components/households/HouseholdForm'
+import { HouseholdForm, type HouseholdFormValues } from '@/components/households/HouseholdForm'
 
 export default function HouseholdCreate() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { refresh } = useAuth()
 
-  async function create(name: string) {
-    await api.post<Household>(endpoints.households.root, { name })
+  async function create({ name, timezone }: HouseholdFormValues) {
+    await api.post<Household>(endpoints.households.root, { name, timezone })
     // Creating a household makes you its organiser, so the caller's roles just changed and
     // the sidebar reads them from the auth context. Without this refresh a brand-new account
     // - the state every install and every new user starts in, and the reason this page is the

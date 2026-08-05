@@ -217,6 +217,10 @@ export default function AdminHouseholds() {
     {
       accessorKey: 'created_at',
       header: t('households.headers.createdAt'),
+      // Deliberately the viewer's zone, NOT the row's, which is the opposite of the same cell on
+      // the user-facing Households page (see the comment there). This is an operator view over
+      // households they are not in: reading 50 rows against 50 different clocks is worse than
+      // reading them all against one. Do not "fix" this to match without reading both.
       cell: ({ row }) => (
         <span title={formatDateTimeFull(row.original.created_at)}>
           {formatDateTime(row.original.created_at)}

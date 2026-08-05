@@ -80,7 +80,11 @@ async def test_completions_lists_most_recent_first(
         "first_name": user.first_name,
         "last_name": user.last_name,
     }
-    assert first["household"] == {"id": household.id, "name": household.name}
+    assert first["household"] == {
+        "id": household.id,
+        "name": household.name,
+        "timezone": household.timezone,
+    }
 
 
 async def test_completions_days_late_late_on_time_and_early(

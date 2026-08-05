@@ -30,6 +30,16 @@ class HistoryEntryRead(BaseModel):
     title: str
     scheduled_for: datetime
     completed_at: datetime
+    # The zone this closure was judged in, which is the zone `completed_at` must be *rendered*
+    # in as well - `days_late` above is already computed from it, and letting the two disagree is
+    # visible nonsense. A closure at 21:00Z on 5 July shows "5 Jul, 23:00" with "0 days late" in
+    # Amsterdam; rendered in a household that has since moved to Pacific/Kiritimati the same row
+    # reads "6 Jul, 11:00" beside the unchanged "0 days late", against a 5 July due date.
+    #
+    # NULL for a closure written before the column existed, where the client falls back to
+    # `household.timezone` - the same fallback `closure_zone` applies server-side. A plain `str`
+    # rather than the validated `Timezone`, like every other zone on a read model.
+    completed_timezone: str | None
     skipped: bool
     days_late: int | None
     completed_by: HouseholdMemberRead | None

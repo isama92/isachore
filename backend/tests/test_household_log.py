@@ -583,7 +583,7 @@ async def test_the_owner_reads_their_households_log_newest_first(
         ("chore_deleted", "First"),
     ]
     entry = body["items"][0]
-    assert entry["household"] == {"id": household.id, "name": "The Flat"}
+    assert entry["household"] == {"id": household.id, "name": "The Flat", "timezone": "UTC"}
     assert entry["actor"]["id"] == user.id
     assert "email" not in entry["actor"]
     assert entry["target"] is None

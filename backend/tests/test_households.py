@@ -199,7 +199,7 @@ async def test_create_household_adds_creator_as_member(
     alice = await make_user(email="alice@example.com")
     client = await auth_client(alice)
 
-    resp = await client.post("/api/v1/households", json={"name": "New Place"})
+    resp = await client.post("/api/v1/households", json={"name": "New Place", "timezone": "UTC"})
     assert resp.status_code == 201
     body = resp.json()
     assert body["name"] == "New Place"
@@ -218,12 +218,12 @@ async def test_create_household_blank_name_rejected(
 ) -> None:
     alice = await make_user(email="alice@example.com")
     client = await auth_client(alice)
-    resp = await client.post("/api/v1/households", json={"name": ""})
+    resp = await client.post("/api/v1/households", json={"name": "", "timezone": "UTC"})
     assert resp.status_code == 422
 
 
 async def test_create_household_requires_auth(client: AsyncClient) -> None:
-    resp = await client.post("/api/v1/households", json={"name": "Nope"})
+    resp = await client.post("/api/v1/households", json={"name": "Nope", "timezone": "UTC"})
     assert resp.status_code == 401
 
 

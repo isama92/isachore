@@ -87,8 +87,8 @@ describe('Tags', () => {
     // shows above two), which is the observable consequence.
     const fetchMock = stubFetch({
       households: [
-        makeHousehold({ id: 1, name: 'Flat 3B' }),
-        makeHousehold({ id: 2, name: 'Beach House' }),
+        makeHousehold({ id: 1, name: 'Flat 3B', timezone: 'UTC' }),
+        makeHousehold({ id: 2, name: 'Beach House', timezone: 'UTC' }),
       ],
       tags: () => [makeTag({ id: 3, name: 'deep-clean' })],
     })
@@ -111,8 +111,8 @@ describe('Tags', () => {
   it('lets a multi-household user pick the household and pushes it into the query', async () => {
     const fetchMock = stubFetch({
       households: [
-        makeHousehold({ id: 1, name: 'Flat 3B' }),
-        makeHousehold({ id: 2, name: 'Beach House' }),
+        makeHousehold({ id: 1, name: 'Flat 3B', timezone: 'UTC' }),
+        makeHousehold({ id: 2, name: 'Beach House', timezone: 'UTC' }),
       ],
       tags: (hid) =>
         hid === '2'

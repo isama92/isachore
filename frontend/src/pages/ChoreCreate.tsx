@@ -7,7 +7,6 @@ import { api, ApiError } from '../lib/api'
 import { householdIdsWithRole } from '../lib/permissions'
 import { endpoints } from '../lib/endpoints'
 import { routes } from '../lib/routes'
-import { todayISO } from '../lib/chores'
 import { ChoreForm, type ChoreFormValues, type ChoreSubmit } from '@/components/chores/ChoreForm'
 import { Label } from '@/components/ui/label'
 import {
@@ -128,16 +127,21 @@ export default function ChoreCreate() {
       </div>
     ) : null
 
+  // The chosen household's zone, which is what "today" means for this chore's start date.
+  // Undefined until the households load, and `todayISO` then falls back to the viewer's own
+  // zone - which is what the form used to do unconditionally.
+  const timezone = households.find((h) => h.id === householdId)?.timezone
+
   // Prefilled values when cloning; empty defaults otherwise. ChoreForm lazy-inits
   // from this and the form mounts only after households load, so clone values are
   // ready in time.
   const initial: ChoreFormValues = {
     title: clone?.title ?? '',
     description: clone?.description ?? '',
-    // `||`, not `??`: cloning an unscheduled chore carries '' (it has no start date), and
-    // the field should be ready with today's date if the period is switched to a recurring
-    // one. The form drops the value while the period stays unscheduled.
-    start_date: clone?.start_date || todayISO(),
+    // Empty rather than today: ChoreForm derives an untouched date from the selected
+    // household's zone, so seeding it here would freeze the first household's "today" and
+    // stop it following a household switch. Cloning an unscheduled chore carries '' too.
+    start_date: clone?.start_date ?? '',
     repeats: clone?.repeats ?? 'weekly',
     assignment_type: clone?.assignment_type ?? 'manual',
     turn_length: clone?.turn_length ?? 1,
@@ -196,6 +200,7 @@ export default function ChoreCreate() {
           <ChoreForm
             members={members}
             tags={tags}
+            timezone={timezone}
             initial={initial}
             submitLabel={t('choreCreate.submit')}
             cancelTo={routes.chores.list}

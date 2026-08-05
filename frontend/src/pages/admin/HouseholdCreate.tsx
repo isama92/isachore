@@ -5,14 +5,14 @@ import { api } from '../../lib/api'
 import { endpoints } from '../../lib/endpoints'
 import { routes } from '../../lib/routes'
 import type { Household } from '../../lib/types'
-import { HouseholdForm } from '@/components/households/HouseholdForm'
+import { HouseholdForm, type HouseholdFormValues } from '@/components/households/HouseholdForm'
 
 export default function AdminHouseholdCreate() {
   const { t } = useTranslation()
   const navigate = useNavigate()
 
-  async function create(name: string) {
-    await api.post<Household>(endpoints.adminHouseholds.root, { name })
+  async function create({ name, timezone }: HouseholdFormValues) {
+    await api.post<Household>(endpoints.adminHouseholds.root, { name, timezone })
     toast.success(t('households.toastCreated'))
     await navigate(routes.admin.households.list)
   }

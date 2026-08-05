@@ -8,6 +8,7 @@ from app.api.v1.households import SortDir
 from app.core.chores import days_late
 from app.core.household_log import record_log_entry
 from app.core.households import member_household_ids, role_in_household, roles_at_least
+from app.core.occurrences import closure_zone
 from app.models import (
     Chore,
     ChoreOccurrence,
@@ -172,15 +173,24 @@ async def list_completions(
             title=occ.title,
             scheduled_for=occ.scheduled_for,
             completed_at=occ.completed_at,
+            completed_timezone=occ.completed_timezone,
             skipped=occ.skipped,
             # An unscheduled chore has no deadline, so it can be neither late nor on time.
             # Nor can a skip: it had a deadline, but nothing was done to be punctual about,
             # and reporting "3 days late" against work that never happened would read as a
             # completion. Both land on the same `history.notDue` placeholder in the table.
+            # Counted in the zone this closure was judged in, so a chore ticked off at 23:00
+            # local on its due date reads as on time rather than a day late - and keeps reading
+            # that way after the household moves. `Household` is already joined for the row's own
+            # payload, so the NULL fallback costs nothing.
             days_late=(
                 None
                 if repeats == RepeatPeriod.manual or occ.skipped
-                else days_late(occ.scheduled_for, occ.completed_at)
+                else days_late(
+                    occ.scheduled_for,
+                    occ.completed_at,
+                    closure_zone(occ.completed_timezone, household.timezone),
+                )
             ),
             completed_by=HouseholdMemberRead.model_validate(completer) if completer else None,
             household=ChoreHouseholdRead.model_validate(household),
@@ -283,6 +293,10 @@ async def undo_completion(
         occ.completed_by_user_id = None
         occ.completed_at = None
         occ.title = None
+        # Cleared with the other closure columns: the row is open again, so there is no closure
+        # left for a zone to have judged. Leaving it would hand the *next* completion of this
+        # slot a zone from whenever the previous one happened.
+        occ.completed_timezone = None
         # Clearing `skipped` matters as much as the rest: an open row that kept the flag
         # would be completed for real later and still land in history as a skip, since
         # nothing downstream re-derives it.

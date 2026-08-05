@@ -178,9 +178,12 @@ export default function Households() {
     {
       accessorKey: 'created_at',
       header: t('households.headers.createdAt'),
+      // The row's own zone, matching how Chores.tsx renders a chore's created_at. These are
+      // the user's households, so each row is a household surface; the admin twin of this
+      // table deliberately does not, being an operator view over households they are not in.
       cell: ({ row }) => (
-        <span title={formatDateTimeFull(row.original.created_at)}>
-          {formatDateTime(row.original.created_at)}
+        <span title={formatDateTimeFull(row.original.created_at, row.original.timezone)}>
+          {formatDateTime(row.original.created_at, row.original.timezone)}
         </span>
       ),
       meta: { cellClassName: 'text-muted-foreground' },

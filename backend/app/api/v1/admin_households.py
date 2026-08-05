@@ -1,4 +1,3 @@
-from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -10,11 +9,13 @@ from app.api.v1.households import (
     SortDir,
     build_household_page,
     build_members_page,
+    commit_household_update,
     load_household_read,
     remove_member,
     set_household_admin,
     set_member_role,
 )
+from app.core import clock
 from app.core.households import add_member
 from app.models import Household, HouseholdRole
 from app.schemas import (
@@ -77,7 +78,7 @@ async def create_household(
     # admin_id is required, and it must reference a member, so the creating admin
     # becomes the household's owner and first member (an organiser, as owners are).
     # They (or another admin) can transfer ownership once real members are added.
-    household = Household(name=payload.name, admin_id=admin.id)
+    household = Household(name=payload.name, admin_id=admin.id, timezone=payload.timezone)
     session.add(household)
     await session.flush()
     await add_member(session, household.id, admin.id, HouseholdRole.organiser)
@@ -99,7 +100,7 @@ async def update_household(
         household.name = payload.name
     if payload.admin_id is not None:
         await set_household_admin(session, household, payload.admin_id)
-    await session.commit()
+    await commit_household_update(session, household, payload.timezone)
     return await load_household_read(session, household.id)
 
 
@@ -107,7 +108,7 @@ async def update_household(
 async def delete_household(household_id: int, _: AdminUser, session: SessionDep) -> None:
     household = await _get_household_or_404(session, household_id)
     if household.deleted_at is None:
-        household.deleted_at = datetime.now(UTC)
+        household.deleted_at = clock.now()
         await session.commit()
 
 

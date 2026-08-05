@@ -21,15 +21,15 @@ function homeBody(done: number, total: number, items: DueChore[]) {
 // A single household + member keeps the filter bar hidden (it only renders when
 // there is more than one of either).
 const SOLO_OPTIONS: HistoryFilterOptions = {
-  households: [{ id: 1, name: 'Test Household' }],
+  households: [{ id: 1, name: 'Test Household', timezone: 'UTC' }],
   members: [makeHouseholdMember({ id: 1 })],
 }
 
 // Two of each so both filters render.
 const MULTI_OPTIONS: HistoryFilterOptions = {
   households: [
-    { id: 1, name: 'Flat A' },
-    { id: 2, name: 'Flat B' },
+    { id: 1, name: 'Flat A', timezone: 'UTC' },
+    { id: 2, name: 'Flat B', timezone: 'UTC' },
   ],
   members: [
     makeHouseholdMember({ id: 1, first_name: 'Me', last_name: 'Myself' }),
@@ -553,7 +553,7 @@ describe('Home', () => {
           makeDueChore({
             id: 1,
             title: 'Clean the bathroom',
-            household: { id: 2, name: 'Flat B' },
+            household: { id: 2, name: 'Flat B', timezone: 'UTC' },
             assignees: [makeHouseholdMember({ id: 2, first_name: 'Anna', last_name: 'Aardvark' })],
           }),
         ]),
@@ -578,7 +578,7 @@ describe('Home', () => {
           makeDueChore({
             id: 1,
             title: 'Clean the bathroom',
-            household: { id: 1, name: 'Test Household' },
+            household: { id: 1, name: 'Test Household', timezone: 'UTC' },
             assignees: [makeHouseholdMember({ id: 2, first_name: 'Anna', last_name: 'Aardvark' })],
           }),
         ]),
@@ -770,6 +770,47 @@ describe('description dialog', () => {
       expect(skipButton).toBeDisabled()
       expect(doneButton).toBeDisabled()
       await waitFor(() => expect(screen.queryByText('Do the dishes')).not.toBeInTheDocument())
+    })
+  })
+
+  describe('timezones', () => {
+    it("renders the due date in the household zone, not the viewer's", async () => {
+      // 22:00Z on the 4th is exactly how a chore due on 5 August in Amsterdam is stored, and
+      // the server has already said "Due today" about it. If the row rendered in the viewer's
+      // zone it could print the 4th right beside that label - the contradiction this whole
+      // feature exists to remove. Two households in one payload, so a single global zone
+      // cannot satisfy both.
+      mockFetch([
+        {
+          path: HOME,
+          body: homeBody(0, 2, [
+            makeDueChore({
+              id: 1,
+              title: 'Amsterdam chore',
+              next_due: '2026-08-04T22:00:00Z',
+              days_until_due: 0,
+              status: 'today',
+              household: { id: 1, name: 'Home', timezone: 'Europe/Amsterdam' },
+            }),
+            makeDueChore({
+              id: 2,
+              title: 'Niue chore',
+              next_due: '2026-08-04T22:00:00Z',
+              days_until_due: 0,
+              status: 'today',
+              household: { id: 2, name: 'Away', timezone: 'Pacific/Niue' },
+            }),
+          ]),
+        },
+        { path: FILTERS, body: SOLO_OPTIONS },
+      ])
+      renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+      const amsterdam = (await screen.findByText('Amsterdam chore')).closest('li')!
+      const niue = screen.getByText('Niue chore').closest('li')!
+      // The same instant, a day apart, because the two households are.
+      expect(amsterdam).toHaveTextContent('5 Aug 2026')
+      expect(niue).toHaveTextContent('4 Aug 2026')
     })
   })
 })
