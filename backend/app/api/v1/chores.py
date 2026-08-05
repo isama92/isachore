@@ -648,9 +648,49 @@ async def _close_occurrence(
 
     The successor's assignee is the one real behavioural fork: a completion hands the chore
     on when the turn ends (`_successor_assignee`), a skip keeps it where it is
-    (`_retained_assignee`)."""
+    (`_retained_assignee`).
+
+    **The two values this closure is computed from are re-read under a row lock first**, and the
+    order matters. `occ` and `chore` arrive from plain selects taken before this was called, so
+    without the lock a concurrent `PATCH /households/{id}` changing the zone could commit in
+    between - `reanchor_open_occurrences` holds `FOR UPDATE` on this very row, but that only
+    delays *this* transaction's write, it does not invalidate the read it already took, and
+    nothing carries a `version_id_col` to notice. The closure would then be computed from a slot
+    and a zone that no longer belong together, silently:
+
+      - the successor gets anchored on the old zone's grid and **stays** there, since every
+        later completion walks from that anchor (measured 11 hours off for an
+        Europe/Amsterdam to Pacific/Niue move);
+      - and `completed_timezone` gets stamped with the old zone onto a row whose `scheduled_for`
+        the re-anchor just moved to the new zone's midnight - mismatched operands for
+        `days_late`, which is the one thing that column exists to prevent. Traced: 1 day late
+        reported where the answer is 0.
+
+    Neither raises `IntegrityError`, so nothing downstream catches it.
+
+    Taking the lock before reading closes both interleavings. If the re-anchor got there first,
+    this blocks and then re-reads the slot it wrote, and the zone select that follows sees the
+    committed value (READ COMMITTED, fresh statement) - a consistent pair. If this got there
+    first, the re-anchor blocks instead, this finishes on the old pair (also consistent, since
+    nothing has changed yet), and once it commits the re-anchor's `status == open` predicate
+    re-evaluates and skips the row, which is now `done`. It also covers the successor insert
+    below, because nothing can reach that insert without holding this lock first.
+
+    The residual is `undo_completion` reopening a row after the re-anchor's select has run,
+    which leaves that row on the old grid until the next chore edit re-seeds it through
+    `_reconcile_open_occurrence`. Narrower again, and self-healing, so it is documented rather
+    than locked.
+    """
+    # `SELECT ... FOR UPDATE` on this one row, which is the row a completion already contends on -
+    # not a household-wide advisory lock, which would serialise housemates completing different
+    # chores.
+    await session.refresh(occ, with_for_update=True)
     now = clock.now()
-    tz = zone_for(chore)
+    # Read after the lock, never from `chore.household` - that was loaded before it.
+    tz = household_zone(
+        await session.scalar(select(Household.timezone).where(Household.id == chore.household_id))
+        or "UTC"
+    )
     scheduled_for = occ.scheduled_for
     # Flip the current occurrence to done FIRST (it becomes the history row and frees
     # the one-open-per-chore slot), then materialise the successor - never the reverse,

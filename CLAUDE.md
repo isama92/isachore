@@ -594,7 +594,28 @@ pre-commit run --all-files                           # what the git hook runs
     past (observed as `['UPDATE', 'SELECT']`, since `async_sessionmaker` leaves `autoflush` on),
     so a `try` around `commit()` alone would let `uq_occurrence_chore_scheduled` escape as a 500
     while the docstring promised a 409. It is the lock rather than the walk that makes both
-    branches near-unreachable, so neither is testable here. Both the user PATCH and its admin twin call the
+    branches near-unreachable, so neither is testable here.
+
+    **That lock is not enough on its own, and `_close_occurrence` holds the other half.** A
+    `FOR UPDATE` on the re-anchor's side delays a concurrent completion's *write*; it does nothing
+    about the read that completion already took. `complete`/`skip` get their chore and occurrence
+    from plain selects before `_close_occurrence` runs, and nothing carries a `version_id_col`, so
+    a zone change committing in between left the closure computed from a slot and a zone that no
+    longer belonged together - silently, since neither raises. Measured on an
+    Amsterdam-to-Niue move: the successor anchored 11 hours off the grid and *stayed* there
+    (later completions walk from that anchor), and `completed_timezone` was stamped with the old
+    zone onto a row whose `scheduled_for` the re-anchor had already moved, reporting 1 day late
+    where the answer is 0. So `_close_occurrence` re-reads **both** operands after taking
+    `refresh(occ, with_for_update=True)` - the lock first, then the zone by its own select, never
+    from `chore.household`. Order matters: whichever transaction takes the row first, the other
+    either re-reads what it wrote or finds the row already `done` and skips it.
+
+    Two things follow. A one-row lock rather than `pg_advisory_xact_lock(household_id)`, because
+    the row is what a completion already contends on and a household-wide lock would serialise
+    housemates completing different chores. And the residual is `undo_completion` reopening a row
+    after the re-anchor's select has run, which leaves that row on the old grid until the next
+    edit re-seeds it through `_reconcile_open_occurrence` - narrower again, and self-healing, so
+    it is documented rather than locked. Both the user PATCH and its admin twin call the
     shared helper. `apply_timezone_change`'s two guards are about work rather than correctness:
     re-anchoring an *unchanged* zone writes nothing (SQLAlchemy issues no UPDATE for an equal
     value, and aware datetimes compare by instant), so what they save is one query per open
@@ -1069,6 +1090,22 @@ the negative paths (401/403/400/404/409), not just the happy one.
   default - three statements rather than one `ADD COLUMN ... NOT NULL DEFAULT now()`, because
   `now()` is volatile and so forfeits Postgres's metadata-only fast path, making that one-liner
   two full table rewrites instead of one.
+- **The zone-change / completion race is by-hand-only, and there is a way to drive it.** The
+  savepoint fixtures give each test one connection inside a rolled-back savepoint, so two
+  concurrent transactions never exist - the same limit as `create_invitation`'s advisory lock. To
+  check it for real, write a throwaway script that builds its own household, chore and open
+  occurrence, then `asyncio.gather`s two `async_session_factory()` sessions: one calling
+  `apply_timezone_change` and sleeping before it commits, the other calling `_close_occurrence`
+  partway through that sleep. Assert `completed_timezone` matches the household's zone afterwards
+  and that the successor sits on local midnight. Run it against the reverted code first - it must
+  fail - and have it clean up after itself so the dev database is left as it was.
+
+  What *is* reachable here is the half that makes the fix work: both operands are read after the
+  lock rather than taken from the preloaded objects. `update(...)` with
+  `execution_options(synchronize_session=False)` stands in for the concurrent transaction, and
+  that option is load-bearing - the default ORM-enabled UPDATE writes the new value onto the
+  loaded object too, so the test would pass on the old code. Both tests assert the object is
+  still stale before closing, for exactly that reason.
 - **`chore_occurrences.updated_at` cannot be observed moving under the fixtures.** Both its
   defaults are SQL `now()`, which is `transaction_timestamp()` and so frozen for the whole
   savepoint-wrapped test; in production each request is its own transaction. The suite pins the

@@ -21,9 +21,14 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.chores import (
+    _close_occurrence,
+    _get_user_chore_or_404,
+    _open_occurrence,
+)
 from app.api.v1.households import apply_timezone_change
 from app.core import clock
 from app.core.chores import (
@@ -1193,6 +1198,90 @@ async def test_a_zone_change_cannot_land_on_an_already_completed_slot(
     )
     # Stepped one day on rather than colliding, and still local midnight.
     assert slot == datetime(2026, 8, 6, 11, 0, tzinfo=UTC)
+
+
+# --- what a closure reads, and when -----------------------------------------
+#
+# The race these two describe needs two real transactions and so cannot be driven here (see the
+# note in CLAUDE.md). What IS reachable is the half that makes the fix work: both operands are
+# read *after* the row lock rather than taken from the objects the handler preloaded. Changing the
+# row underneath the loaded object stands in for the concurrent transaction, and it fails on the
+# old code for the same reason the real race did.
+
+
+async def test_a_closure_reads_the_zone_after_the_lock_not_from_the_loaded_chore(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    db_session: AsyncSession,
+) -> None:
+    """`_close_occurrence` gets its `chore` from a plain select taken earlier, so reading
+    `chore.household.timezone` would use whatever was true when the handler started. A zone change
+    committing in between would then stamp `completed_timezone` with the old zone onto a row whose
+    `scheduled_for` the re-anchor had already moved - mismatched operands for `days_late`, which is
+    the one thing that column exists to prevent."""
+    user = await make_user()
+    household = await make_household(members=[user], timezone="Europe/Amsterdam")
+    chore = await make_chore(household=household, assignees=[user])
+    loaded = await _get_user_chore_or_404(db_session, user, chore.id)
+    occ = await _open_occurrence(db_session, chore.id)
+    assert occ is not None
+    # Stands in for the concurrent PATCH. `synchronize_session=False` is what makes it a stand-in
+    # at all: the default ORM-enabled UPDATE writes the new value onto the loaded object too, so
+    # `chore.household.timezone` would already agree and this would pass on the old code.
+    await db_session.execute(
+        update(Household)
+        .where(Household.id == household.id)
+        .values(timezone="Pacific/Niue")
+        .execution_options(synchronize_session=False)
+    )
+    assert loaded.household.timezone == "Europe/Amsterdam"
+
+    await _close_occurrence(
+        db_session, loaded, occ, closed_by_id=user.id, skipped=False, conflict_detail="conflict"
+    )
+
+    assert occ.completed_timezone == "Pacific/Niue"
+
+
+async def test_a_closure_reads_the_slot_after_the_lock_not_from_the_loaded_occurrence(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    db_session: AsyncSession,
+) -> None:
+    """The other operand. The successor is anchored from `scheduled_for`, so a slot re-anchored in
+    between would leave the chore on the old zone's grid - and permanently, since every later
+    completion walks from that anchor. The `refresh(..., with_for_update=True)` is what re-reads
+    it; without that this anchors from the stale value."""
+    user = await make_user()
+    household = await make_household(members=[user], timezone="UTC")
+    chore = await make_chore(
+        household=household,
+        start_date=date(2026, 8, 5),
+        repeats=RepeatPeriod.daily,
+        assignees=[user],
+    )
+    loaded = await _get_user_chore_or_404(db_session, user, chore.id)
+    occ = await _open_occurrence(db_session, chore.id)
+    assert occ is not None
+    moved = datetime(2026, 8, 20, tzinfo=UTC)
+    # `synchronize_session=False` for the same reason as the test above: without it the loaded
+    # occurrence picks the new slot up by itself and the refresh proves nothing.
+    await db_session.execute(
+        update(ChoreOccurrence)
+        .where(ChoreOccurrence.id == occ.id)
+        .values(scheduled_for=moved)
+        .execution_options(synchronize_session=False)
+    )
+    assert occ.scheduled_for != moved
+
+    result = await _close_occurrence(
+        db_session, loaded, occ, closed_by_id=user.id, skipped=False, conflict_detail="conflict"
+    )
+
+    # One day on from the slot as it is *now*, not from the 5 August the handler loaded.
+    assert result.next_due == moved + timedelta(days=1)
 
 
 # --- chore_occurrences.updated_at -------------------------------------------
