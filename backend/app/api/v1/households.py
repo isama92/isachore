@@ -262,31 +262,56 @@ async def apply_timezone_change(
     )
 
 
-async def commit_household_update(session: SessionDep, *, rescheduled: int) -> None:
-    """Commit a household PATCH, mapping a slot collision to a 409 rather than a 500.
+def _slot_conflict() -> HTTPException:
+    """The 409 a re-anchor collision surfaces as. One constructor because two call sites raise
+    it, and they must not drift into two different messages for one cause."""
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="A chore was completed while the timezone was changing; please try again",
+    )
 
-    `rescheduled` is what `apply_timezone_change` reported, and gating on it is what keeps the
-    message honest: a name-only save touches no occurrence row, so nothing on that path can
-    raise this and a caller who somehow saw it would be told a chore was completed when none
-    was. No other constraint on this endpoint can realistically raise today, which makes the
-    mislabel latent rather than live - but the fix is a branch, so there is no reason to carry it.
 
-    The collision itself needs a genuine race: `free_slot_from` already walks each candidate past
-    the slots the chore has completed, so what is left is a completion landing between that walk
-    and this commit, which is exactly the shape `update_chore` maps to a 409. Shared by both
-    PATCH handlers so the two cannot drift.
+async def commit_household_update(
+    session: SessionDep, household: Household, new_timezone: str | None
+) -> None:
+    """Apply a timezone change and commit, mapping a slot collision to a 409 rather than a 500.
+
+    Owns the re-anchor rather than sitting after it, because that is where a collision can
+    actually be raised. `reanchor_open_occurrences` writes `scheduled_for` row by row, and
+    `free_slot_from`'s SELECT autoflushes the previous iteration on the way past - observed as
+    `['UPDATE', 'SELECT']` on the session's cursor, since `async_sessionmaker` leaves `autoflush`
+    on. So `uq_occurrence_chore_scheduled` fires inside the loop, and a `try` around `commit()`
+    alone would let it escape as a 500 while promising a 409.
+
+    Two `try` blocks rather than one, because *where* the error came from is what makes the
+    message honest:
+    - From the re-anchor, the cause is unambiguous - the only thing it writes is occurrence slots.
+    - From `commit()`, it is a 409 only if the re-anchor actually moved something. A name-only
+      save touches no occurrence row, so a constraint failing there is something else entirely and
+      deserves to surface as the 500 it is rather than be told a chore was completed.
+
+    Both paths are near-unreachable, and it is the lock rather than the walk that makes them so:
+    `free_slot_from` already steps each candidate past the slots the chore has completed, so what
+    is left is a concurrent completion taking one - and `reanchor_open_occurrences` holds
+    `FOR UPDATE OF chore_occurrences` on every open row for the rest of the transaction, so that
+    completion blocks until this commits and then finds the row already `done`. Which is why
+    neither branch is reachable from the suite; see CLAUDE.md on the paths that need real
+    concurrency.
+
+    Shared by both PATCH handlers so the two cannot drift.
     """
-    if not rescheduled:
-        await session.commit()
-        return
+    try:
+        moved = await apply_timezone_change(session, household, new_timezone)
+    except IntegrityError:
+        await session.rollback()
+        raise _slot_conflict() from None
     try:
         await session.commit()
     except IntegrityError:
         await session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A chore was completed while the timezone was changing; please try again",
-        ) from None
+        if not moved:
+            raise
+        raise _slot_conflict() from None
 
 
 def refuse_owner_row(household: Household, user_id: int) -> None:
@@ -486,8 +511,7 @@ async def update_household(
         household.name = payload.name
     if payload.admin_id is not None:
         await set_household_admin(session, household, payload.admin_id)
-    rescheduled = await apply_timezone_change(session, household, payload.timezone)
-    await commit_household_update(session, rescheduled=rescheduled)
+    await commit_household_update(session, household, payload.timezone)
     return await load_household_read(session, household.id)
 
 

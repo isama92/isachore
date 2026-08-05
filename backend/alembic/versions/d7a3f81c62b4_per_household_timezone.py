@@ -1,4 +1,4 @@
-"""per-household timezone, and an updated_at on chore occurrences
+"""per-household timezone
 
 Revision ID: d7a3f81c62b4
 Revises: 89584c6f2687
@@ -81,35 +81,6 @@ def upgrade() -> None:
         """
     )
 
-    # Unrelated to the timezone work, and here only because it is a second column on a table
-    # this revision already rewrites. An occurrence stopped being write-once a while ago -
-    # completing one stamps four columns, undoing clears them, and an edit can move the
-    # assignee or re-date the slot - so `created_at` alone no longer answers "is this what it
-    # was".
-    #
-    # `server_default now()` plus NOT NULL makes every existing row valid without a follow-up
-    # NULL sweep, the same shape as chore_occurrences.skipped in 5c15efc03a8c. Note `now()` is
-    # volatile, so unlike a constant default this cannot use Postgres's metadata-only fast path:
-    # the ADD COLUMN rewrites the table and the UPDATE below rewrites it again. Fine at household
-    # scale, but it is two passes rather than one.
-    #
-    # The backfill sets every row to `created_at`, *including* the ones this revision just
-    # re-anchored, which looks like a contradiction and is a deliberate choice: there is no edit
-    # history to reconstruct, `created_at` is the only honest approximation available for a
-    # pre-existing row, and re-anchoring changed how a slot is *represented* rather than anything
-    # a member did. Stamping the migration's own clock instead would tell every reader that
-    # somebody edited every occurrence the day this deployed, which is worse.
-    op.add_column(
-        "chore_occurrences",
-        sa.Column(
-            "updated_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
-            nullable=False,
-        ),
-    )
-    op.execute("UPDATE chore_occurrences SET updated_at = created_at")
-
 
 def downgrade() -> None:
     """Downgrade schema.
@@ -137,8 +108,6 @@ def downgrade() -> None:
     and restore them afterwards. There is no way for the migration to do it: the values are
     gone by the time the re-upgrade runs.
     """
-    op.drop_column("chore_occurrences", "updated_at")
-
     # Put the slots back on midnight UTC, mirroring the upgrade's transform. This has to run
     # BEFORE the column is dropped: it reads h.timezone, so dropping first would leave the
     # rows re-anchored with nothing left to reverse them by.

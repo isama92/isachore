@@ -588,7 +588,13 @@ pre-commit run --all-files                           # what the git hook runs
     Every candidate goes through `free_slot_from`, because the new instant can land on a slot
     the chore has already completed, and the select takes `FOR UPDATE OF chore_occurrences` so a
     concurrent `POST /complete` cannot flip a row to `done` between the read and the write - the
-    one way this could re-date a history row. Both the user PATCH and its admin twin call the
+    one way this could re-date a history row. **`commit_household_update` owns the re-anchor as
+    well as the commit**, because that is where a collision can actually be raised: the re-anchor
+    writes row by row and `free_slot_from`'s SELECT autoflushes the previous iteration on the way
+    past (observed as `['UPDATE', 'SELECT']`, since `async_sessionmaker` leaves `autoflush` on),
+    so a `try` around `commit()` alone would let `uq_occurrence_chore_scheduled` escape as a 500
+    while the docstring promised a 409. It is the lock rather than the walk that makes both
+    branches near-unreachable, so neither is testable here. Both the user PATCH and its admin twin call the
     shared helper. `apply_timezone_change`'s two guards are about work rather than correctness:
     re-anchoring an *unchanged* zone writes nothing (SQLAlchemy issues no UPDATE for an equal
     value, and aware datetimes compare by instant), so what they save is one query per open
@@ -643,8 +649,11 @@ pre-commit run --all-files                           # what the git hook runs
     this true from both directions (`_normalised_schedule`): the date is silently
     dropped for `manual` and **required** for every other period, the one part of the
     schedule rejected rather than normalised. So a NULL `start_date` and `repeats ==
-    manual` are the same fact, and `ChoreForm` hides the field, submits `null`, and
-    refills it with today when the period stops being unscheduled.
+    manual` are the same fact, and `ChoreForm` hides the field and submits `null`. It does not
+    *refill* the date when the period stops being unscheduled: `startDate` is derived
+    (`values.start_date || todayISO(timezone)`), so an empty value resolves to today in the
+    **household's** zone on its own - which is also what makes it follow a household switch on
+    the create page. A date the form was handed, by cloning a scheduled chore, is kept instead.
   - Their `scheduled_for` records **availability, not a deadline**. Nothing may read it
     as one: `days_late` comes back `null` from History, and both `home.py` and `stats.py`
     exclude `repeats == manual` outright. In stats that means counted in
@@ -1053,6 +1062,13 @@ the negative paths (401/403/400/404/409), not just the happy one.
   the zone is dropped. Second, `end - start` on two aware datetimes **sharing a tzinfo** ignores
   the zone entirely and subtracts wall-clock fields, so "this DST day is 25 hours long" is a
   constant 24 unless both sides are `.astimezone(UTC)`'d first.
+- **`chore_occurrences.updated_at` has its own revision** (`c8d5e21a473f`), deliberately not
+  bundled with the timezone work even though `d7a3f81c62b4` already rewrites that table: an
+  operator rolling the timezone feature back should not have to drop an unrelated column to do
+  it. It is added nullable, backfilled from `created_at`, then set NOT NULL with a `now()`
+  default - three statements rather than one `ADD COLUMN ... NOT NULL DEFAULT now()`, because
+  `now()` is volatile and so forfeits Postgres's metadata-only fast path, making that one-liner
+  two full table rewrites instead of one.
 - **`chore_occurrences.updated_at` cannot be observed moving under the fixtures.** Both its
   defaults are SQL `now()`, which is `transaction_timestamp()` and so frozen for the whole
   savepoint-wrapped test; in production each request is its own transaction. The suite pins the

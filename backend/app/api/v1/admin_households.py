@@ -7,7 +7,6 @@ from app.api.v1.households import (
     HouseholdSortBy,
     MemberSortBy,
     SortDir,
-    apply_timezone_change,
     build_household_page,
     build_members_page,
     commit_household_update,
@@ -101,8 +100,7 @@ async def update_household(
         household.name = payload.name
     if payload.admin_id is not None:
         await set_household_admin(session, household, payload.admin_id)
-    rescheduled = await apply_timezone_change(session, household, payload.timezone)
-    await commit_household_update(session, rescheduled=rescheduled)
+    await commit_household_update(session, household, payload.timezone)
     return await load_household_read(session, household.id)
 
 

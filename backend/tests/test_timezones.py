@@ -1024,6 +1024,56 @@ async def test_patch_rejects_an_unknown_timezone(
     assert (await client.get(f"/api/v1/households/{household.id}")).json()["timezone"] == "UTC"
 
 
+async def test_changing_the_timezone_leaves_soft_deleted_chores_alone(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    """The third of `reanchor_open_occurrences`' documented exclusions, and the one that had no
+    test - so deleting `Chore.deleted_at.is_(None)` from its query broke nothing.
+
+    Nothing shows a soft-deleted chore and nothing can complete it, so re-anchoring its slot is
+    work with no observer. It also matters for the count the caller gates its 409 on: a household
+    full of deleted chores would report a re-scheduling that nobody could see.
+    """
+    user = await make_user()
+    household = await make_household(members=[user], admin=user, timezone="Europe/Amsterdam")
+    live = await make_chore(
+        household=household,
+        title="Live",
+        start_date=date(2026, 8, 5),
+        repeats=RepeatPeriod.yearly,
+    )
+    deleted = await make_chore(
+        household=household,
+        title="Deleted",
+        start_date=date(2026, 8, 5),
+        repeats=RepeatPeriod.yearly,
+    )
+    client = await auth_client(user)
+    assert (await client.delete(f"/api/v1/chores/{deleted.id}")).status_code == 204
+
+    async def slot_of(chore_id: int) -> datetime | None:
+        return await db_session.scalar(
+            select(ChoreOccurrence.scheduled_for).where(
+                ChoreOccurrence.chore_id == chore_id,
+                ChoreOccurrence.status == OccurrenceStatus.open,
+            )
+        )
+
+    before = await slot_of(deleted.id)
+    resp = await client.patch(
+        f"/api/v1/households/{household.id}", json={"timezone": "Pacific/Niue"}
+    )
+    assert resp.status_code == 200
+
+    # The live chore moved; the soft-deleted one did not.
+    assert await slot_of(live.id) == datetime(2026, 8, 5, 11, 0, tzinfo=UTC)
+    assert await slot_of(deleted.id) == before
+
+
 async def test_apply_timezone_change_skips_the_work_when_the_zone_did_not_move(
     make_user: MakeUser,
     make_household: MakeHousehold,

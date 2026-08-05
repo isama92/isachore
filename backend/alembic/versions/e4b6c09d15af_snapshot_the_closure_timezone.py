@@ -1,7 +1,7 @@
 """snapshot the household timezone on a closed occurrence
 
 Revision ID: e4b6c09d15af
-Revises: d7a3f81c62b4
+Revises: c8d5e21a473f
 Create Date: 2026-08-05 02:58:14.902731
 
 """
@@ -14,7 +14,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "e4b6c09d15af"
-down_revision: str | Sequence[str] | None = "d7a3f81c62b4"
+down_revision: str | Sequence[str] | None = "c8d5e21a473f"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
