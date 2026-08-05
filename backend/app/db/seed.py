@@ -41,6 +41,7 @@ from app.models import (
     HouseholdLogEntry,
     HouseholdRole,
     OccurrenceStatus,
+    OidcLoginState,
     RepeatPeriod,
     Tag,
     User,
@@ -361,6 +362,10 @@ _WIPE_ORDER = [
     Household,
     AuthToken,
     ConfirmationToken,
+    # No user_id and so no CASCADE to lean on: an in-flight SSO login belongs to a
+    # browser, not yet to an account. Position is therefore free, unlike everything
+    # above it.
+    OidcLoginState,
     AuditEvent,
     User,
 ]

@@ -28,6 +28,14 @@ async def test_read_settings_defaults(make_user: Login, auth_client: AuthClient)
         "smtp_host": None,
         "smtp_port": 587,
         "smtp_from": None,
+        "oidc_configured": False,
+        "oidc_provider_name": "SSO",
+        "oidc_issuer": None,
+        "oidc_client_id": None,
+        # Derived from app_base_url, so it is reported even with no provider set: it is
+        # the value an operator registers with the provider *before* filling the rest in.
+        "oidc_redirect_uri": "http://localhost:5173/api/v1/auth/oidc/callback",
+        "oidc_only": False,
     }
 
 
@@ -204,3 +212,40 @@ async def test_test_email_cooldown_fails_open_when_redis_unavailable(
     assert (await client.post("/api/v1/settings/test-email")).status_code == 204
     assert (await client.post("/api/v1/settings/test-email")).status_code == 204
     assert len(smtp) == 2
+
+
+async def test_read_settings_normalises_a_blank_provider_name(
+    make_user: Login, auth_client: AuthClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The label an operator reads here must be the label users see on the button.
+
+    `OIDC_PROVIDER_NAME=` is reachable (the name is cosmetic and deliberately outside
+    oidc_configured()), and /auth/methods substitutes the default for it, so without the same
+    normalisation this page shows an empty cell while the login page reads "Sign in with SSO".
+    """
+    monkeypatch.setattr(settings, "oidc_issuer", "https://auth.example.com/o/isachore/")
+    monkeypatch.setattr(settings, "oidc_client_id", "isachore")
+    monkeypatch.setattr(settings, "oidc_client_secret", "not-a-real-secret")
+    monkeypatch.setattr(settings, "oidc_provider_name", "  ")
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    client = await auth_client(admin)
+
+    resp = await client.get("/api/v1/settings")
+
+    assert resp.json()["oidc_configured"] is True
+    assert resp.json()["oidc_provider_name"] == "SSO"
+
+
+async def test_read_settings_never_exposes_the_client_secret(
+    make_user: Login, auth_client: AuthClient, oidc: str
+) -> None:
+    # Same rule as smtp_password: a derived boolean and the non-secret values, never the
+    # credential. Asserted against the whole body rather than a field, so adding a field that
+    # happens to carry it fails here too.
+    admin = await make_user(email="admin@example.com", is_admin=True)
+    client = await auth_client(admin)
+
+    resp = await client.get("/api/v1/settings")
+
+    assert "shh-client-secret" not in resp.text
+    assert "client_secret" not in resp.text

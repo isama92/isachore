@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, String, func
+from sqlalchemy import DateTime, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -68,12 +68,34 @@ class User(Base):
     # so login enforcement keys on totp_enabled, never on the secret's presence.
     totp_secret: Mapped[str | None] = mapped_column(String(255), default=None)
     totp_enabled: Mapped[bool] = mapped_column(default=False)
+    # Link to an external OpenID Connect identity, written on the first SSO sign-in
+    # (see api/v1/oidc.py). NULL on both means "never signed in through a provider",
+    # which is every account until it does; a linked account can still use its
+    # password, so this grants a second way in rather than replacing the first.
+    #
+    # BOTH columns, not just the subject, and the unique constraint spans the pair.
+    # `sub` is only promised to be unique *per issuer*, so with the subject alone an
+    # operator who repointed OIDC_ISSUER at a different provider whose subject values
+    # happened to collide would have handed one person another's account. Storing the
+    # issuer makes that lookup simply miss, falling back to matching on email, which
+    # re-links correctly. Note nothing enforces that these match the *currently*
+    # configured issuer: a stale link is inert rather than dangerous, because the
+    # lookup is keyed on the pair.
+    oidc_subject: Mapped[str | None] = mapped_column(String(255), default=None)
+    oidc_issuer: Mapped[str | None] = mapped_column(String(255), default=None)
     # Indexed because it is the default sort key for the admin users table.
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        # One local account per external identity. Postgres treats NULLs as distinct,
+        # so every account that has never used SSO (both columns NULL) is exempt, which
+        # is what makes this safe to add to an existing table.
+        UniqueConstraint("oidc_issuer", "oidc_subject", name="uq_users_oidc_identity"),
     )
 
     tokens: Mapped[list["AuthToken"]] = relationship(

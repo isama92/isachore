@@ -41,6 +41,18 @@ export type Membership = { household_id: number; role: HouseholdRole; owned: boo
 
 export type Me = User & { impersonating: boolean; memberships: Membership[] }
 
+// From GET /api/v1/auth/methods, the login page's one request. Public and
+// unauthenticated, because the page that asks has nobody signed in yet.
+export type AuthMethods = {
+  // False only when the server has made the provider the only way in (OIDC_ONLY), which
+  // is also exactly when POST /auth/login answers 403.
+  password_enabled: boolean
+  oidc_enabled: boolean
+  // Whatever OIDC_PROVIDER_NAME says, for the "Sign in with ..." label; null when there
+  // is no provider, so a client cannot render a button for nothing.
+  oidc_provider_name: string | null
+}
+
 // Outcome of the password step of login (backend LoginResponse). When
 // two_factor_required is true the user must submit a code to /auth/verify-2fa;
 // otherwise the login is complete and `user` is populated.
@@ -82,6 +94,18 @@ export type ServerSettings = {
   smtp_host: string | null
   smtp_port: number
   smtp_from: string | null
+  // Single sign-on, reported the same way SMTP is: a derived "is it usable" boolean plus
+  // the non-secret values, read-only from the server's environment. The client secret is
+  // never on the wire, exactly as smtp_password is not. Flat oidc_* fields rather than a
+  // nested object, to match the smtp_* group above.
+  oidc_configured: boolean
+  oidc_provider_name: string
+  oidc_issuer: string | null
+  oidc_client_id: string | null
+  // Derived from APP_BASE_URL rather than configured, so it is always present: it is the
+  // value an operator registers with the provider, and this page is where they read it.
+  oidc_redirect_uri: string
+  oidc_only: boolean
 }
 
 export type RepeatPeriod = 'manual' | 'daily' | 'weekly' | 'monthly' | 'yearly'

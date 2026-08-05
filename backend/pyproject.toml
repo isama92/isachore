@@ -8,8 +8,27 @@ dependencies = [
     "alembic>=1.18.5",
     "apscheduler>=3.11,<4",
     "asyncpg>=0.31.0",
+    # OIDC single sign-on, the authorization-code half: PKCE and the token exchange. Only
+    # authlib.integrations.httpx_client is used, and note it authenticates with
+    # client_secret_basic (its default) rather than reading the provider's advertised
+    # token_endpoint_auth_methods_supported - a provider that only accepts
+    # client_secret_post needs a change here, not a setting. The starlette_client integration is
+    # deliberately avoided, because it keeps `state` and `nonce` in a Starlette
+    # session, which this app does not have and should not gain. See app/core/oidc.py.
+    "authlib>=1.6.5",
     "cryptography>=43.0.0",
     "fastapi>=0.140.0",
+    # Runtime, not just the test client: app/core/oidc.py talks to the OIDC
+    # provider's discovery, token, userinfo and JWKS endpoints with it. It was a
+    # dev-only dependency until SSO existed, so do not move it back.
+    "httpx>=0.28.1",
+    # The other half of OIDC: ID token signature verification against the provider's
+    # JWKS, and the claim checks. Declared explicitly even though authlib pulls it in
+    # anyway, because app/core/oidc.py imports it directly. NOT `authlib.jose`, which
+    # is the same author's older API and emits a deprecation warning telling you to
+    # come here; it is scheduled to go away in authlib 2.0, which would silently take
+    # the ID token verification with it.
+    "joserfc>=1.0.0",
     "nh3>=0.3.6",
     "pillow>=11.0.0",
     "pwdlib[argon2]>=0.3.0",
@@ -33,7 +52,8 @@ dependencies = [
 [dependency-groups]
 dev = [
     "fakeredis>=2.37.0",
-    "httpx>=0.28.1",
+    # httpx is a runtime dependency now (see the OIDC note above), so it is no
+    # longer listed here even though the test client is still its biggest user.
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",

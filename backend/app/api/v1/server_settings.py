@@ -3,9 +3,11 @@ import logging
 from fastapi import APIRouter, HTTPException, status
 
 from app.api.deps import AdminUser, RedisDep, SessionDep
+from app.api.v1.auth import DEFAULT_PROVIDER_NAME
 from app.core.app_settings import get_app_settings
 from app.core.config import settings
 from app.core.email import NO_SMTP_DETAIL, send_email, smtp_configured
+from app.core.oidc import oidc_configured, redirect_uri
 from app.core.rate_limit import enforce_test_email_cooldown
 from app.models import AppSettings
 from app.schemas import ServerSettingsRead, ServerSettingsUpdate
@@ -22,6 +24,18 @@ def _read(app_settings: AppSettings) -> ServerSettingsRead:
         smtp_host=settings.smtp_host,
         smtp_port=settings.smtp_port,
         smtp_from=settings.smtp_from,
+        oidc_configured=oidc_configured(),
+        # Normalised the same way /auth/methods does it, so the label an operator reads here
+        # is the label users see on the button. Without this, OIDC_PROVIDER_NAME= shows an
+        # empty cell on this page while the login page reads "Sign in with SSO".
+        oidc_provider_name=settings.oidc_provider_name.strip() or DEFAULT_PROVIDER_NAME,
+        oidc_issuer=settings.oidc_issuer,
+        oidc_client_id=settings.oidc_client_id,
+        # Always reported, even with no provider configured: it is derived from
+        # APP_BASE_URL and is the value an operator has to register *before* the rest
+        # of the group can be filled in, so hiding it until then would be backwards.
+        oidc_redirect_uri=redirect_uri(),
+        oidc_only=settings.oidc_only,
     )
 
 

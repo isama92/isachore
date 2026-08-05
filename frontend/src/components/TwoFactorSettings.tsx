@@ -166,6 +166,12 @@ export default function TwoFactorSettings() {
         <p className="text-sm text-muted-foreground">{t('profile.twoFactorDescription')}</p>
       </div>
 
+      {/* Says what this does NOT cover. A sign-in through the identity provider skips
+          this step deliberately - the provider owns authentication, including whatever
+          MFA it enforces - and without saying so, somebody who has just enrolled here
+          would reasonably read an SSO sign-in that never asked for a code as a bug. */}
+      <p className="text-[13px] text-muted-foreground">{t('profile.twoFactorScope')}</p>
+
       {enabled ? (
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" size="sm" onClick={openRegen}>

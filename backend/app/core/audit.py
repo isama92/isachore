@@ -14,6 +14,24 @@ from app.models import AuditAction, AuditEvent
 logger = logging.getLogger("app.audit")
 
 
+def _loggable(detail: str | None) -> str | None:
+    """`detail` with control characters replaced, for the log line only.
+
+    The log line is one record per newline, so a `detail` containing CR or LF can forge a
+    second record - including a plausible `audit action=login_success ...` line. Most callers
+    pass something the app itself produced or pydantic validated, but not all: the SSO
+    callback's `?error=` is a raw query parameter from an unauthenticated request, and an
+    email claim comes from whatever the identity provider was told. That makes this a
+    property of the formatter rather than of any one caller.
+
+    The stored column keeps the original: the DB row is not line-oriented, so nothing is
+    forgeable there, and truncating what an operator can query would be the worse trade.
+    """
+    if detail is None:
+        return None
+    return "".join(ch if ch.isprintable() else f"\\x{ord(ch):02x}" for ch in detail)
+
+
 async def record_event(
     session: AsyncSession,
     *,
@@ -41,5 +59,5 @@ async def record_event(
         target_id,
         impersonator_id,
         ip,
-        detail,
+        _loggable(detail),
     )

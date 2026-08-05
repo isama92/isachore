@@ -161,6 +161,84 @@ async def clear_two_factor_failures(redis: Redis, *, user_id: int) -> None:
         logger.warning("2FA failure counter not cleared: Redis unavailable", exc_info=True)
 
 
+_OIDC_KEY_PREFIX = "oidc:fail:"
+
+_OIDC_START_KEY_PREFIX = "oidc:start:"
+# Ceiling on *started* sign-ons per IP per window, counting successes as well as
+# abandonments. Its own number rather than login_ip_max_attempts, because it bounds a
+# different thing: that limit counts failures, so 20 is generous for one person, while this
+# counts every click of the button from every person behind one address. A shared office NAT
+# signing in on a Monday morning must not run into it, so it is set an order of magnitude
+# above anything a human sequence produces, which still stops a loop dead. A module constant
+# rather than a Settings field, like MAX_PENDING_INVITATIONS: it is a bound on abuse, not a
+# deployment knob.
+_OIDC_START_MAX_ATTEMPTS = 200
+
+
+def _oidc_ip_key(ip: str) -> str:
+    return f"{_OIDC_KEY_PREFIX}ip:{ip}"
+
+
+def _oidc_start_key(ip: str) -> str:
+    return f"{_OIDC_START_KEY_PREFIX}ip:{ip}"
+
+
+async def enforce_oidc_start_rate_limit(redis: Redis, *, ip: str | None) -> None:
+    """Bound how many sign-ons one IP may *start*. Call at the top of the start endpoint.
+
+    Unlike every other helper here this counts and checks in one go, because there is no
+    later "failure" to record: starting a flow always succeeds, and the thing being limited
+    is the start itself. `GET /auth/oidc/start` is unauthenticated and writes a row per
+    call, and the opportunistic sweep only clears rows past their ten-minute TTL, so nothing
+    just inserted is eligible - without this an anonymous loop grows `oidc_login_states` for
+    as long as it runs, on a deployment where every other pre-auth write path is bounded.
+
+    Fails open on a Redis outage like its siblings: a cache outage should not stop people
+    signing in.
+    """
+    try:
+        if ip is None:
+            return
+        key = _oidc_start_key(ip)
+        await _incr_with_ttl(redis, key)
+        if int(await redis.get(key) or 0) > _OIDC_START_MAX_ATTEMPTS:
+            raise _locked_out(await _retry_after(redis, key))
+    except RedisError:
+        logger.warning("SSO start rate-limit check skipped: Redis unavailable", exc_info=True)
+
+
+async def enforce_oidc_rate_limit(redis: Redis, *, ip: str | None) -> None:
+    """Raise 429 if this IP has failed too many SSO callbacks. Call at the top of the
+    callback, before anything is looked up.
+
+    Keyed on the IP alone, unlike the login and 2FA throttles, because at the point
+    this runs there is no email or user to key on: the callback carries an opaque
+    `state` and a `code`, and whether either resolves to anything is what is being
+    rate-limited. Reuses the per-IP threshold and window rather than adding settings of
+    its own, since it is bounding the same thing from a different direction.
+    """
+    try:
+        if ip is None:
+            return
+        key = _oidc_ip_key(ip)
+        if int(await redis.get(key) or 0) >= settings.login_ip_max_attempts:
+            raise _locked_out(await _retry_after(redis, key))
+    except RedisError:
+        logger.warning("SSO rate-limit check skipped: Redis unavailable", exc_info=True)
+
+
+async def record_oidc_failure(redis: Redis, *, ip: str | None) -> None:
+    # There is deliberately no clear-on-success counterpart. The per-email counters
+    # have one because a successful password login proves the address belongs to
+    # whoever just used it; an IP proves nothing of the kind, which is also why
+    # clear_login_failures leaves the per-IP key alone.
+    try:
+        if ip is not None:
+            await _incr_with_ttl(redis, _oidc_ip_key(ip))
+    except RedisError:
+        logger.warning("SSO failure not recorded: Redis unavailable", exc_info=True)
+
+
 _TEST_EMAIL_KEY_PREFIX = "test-email:cooldown:"
 _TEST_EMAIL_COOLDOWN_DETAIL = "Please wait before sending another test email."
 
@@ -206,5 +284,16 @@ async def clear_login_throttle(redis: Redis, *, email: str | None = None) -> int
     """
     if email is not None:
         return await redis.delete(_email_key(email))
-    keys = [key async for key in redis.scan_iter(f"{_KEY_PREFIX}*")]
+    # Every sign-in counter there is, which is what README has always claimed this command
+    # does: the password ones, the 2FA ones (a lockout at the code step was previously
+    # unreachable from here, so the documented recovery quietly did not cover it) and the two
+    # SSO ones. The per-email form above stays password-only, since the others are keyed on a
+    # user id or an IP and there is no address to look one up by.
+    prefixes = (
+        _KEY_PREFIX,
+        _TWO_FACTOR_KEY_PREFIX,
+        _OIDC_KEY_PREFIX,
+        _OIDC_START_KEY_PREFIX,
+    )
+    keys = [key for prefix in prefixes async for key in redis.scan_iter(f"{prefix}*")]
     return await redis.delete(*keys) if keys else 0

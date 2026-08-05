@@ -413,6 +413,146 @@ pre-commit run --all-files                           # what the git hook runs
   Emails are English-only (the backend has no i18n). Server settings live under
   `/api/v1/settings` (admin) and the **Admin > Server settings** page. Dev SMTP
   goes to the mailpit compose service (http://localhost:8025).
+- **Single sign-on (OIDC)**: `core/oidc.py` owns the protocol (discovery, the PKCE code
+  exchange, ID token verification), `api/v1/oidc.py` owns the policy, and the whole thing
+  is env-gated on `oidc_configured()` exactly as email is on `smtp_configured()`. The
+  session it opens is an ordinary `auth_tokens` row: nothing downstream can tell an SSO
+  session from a password one, deliberately. Thirteen things to keep straight:
+  - **Both endpoints are GET and both answer with a redirect, and neither is a style
+    choice.** Auth cookies are `SameSite=Lax`, which a browser sends on a cross-site
+    top-level *navigation* but not on a cross-site POST, so a `form_post` response mode
+    would arrive with no state cookie and fail the browser-binding check every time. GET
+    also means `CsrfProtectMiddleware` exempts them on method alone, which is what makes
+    the callback reachable: it is a navigation from the provider with no chance to set
+    `X-CSRF-Token`. And redirects rather than JSON because the caller is a browser
+    mid-navigation, not the `api` wrapper, so a refusal has to land somewhere readable -
+    hence `?sso_error=<code>` on the login url.
+  - **No nginx or CSP change was needed, and this is why.** The prod CSP is
+    `connect-src 'self'; form-action 'self'`, which would block a browser-side token
+    exchange or a form post to the provider. A backend-mediated redirect is covered by
+    neither directive (CSP does not govern top-level navigations; `navigate-to` was
+    dropped from the spec). Do NOT widen the CSP for this, and do not add
+    `CORSMiddleware` - `core/csrf.py`'s whole defence rests on there being no CORS.
+  - **No frontend auth-context change was needed either.** The callback sets the cookie
+    and 302s to the SPA, so the app *cold-boots* and `AuthProvider`'s mount `/auth/me`
+    probe picks the session up - already one of the four `claimTableSettings` adoption
+    paths. So SSO is not a fifth one, and `AuthContextValue` / `makeAuthValue` are
+    untouched. Keep it that way: a callback that returned JSON would need both.
+  - **`joserfc`, NOT `authlib.jose`.** They are the same author's new and old JOSE APIs;
+    `authlib.jose` emits a deprecation warning pointing at joserfc and is scheduled to go
+    away in authlib 2.0, which would silently take ID token verification with it. authlib
+    is still used, but only `integrations.httpx_client` for the code exchange - never
+    `integrations.starlette_client`, which is the obvious import and the wrong one: it
+    keeps `state` and `nonce` in a Starlette session, so adopting it would mean adding
+    `SessionMiddleware` and a second signed-cookie mechanism competing with this
+    codebase's "random token in an httpOnly cookie, SHA-256 hash in Postgres" pattern.
+  - **`oidc_login_states` is a table rather than a fat cookie**, shaped like
+    `TwoFactorChallenge`, for three reasons a cookie cannot cover: the nonce and PKCE
+    verifier must not be client-controllable; deleting the row on use makes a flow
+    single-use, so a captured callback url cannot be replayed; and `expires_at` bounds it
+    like every other short-lived token here. The raw token doubles as the `state`
+    parameter *and* the `isachore_oidc` cookie value, and requiring the two to match is
+    the browser binding - without it an attacker starts a flow and feeds the victim its
+    callback url, landing the victim in the attacker's session. Compared with
+    `compare_digest`, since the caller controls the query parameter and the cookie is
+    httpOnly. `isachore_oidc` is deliberately absent from `_AUTH_COOKIES` in
+    `core/csrf.py`, for the same reason `isachore_2fa` is: it authenticates nobody, so it must
+    not turn an anonymous request into one that middleware reads as a session. Note listing it
+    would not actually break today's endpoints, since that middleware only inspects unsafe
+    methods and both are GET - the reason above is the one that survives a change of method.
+  - **`_consume_state` commits the delete before the caller talks to the provider**, and that
+    is not tidiness. `complete()` makes up to five calls to the provider (discovery, token,
+    JWKS, a forced JWKS re-fetch, userinfo), each with its own 10s timeout, so holding the
+    transaction across it would park a pooled connection for as long as a degraded provider
+    takes to answer - a slow IdP would exhaust the pool and take the rest of the API down, not
+    just sign-in. Separately, the claim is a **single `DELETE ... RETURNING`** rather than a
+    SELECT then a delete: that gap is a race, and the loser of it would raise `StaleDataError`
+    (an unhandled 500) where a clean refusal belongs, which a double-click on a slow callback
+    is enough to reach. Neither property is testable under the savepoint fixtures - one
+    connection, one rolled-back savepoint, so two concurrent transactions never exist - so
+    both rest on reading the code, like the invitation advisory lock and the zone-change race.
+  - **`/start` has its own throttle, with its own ceiling.** It is unauthenticated and writes
+    a row per call, and the opportunistic sweep only clears rows past their ten-minute TTL, so
+    nothing just inserted is eligible: without a bound an anonymous loop grows
+    `oidc_login_states` for as long as it runs. Its counter is separate from the callback's
+    because it counts *every* start rather than every failure, so `login_ip_max_attempts` (20,
+    sized for failures) would break a shared office NAT on a Monday morning;
+    `_OIDC_START_MAX_ATTEMPTS` is an order of magnitude above any human sequence. Keeping them
+    separate also stops a run of provider errors from spending a legitimate user's budget for
+    retrying, which is pinned by its own test.
+  - **The identity link is TWO columns, `users.oidc_issuer` and `users.oidc_subject`,
+    unique together.** `sub` is only promised unique *per issuer*, so with the subject
+    alone an operator repointing `OIDC_ISSUER` at a different provider whose subjects
+    happened to collide would match one person onto another's account. With the pair the
+    lookup simply misses and falls back to email, which re-links correctly. Postgres
+    treats NULLs as distinct, which is what made the constraint safe to add to a populated
+    table. Email finds the account on a **first** sign-in only; after that the subject
+    does, so changing an address at the provider keeps the account, and the local `email`
+    is never overwritten from the provider.
+
+    **The re-link only self-heals when the new provider hands out a different subject.** If it
+    reuses the same value under a new issuer the row is simply re-pointed (pinned by
+    `test_the_same_subject_from_the_configured_issuer_re_links`); if it hands out a *new*
+    subject for somebody already linked, the email match finds a row whose stored subject
+    differs and `already_linked` refuses - by design, since that refusal is the account
+    takeover guard. There is deliberately no in-app unlink, so recovering a provider
+    migration is the SQL in README's single sign-on section. `cli init` clears the link too
+    but only for the account it recovers and only during an admin lockout, so it is not that
+    tool.
+  - **`email_verified` is only enforced when `app_settings.require_confirmation` is on**,
+    read from `get_app_settings(session)` inside the callback. With confirmation off,
+    accounts are created active without anyone proving an address, so demanding proof here
+    would make SSO stricter than every other way into the same account and would refuse
+    providers that simply omit the claim. Both directions are pinned, and they have to be:
+    a test for only the refusal also passes if the code ignores the setting and always
+    refuses. The check gates *linking*, not every sign-in, so an already-linked account is
+    not re-checked - a provider that later stops sending the claim cannot lock people out.
+
+    **What turning confirmation off actually buys an attacker, stated properly.** With the
+    check skipped, anyone who can self-assert an address inside the directory can link to and
+    sign in as the local account holding it. That is the whole exposure, and the valuable
+    target is an ordinary *active* colleague - not, as an earlier version of this note
+    implied, only an account left in `waiting_confirmation`. The pending-account case is a
+    second-order variant of the same thing (a first SSO sign-in both links *and* activates
+    it, so `waiting_confirmation` -> `active` also happens on an unverified claim), and it is
+    the narrower one, since such an account has to exist and the setting has to have been
+    turned off after it was created.
+
+    The rule is a deliberate product decision, reaffirmed, so this is documented rather than
+    tightened. Two narrowings if it ever needs closing: require `email_verified` on the
+    `waiting_confirmation` -> `active` transition specifically, where proof that the address
+    reaches the person is the entire point; or gate linking on it unconditionally and accept
+    that providers omitting the claim stop working.
+
+    One related wording trap: "SSO is never stricter than the rest of the app" is the
+    justification in the code and the README, and it is true, but with confirmation off the
+    local path still needs an admin to set a password, so SSO is *looser* than the local one
+    rather than merely not stricter.
+  - **`totp_enabled` is deliberately not consulted in the callback.** The provider owns
+    authentication including its own MFA, so re-challenging for a local code asks the same
+    person to prove themselves twice for nothing. It reads like an omission, which is why
+    it carries a comment there, a test, and a line of copy on `TwoFactorSettings`: without
+    that copy, somebody who just enrolled reads an SSO sign-in that never asked for a code
+    as a bug. Local 2FA still applies in full to password sign-in.
+  - **Audit reuses `login_success` / `login_failed` with an `"oidc"`-prefixed `detail`**,
+    rather than new enum members: `audit_events.action` is a native Postgres enum, so a new
+    value needs an `ALTER TYPE`, and `cli.py` already sets the precedent of reusing an
+    action. Do not add SSO actions without reading that note first.
+  - **`OIDC_ONLY` is gated on `oidc_configured()` too, in both places that read it**
+    (`login`'s 403 and `/auth/methods`). The flag alone is a total lockout, and while
+    `check_startup_config` refuses that combination, **dev is exempt from every startup
+    check** - so without the second clause a developer who set the flag and nothing else
+    locks themselves out of their own stack with no explanation. There is deliberately no
+    admin exemption: an `is_admin` carve-out would tell an anonymous caller whether an
+    address belongs to an admin.
+  - **`begin` and `complete` are called through the module** (`oidc_core.begin(...)`), for
+    the same reason endpoints call `clock.now()`: it leaves
+    `monkeypatch.setattr(oidc_core, "complete", ...)` able to reach them, so the whole
+    policy is testable with no provider. Importing the names would bind them at import time
+    and silently defeat every stub in `tests/test_oidc.py`. The redirect uri is derived
+    from `app_base_url` rather than configured, which is also why it is reported on
+    **Admin > Server settings**: it is the value an operator has to register with the
+    provider and there is nowhere else to read it.
 - **Impersonation**: `POST /users/{id}/impersonate` swaps the session cookie to
   the target user and parks the admin's own token in the `isachore_admin_token`
   cookie; `POST /auth/stop-impersonating` restores it. `/auth/me` reports
@@ -1063,6 +1203,57 @@ the negative paths (401/403/400/404/409), not just the happy one.
   monkeypatching `settings.login_*`. Coverage: add
   `--cov=app --cov-report=term-missing --cov-report=html` (report at
   `backend/htmlcov/`).
+- **Single sign-on is tested in two halves, and needs an autouse reset.** `_reset_oidc`
+  in `conftest.py` clears the OIDC settings and `oidc_core.reset_caches()` before every
+  test, mirroring `_reset_smtp` / `_reset_app_key` and for the same reason: pytest runs
+  inside the dev container with `env_file: .env`, so uncommenting the OIDC block to try the
+  flow by hand would otherwise turn the button on for every test and make
+  `POST /auth/login` 403. The opt-in `oidc` fixture configures a provider, over https so that
+  a case pinning a non-dev environment cannot trip the plaintext-issuer refusal (the
+  startup-check tests build their own config, since they call `check_startup_config()`
+  directly). The cache clear is the other half - discovery documents are memoised per issuer,
+  and one test's must not be served to the next.
+  - The **policy** half stubs `oidc_core.begin` / `oidc_core.complete`, so no provider is
+    involved. The **verification** half does the opposite: real RSA keys, real signed
+    tokens, real `_verify_id_token`, stubbing only the key fetch. Do not collapse them -
+    without the second, every signature check in the feature is mocked out, and that
+    function is the only thing between a stranger and a session.
+  - **Every guard reachable from a test was mutation-checked** (delete it, watch a test fail):
+    the conditional `email_verified` in both directions, the state cookie comparison, the
+    issuer half of the identity lookup, the `already_linked` takeover guard, the
+    disabled-account refusal, the open-redirect guard on `return_to` including its length
+    clause, the algorithm allowlist and its non-list guard, the non-object claims guard, both
+    `azp` rules, `build_identity`'s same-source selection, the identity length guard, the
+    provider-name normalisation, both throttles, `clear_login_throttle`'s prefixes, the
+    confirmation-token revocation, and `OIDC_ONLY`'s second clause. The exception, and it is
+    the interesting one: **`_client()` is never executed by either suite**, so it is the one
+    place PKCE is actually requested from authlib and an argument rename there would ship
+    green. That is a by-hand check, like the boot migration.
+
+    **The mutation has to be as narrow as the guard, and getting that wrong hid two holes
+    here.** Replacing `if not state or not cookie or not compare_digest(state, cookie)` with
+    `if not state` fails a test, so the guard looks pinned - but it deleted *three* clauses,
+    and the test that failed only needed the first. Dropping the `compare_digest` alone left
+    the whole suite green, because the one test aimed at it deleted the cookie (satisfying
+    `not cookie` instead) and the other passed a state matching no row (satisfying the
+    lookup). Same story for `User.oidc_issuer == identity.issuer`. Both now have a test that
+    satisfies every *other* clause deliberately: two concurrent flows for the comparison, and
+    a same-subject-different-issuer collision for the lookup. When you mutation-check
+    something, change exactly one clause.
+
+    One guard did NOT survive the check and was removed rather than kept: a `.catch` that
+    reset `methods` to password-only on a failed probe in `Login.tsx`. It was unobservable,
+    because the pre-load state already read as password-only, so the fallback is now the
+    `useState` default and there is no branch to pin. Seeding that default is what the tests
+    actually hold.
+  - **The dev stack ships no identity provider, deliberately** - trying the flow by hand
+    means pointing `.env` at a real one. When you do, the trap that costs the most time is
+    that the browser and the backend must reach it at the *same* url, or `iss` disagrees
+    with `OIDC_ISSUER` and every sign-in fails verification with a message that does not
+    say so. `localhost` cannot be that url: inside the backend container it is the backend.
+    Check it before debugging anything else - fetch
+    `<issuer>/.well-known/openid-configuration` from the host and from inside the backend
+    container and compare `issuer`; they must be byte-identical.
 - **Pin the clock with `app.core.clock.now`, and patch the module attribute.** The endpoints
   call `clock.now()` rather than importing the name precisely so `monkeypatch.setattr(clock,
   "now", ...)` reaches them; `from app.core.clock import now` in a caller would defeat it. The

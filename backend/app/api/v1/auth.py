@@ -14,8 +14,10 @@ from app.api.deps import (
     get_user_by_token,
 )
 from app.core.audit import record_event
+from app.core.config import settings
 from app.core.crypto import crypto_configured
 from app.core.households import memberships_for
+from app.core.oidc import oidc_configured
 from app.core.rate_limit import (
     clear_login_failures,
     clear_two_factor_failures,
@@ -41,7 +43,14 @@ from app.core.security import (
 from app.core.tokens import purge_expired_tokens, purge_expired_two_factor_challenges
 from app.core.two_factor import consume_valid_code
 from app.models import AuditAction, AuthToken, TwoFactorChallenge, User, UserStatus
-from app.schemas import LoginRequest, LoginResponse, MeRead, TwoFactorVerifyRequest, UserRead
+from app.schemas import (
+    AuthMethodsRead,
+    LoginRequest,
+    LoginResponse,
+    MeRead,
+    TwoFactorVerifyRequest,
+    UserRead,
+)
 from app.schemas.user import MembershipRead
 
 # Refused when a user has 2FA enabled but the server can't decrypt the seed
@@ -49,12 +58,26 @@ from app.schemas.user import MembershipRead
 # alone.
 _TWO_FACTOR_UNAVAILABLE_DETAIL = "Two-factor authentication is temporarily unavailable"
 
+# Refused when the deployment has made its identity provider the only way in
+# (OIDC_ONLY). Deliberately has no exemption, not even for admins: an is_admin
+# carve-out would make the response tell an anonymous caller whether an address
+# belongs to an admin, and recovering a broken provider is an operator action
+# (set OIDC_ONLY back to false and restart) rather than an in-app one.
+_PASSWORD_LOGIN_DISABLED_DETAIL = "Password sign-in is disabled on this server"
+
+# Stand-in label when OIDC_PROVIDER_NAME is set to the empty string. Matches the Settings
+# default, so an unset var and a blank one look the same to a client. Mirrored on the
+# frontend (`FALLBACK_PROVIDER_NAME` in pages/Login.tsx), which keeps its own copy because a
+# client cannot assume which server version it is talking to.
+DEFAULT_PROVIDER_NAME = "SSO"
+
 router = APIRouter()
 
 
-def _mint_session(response: Response, token: str, *, remember: bool) -> None:
+def mint_session(response: Response, token: str, *, remember: bool) -> None:
     """Set the auth cookie for a freshly minted session and drop any parked
-    admin cookie. Shared by the single-step login and the 2FA verify step."""
+    admin cookie. Shared by the single-step login, the 2FA verify step and the
+    SSO callback."""
     set_auth_cookie(
         response,
         token,
@@ -63,6 +86,46 @@ def _mint_session(response: Response, token: str, *, remember: bool) -> None:
         max_age=int(TOKEN_TTL.total_seconds()) if remember else None,
     )
     clear_auth_cookie(response, ADMIN_COOKIE_NAME)
+
+
+async def open_session(
+    session: SessionDep,
+    user: User,
+    *,
+    remember: bool,
+    ip: str | None,
+    detail: str | None = None,
+) -> str:
+    """Stage a new auth token for `user` and record the successful login, returning
+    the raw token.
+
+    The three ways into the app (password, password + 2FA code, SSO callback) differ
+    entirely in how they decide *whether* to let someone in and agree completely on
+    what happens once they have: same token, same TTL rule, same audit action, same
+    opportunistic sweep. That agreement is what lives here.
+
+    Deliberately does NOT commit, and does not touch the response: the caller owns the
+    transaction (the 2FA path has a challenge row to delete in the same one) and calls
+    `mint_session` after committing, so a failed commit cannot hand out a cookie for a
+    session that does not exist.
+    """
+    # "Remember me" opts into a persistent session (long-lived cookie + token);
+    # otherwise it's a browser-session cookie capped by a short token TTL.
+    ttl = TOKEN_TTL if remember else SESSION_TOKEN_TTL
+    token = generate_token()
+    session.add(
+        AuthToken(
+            token_hash=hash_token(token),
+            user_id=user.id,
+            expires_at=datetime.now(UTC) + ttl,
+        )
+    )
+    await record_event(
+        session, action=AuditAction.login_success, actor_id=user.id, ip=ip, detail=detail
+    )
+    # Opportunistically clean out expired tokens so the table stays bounded (L1)
+    await purge_expired_tokens(session)
+    return token
 
 
 async def _me_read(session: SessionDep, user: User, *, impersonating: bool = False) -> MeRead:
@@ -90,6 +153,17 @@ async def login(
     request: Request,
     response: Response,
 ) -> LoginResponse:
+    # Gated on the provider actually being usable, not on the flag alone: OIDC_ONLY
+    # with no configured provider is a total lockout, and while the startup check
+    # refuses to boot on that combination outside a dev environment, dev is exempt
+    # from every startup check. Without this second clause a developer who set the
+    # flag and nothing else would lock themselves out of their own stack with no
+    # error explaining why.
+    if settings.oidc_only and oidc_configured():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=_PASSWORD_LOGIN_DISABLED_DETAIL
+        )
+
     ip = client_ip(request)
     # payload.email is already lower-cased by the schema (L3); keep the explicit
     # .lower() so the throttle key stays case-insensitive regardless.
@@ -144,24 +218,11 @@ async def login(
         )
         return LoginResponse(two_factor_required=True)
 
-    # "Remember me" opts into a persistent session (long-lived cookie + token);
-    # otherwise it's a browser-session cookie capped by a short token TTL.
-    ttl = TOKEN_TTL if payload.remember else SESSION_TOKEN_TTL
-    token = generate_token()
-    session.add(
-        AuthToken(
-            token_hash=hash_token(token),
-            user_id=user.id,
-            expires_at=datetime.now(UTC) + ttl,
-        )
-    )
-    await record_event(session, action=AuditAction.login_success, actor_id=user.id, ip=ip)
-    # Opportunistically clean out expired tokens so the table stays bounded (L1)
-    await purge_expired_tokens(session)
+    token = await open_session(session, user, remember=payload.remember, ip=ip)
     await session.commit()
 
     await clear_login_failures(redis, email=email)
-    _mint_session(response, token, remember=payload.remember)
+    mint_session(response, token, remember=payload.remember)
     return LoginResponse(user=await _me_read(session, user))
 
 
@@ -218,23 +279,13 @@ async def verify_two_factor(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired code"
         )
 
-    ttl = TOKEN_TTL if challenge.remember else SESSION_TOKEN_TTL
-    token = generate_token()
-    session.add(
-        AuthToken(
-            token_hash=hash_token(token),
-            user_id=user.id,
-            expires_at=datetime.now(UTC) + ttl,
-        )
-    )
+    token = await open_session(session, user, remember=challenge.remember, ip=ip)
     await session.delete(challenge)
-    await record_event(session, action=AuditAction.login_success, actor_id=user.id, ip=ip)
-    await purge_expired_tokens(session)
     await session.commit()
 
     await clear_login_failures(redis, email=user.email)
     await clear_two_factor_failures(redis, user_id=user.id)
-    _mint_session(response, token, remember=challenge.remember)
+    mint_session(response, token, remember=challenge.remember)
     clear_auth_cookie(response, TWO_FACTOR_COOKIE_NAME)
     return await _me_read(session, user)
 
@@ -263,6 +314,31 @@ async def logout(request: Request, session: SessionDep, response: Response) -> N
     await session.commit()
     clear_auth_cookie(response)
     clear_auth_cookie(response, ADMIN_COOKIE_NAME)
+
+
+@router.get("/methods", response_model=AuthMethodsRead)
+async def auth_methods() -> AuthMethodsRead:
+    """Which ways in the login page should offer. Public: the page that asks has nobody
+    signed in yet, by definition.
+
+    `password_enabled` reads the same condition as the 403 in `login` above, so the two
+    cannot disagree - the form is never hidden while the endpoint works, nor offered
+    while it refuses.
+    """
+    enabled = oidc_configured()
+    return AuthMethodsRead(
+        password_enabled=not (settings.oidc_only and enabled),
+        oidc_enabled=enabled,
+        # Never blank while enabled. `OIDC_PROVIDER_NAME=` in a .env arrives as "" - a
+        # reachable config, since the name is cosmetic and deliberately not part of
+        # oidc_configured() - and a client with a blank label has to choose between
+        # rendering "Sign in with " and rendering nothing. Under OIDC_ONLY the second is a
+        # login page with no way in at all, so the invariant is established here instead:
+        # enabled implies a usable name.
+        oidc_provider_name=(settings.oidc_provider_name.strip() or DEFAULT_PROVIDER_NAME)
+        if enabled
+        else None,
+    )
 
 
 @router.get("/me", response_model=MeRead)

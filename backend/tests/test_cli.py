@@ -44,6 +44,14 @@ def _ip_key(ip: str) -> str:
     return f"login:fail:ip:{ip}"
 
 
+def _oidc_ip_key(ip: str) -> str:
+    return f"oidc:fail:ip:{ip}"
+
+
+def _oidc_start_key(ip: str) -> str:
+    return f"oidc:start:ip:{ip}"
+
+
 # --- init_admin (bootstrap and lockout recovery, I2) ----------------------
 
 
@@ -221,6 +229,26 @@ async def test_init_restore_clears_two_factor_enrolment(
     assert await db_session.scalar(select(func.count()).select_from(TwoFactorRecoveryCode)) == 0
 
 
+async def test_init_restore_clears_the_single_sign_on_link(
+    db_session, make_user: Callable[..., Awaitable[User]]
+) -> None:
+    # Unlinking looks like it removes a way in rather than restoring one, and that is the
+    # point: if the WRONG provider account got linked to this address, that identity signs
+    # in as this admin and the rightful owner cannot, because the callback refuses to
+    # re-link an address already pointing elsewhere (already_linked). Clearing it lets the
+    # next SSO sign-in link afresh, exactly like a first one.
+    admin = await make_user(email="admin@example.com", is_admin=True, status=UserStatus.disabled)
+    admin.oidc_subject = "the-wrong-account"
+    admin.oidc_issuer = "https://auth.example.com/application/o/isachore"
+    await db_session.commit()
+
+    await init_admin(db_session, "admin@example.com", "Admin", "User", _INIT_PASSWORD)
+
+    await db_session.refresh(admin)
+    assert admin.oidc_subject is None
+    assert admin.oidc_issuer is None
+
+
 async def test_init_restore_reports_every_change_and_audits_it(
     db_session, make_user: Callable[..., Awaitable[User]], capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -330,13 +358,25 @@ async def test_clear_login_throttle_all_clears_email_and_ip(fake_redis: Redis) -
     await fake_redis.set(_email_key("bob@example.com"), "1")
     await fake_redis.set(_ip_key("10.0.0.1"), "7")
     await fake_redis.set(_ip_key("10.0.0.2"), "2")
+    # The single sign-on counters too: README documents this command as the way out of a
+    # lockout, and those are the ones a run of provider errors (or a developer looping
+    # /auth/oidc/start) actually lands on. Without them here, narrowing the prefix list back
+    # to the password counter alone would leave both suites green.
+    await fake_redis.set(_oidc_ip_key("10.0.0.1"), "9")
+    await fake_redis.set(_oidc_start_key("10.0.0.1"), "201")
+    # And the 2FA counters, which this command claims to clear and previously did not: a
+    # lockout at the code step was unreachable from the documented recovery.
+    await fake_redis.set("twofa:fail:user:42", "5")
+    await fake_redis.set("twofa:fail:ip:10.0.0.1", "5")
     # An unrelated key must survive a full clear.
     await fake_redis.set("something:else", "keep")
 
     removed = await clear_login_throttle(fake_redis)
 
-    assert removed == 4
+    assert removed == 8
+    assert [key async for key in fake_redis.scan_iter("twofa:fail:*")] == []
     assert [key async for key in fake_redis.scan_iter("login:fail:*")] == []
+    assert [key async for key in fake_redis.scan_iter("oidc:*")] == []
     assert await fake_redis.get("something:else") == "keep"
 
 

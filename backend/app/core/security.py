@@ -24,6 +24,18 @@ ADMIN_COOKIE_NAME = "isachore_admin_token"
 # of a two-step login. Short TTL: the user should enter their code promptly.
 TWO_FACTOR_COOKIE_NAME = "isachore_2fa"
 TWO_FACTOR_TTL = timedelta(minutes=5)
+# Binds an in-flight SSO sign-on to the browser that started it: the same random
+# value goes here and into the OAuth2 `state` parameter, and the callback requires
+# the two to match. Longer TTL than the 2FA challenge because the user spends this
+# window on someone else's login page, possibly completing an MFA step there.
+#
+# Deliberately NOT listed in app/core/csrf.py's _AUTH_COOKIES, for the same reason
+# isachore_2fa is not: it authenticates nobody, so it must not turn an anonymous
+# request into one the CSRF middleware treats as a session. (Listing it would not
+# actually break today's flow, since that middleware only inspects unsafe methods and
+# both OIDC endpoints are GET - but the flow being GET is not what makes this right.)
+OIDC_STATE_COOKIE_NAME = "isachore_oidc"
+OIDC_STATE_TTL = timedelta(minutes=10)
 
 _password_hash = PasswordHash.recommended()
 
