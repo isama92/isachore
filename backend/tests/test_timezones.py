@@ -1052,6 +1052,50 @@ async def test_apply_timezone_change_skips_the_work_when_the_zone_did_not_move(
     assert await apply_timezone_change(db_session, household, "Pacific/Niue") == 1
 
 
+async def test_an_offset_equivalent_rename_reports_nothing_rescheduled(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    db_session: AsyncSession,
+) -> None:
+    """`reanchor_open_occurrences` returns rows *moved*, not rows locked.
+
+    Europe/Amsterdam and Europe/Paris share an offset year-round, so reinterpreting every wall
+    clock lands each slot on the instant it already held: nothing is rescheduled and SQLAlchemy
+    emits no UPDATE. Counting the locked rows instead would report work that did not happen, and
+    `commit_household_update` gates its "a chore was completed while the timezone was changing"
+    409 on exactly this number.
+    """
+    user = await make_user()
+    household = await make_household(members=[user], timezone="Europe/Amsterdam")
+    chore = await make_chore(
+        household=household, start_date=date(2026, 8, 5), repeats=RepeatPeriod.yearly
+    )
+    before = await db_session.scalar(
+        select(ChoreOccurrence.scheduled_for).where(
+            ChoreOccurrence.chore_id == chore.id,
+            ChoreOccurrence.status == OccurrenceStatus.open,
+        )
+    )
+    await db_session.refresh(household)
+
+    # The zone genuinely changes, so the guards in `apply_timezone_change` do not short-circuit
+    # it - the work runs and finds nothing to do.
+    assert await apply_timezone_change(db_session, household, "Europe/Paris") == 0
+    assert household.timezone == "Europe/Paris"
+
+    after = await db_session.scalar(
+        select(ChoreOccurrence.scheduled_for).where(
+            ChoreOccurrence.chore_id == chore.id,
+            ChoreOccurrence.status == OccurrenceStatus.open,
+        )
+    )
+    assert after == before
+    # ...and a real move does report the work, so the zero above is a measurement rather than a
+    # function that always returns nothing.
+    assert await apply_timezone_change(db_session, household, "Pacific/Niue") == 1
+
+
 async def test_a_zone_change_cannot_land_on_an_already_completed_slot(
     make_user: MakeUser,
     make_household: MakeHousehold,

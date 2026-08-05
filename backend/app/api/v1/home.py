@@ -83,7 +83,8 @@ async def get_home(
     items: list[DueChoreRead] = []
     pending_ids: set[int] = set()  # overdue or due today, still not done
     for occ in occurrences:
-        # The household is already selectinloaded below, so the zone costs no extra query.
+        # The household is already selectinloaded by the query above, so the zone costs no
+        # extra query.
         days = days_until_due(occ.scheduled_for, now, household_zone(occ.chore.household.timezone))
         if days <= 0:
             pending_ids.add(occ.chore_id)

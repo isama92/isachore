@@ -459,6 +459,12 @@ def _seed_chore(
                 title=spec.title,
                 completed_by_user_id=assignee.id if assignee is not None else None,
                 completed_at=completed_at,
+                # The zone this closure was judged in, as `_close_occurrence` stamps it. Without
+                # it a reseeded stack has no snapshot on any of its history, so moving a seeded
+                # household re-scores its lateness exactly as it did before the column existed -
+                # making the one behaviour that column exists to prevent the one a developer
+                # cannot see working locally.
+                completed_timezone=tz.key,
                 created_at=completed_at,  # so History's created_at sort matches chronology
             )
         )

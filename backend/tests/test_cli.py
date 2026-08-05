@@ -17,7 +17,7 @@ from app.cli import _guard_dev_environment, clear_throttle, init_admin
 from app.core.crypto import encrypt
 from app.core.rate_limit import clear_login_throttle
 from app.core.security import generate_token, hash_token, verify_password
-from app.db.seed import SEED_PASSWORD, seed
+from app.db.seed import SEED_PASSWORD, SEED_TIMEZONE, seed
 from app.models import (
     AuditAction,
     AuditEvent,
@@ -441,6 +441,34 @@ async def test_seed_creates_expected_dataset(db_session) -> None:
         )
     ).all()
     assert dupes == []
+
+    # Every seeded closure carries the zone it was judged in, and no open row does. Without this
+    # a reseeded stack has no snapshot anywhere in its history, so moving a seeded household
+    # re-scores its lateness exactly as it did before the column existed - which makes the one
+    # behaviour the snapshot exists to prevent the one a developer cannot see working locally.
+    # A migrated database gets this from the backfill in e4b6c09d15af; this is the seeder's half
+    # of "reseeded from scratch behaves like one that was upgraded".
+    snapshots = (
+        await db_session.execute(
+            select(
+                ChoreOccurrence.status,
+                func.count(),
+                func.count(ChoreOccurrence.completed_timezone),
+            ).group_by(ChoreOccurrence.status)
+        )
+    ).all()
+    by_status = {status: (rows, stamped) for status, rows, stamped in snapshots}
+    done_rows, done_stamped = by_status[OccurrenceStatus.done]
+    assert done_stamped == done_rows
+    assert by_status[OccurrenceStatus.open][1] == 0
+    assert (
+        await db_session.scalar(
+            select(ChoreOccurrence.completed_timezone).where(
+                ChoreOccurrence.status == OccurrenceStatus.done
+            )
+        )
+        == SEED_TIMEZONE
+    )
 
     # A completed unscheduled chore keeps its done row AND stays open: it is repeatable on
     # demand, so it never terminates. It also stores no start date.

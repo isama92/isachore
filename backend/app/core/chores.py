@@ -39,9 +39,16 @@ Two consequences of that conversion worth knowing:
   `replace()` behaves the same way. Doing this in UTC is what would drift.
 - A step can land on a local time that does not exist, in the few zones whose DST transition
   is at midnight (`America/Santiago` among them). Python resolves that under `fold=0` to a
-  real instant an hour off the nominal one, on the correct date. Nothing here reads a slot's
-  time-of-day - every comparison is `.date()` - so the date being right is the whole
-  requirement.
+  real instant an hour off the nominal one, on the correct date. Nothing in the recurrence
+  helpers reads a slot's time-of-day - every comparison is `.date()` - so the date being right
+  is the whole requirement there.
+
+  `local_day_bounds` is the exception and needs its own argument, because its result *is* used
+  as an instant boundary in SQL. It holds: for a zone whose transition is at midnight, `fold=0`
+  resolves the nonexistent local midnight using the pre-transition offset, and that instant is
+  exactly the first moment of the new local day. Checked on `America/Santiago`, 6 September
+  2026: day 5 ends at 04:00Z and day 6 begins at 04:00Z, so the windows tile with no gap, no
+  overlap and no completion counted twice.
 
 `completed_at` is the exception to all of this and is deliberately never re-anchored: it is
 stamped at the moment the button is pressed and is a plain instant, correct in any zone. It

@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from 'react'
+import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { format } from 'date-fns'
@@ -165,7 +165,12 @@ export function ChoreForm({
   // household's zone. Derived rather than stored, which is what makes switching household on the
   // create page follow the new zone instead of keeping the first one's "today" - and it removes
   // the period select's refill branch, since an empty value now resolves on its own.
-  const startDate = values.start_date || todayISO(timezone)
+  // `todayISO` constructs an `Intl.DateTimeFormat`, and this runs on every keystroke in the form
+  // otherwise; the deps are exactly what it reads.
+  const startDate = useMemo(
+    () => values.start_date || todayISO(timezone),
+    [values.start_date, timezone],
+  )
 
   const isManual = values.assignment_type === 'manual'
   const currentAssigneeId =

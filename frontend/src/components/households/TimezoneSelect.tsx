@@ -27,6 +27,12 @@ type Props = {
 // Composed from Popover + Command rather than a plain Select because there are ~420 options
 // and Radix's Select has no search; the shape follows AssigneeMultiSelect, down to pinning
 // the popover to the trigger width.
+//
+// The list is unvirtualised, which makes this the one interaction in the app that mounts ~419
+// rows at once - every other Command list here is a household's members or tags. Acceptable
+// because the popover is only open while somebody is choosing and typing filters it down
+// immediately, but it is the thing to reach for if opening the picker ever feels slow, ahead of
+// anything to do with the offsets.
 export function TimezoneSelect({ value, onChange, labelledBy, id, className }: Props) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)

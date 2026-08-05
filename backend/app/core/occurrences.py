@@ -124,7 +124,8 @@ async def reanchor_open_occurrences(
     session: AsyncSession, household_id: int, old_tz: ZoneInfo, new_tz: ZoneInfo
 ) -> int:
     """Move a household's open slots so they keep the local dates they already had, after the
-    household changed timezone. Returns how many moved.
+    household changed timezone. Returns how many actually moved, which can be fewer than the
+    rows it locked - see the comparison below.
 
     The transform is the same one the timezone migration applies in SQL: read the slot's wall
     clock in the old zone, then say that reading was always local to the new one. A chore
@@ -192,9 +193,20 @@ async def reanchor_open_occurrences(
         .scalars()
         .all()
     )
+    moved = 0
     for occ in rows:
         candidate = occ.scheduled_for.astimezone(old_tz).replace(tzinfo=new_tz)
-        occ.scheduled_for = await free_slot_from(
-            session, occ.chore_id, candidate, rule_for(occ.chore), new_tz
-        )
-    return len(rows)
+        slot = await free_slot_from(session, occ.chore_id, candidate, rule_for(occ.chore), new_tz)
+        # Compared as instants, and counted rather than assumed. A move between two names that
+        # share an offset (Europe/Amsterdam to Europe/Paris) reinterprets every wall clock onto
+        # the instant it already held, so SQLAlchemy emits no UPDATE and nothing was rescheduled -
+        # but `len(rows)` would still report work, and the caller gates a "a chore was completed
+        # while the timezone was changing" 409 on this number.
+        #
+        # `.astimezone(UTC)` on both sides for the same reason `free_slot_from`'s membership test
+        # needs it: inter-zone `==` is not reflexive for a local time in a DST gap (PEP 495), so a
+        # gap-local candidate would compare unequal to its own instant and be counted as a move.
+        if slot.astimezone(UTC) != occ.scheduled_for.astimezone(UTC):
+            occ.scheduled_for = slot
+            moved += 1
+    return moved
