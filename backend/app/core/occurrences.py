@@ -45,6 +45,23 @@ def initial_slot(
     return first_occurrence(start_date, rule, tz) if start_date is not None else now
 
 
+def closure_zone(snapshot: str | None, household_timezone: str) -> ZoneInfo:
+    """The zone a *closed* occurrence should be judged in: the one snapshotted when it closed,
+    else the household's current zone.
+
+    Lateness and the day a completion is bucketed on are calendar judgements about the past, so
+    they have to be read in the zone the closure actually happened in - otherwise moving a
+    household silently re-measures work nobody touched. `chore_occurrences.completed_timezone`
+    records it, and this is the only place the fallback is written down.
+
+    The fallback covers closures written before that column existed, where the household's zone
+    now is both the old behaviour and the best reconstruction available. Do not use this for a
+    "how long ago" measure (`days_since`, Home's "done today"): those are anchored to *now* and
+    belong in the household's current zone, so pairing a snapshot operand with a live one would
+    compare two different calendars."""
+    return household_zone(snapshot if snapshot is not None else household_timezone)
+
+
 async def free_slot_from(
     session: AsyncSession,
     chore_id: int,
@@ -116,20 +133,20 @@ async def reanchor_open_occurrences(
 
     Three deliberate exclusions:
 
-    - **Done rows**, which is a trade rather than a clean win and should not be read as "history
-      is immutable". `completed_at` genuinely is, but `days_late` is derived at read time from the
-      household's *current* zone, so leaving a done slot alone lets a closure that was on time
-      start reporting a day late (History's badge, `punctuality`, `on_time_rate`). The
-      confirmation dialog says so rather than promising otherwise.
+    - **Done rows.** History is a record of what happened, and it stays readable across a move
+      because each closure snapshots the zone it was judged in
+      (`chore_occurrences.completed_timezone`, read through `closure_zone`) - so its lateness is
+      computed from that rather than from wherever the household is now. Re-anchoring the slot
+      here would be both unnecessary and wrong: unnecessary because the snapshot already holds
+      the answer, and wrong because the stored instant would stop being the local midnight the
+      snapshot zone names.
 
-      The timezone migration re-anchors done rows and is right to: it is one statement applying a
-      uniform downward shift to rows that all sit at midnight UTC, so no intermediate state
-      collides. Row-by-row through the ORM is different - a uniform *forward* shift can put one
+      The timezone migration *does* re-anchor done rows, which is right there and would be wrong
+      here: it is one statement applying a uniform downward shift to rows that all sit at midnight
+      UTC, so no intermediate state collides, and it runs before any closure has a snapshot to
+      contradict. Row-by-row through the ORM is different - a uniform *forward* shift can put one
       row onto a slot the next has not vacated, which `uq_occurrence_chore_scheduled` rejects
-      mid-transaction. Reachable for a chore that was once `manual`, whose done rows sit at
-      arbitrary completion times rather than a day apart. Doing it here would mean ordering the
-      updates by shift direction; the durable fix is to snapshot the zone at closing time, as
-      `title` already is (README todo).
+      mid-transaction.
     - **Unscheduled (`manual`) chores.** Their slot is the moment the chore was last completed
       ("available since"), not a calendar anchor, so it is already a correct instant.
     - **Soft-deleted chores.** Nothing shows them and nothing can complete them, so moving

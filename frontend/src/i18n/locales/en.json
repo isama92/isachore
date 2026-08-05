@@ -484,7 +484,7 @@
     "timezoneSearch": "Search timezones",
     "timezoneEmpty": "No matching timezone",
     "timezoneConfirmTitle": "Change timezone?",
-    "timezoneConfirmBody": "This household's scheduled chores will be re-dated so they keep the dates they show now. Past completions keep the times they were done at, but how late each one was is re-measured against the new timezone, so a few may read a day differently.",
+    "timezoneConfirmBody": "This household's scheduled chores will be re-dated so they keep the dates they show now. Completed history is not affected: each closure keeps the timezone it was judged in, so how late it was does not change.",
     "timezoneConfirmAction": "Change timezone",
     "notFound": "This household could not be found.",
     "toastCreated": "Household created",

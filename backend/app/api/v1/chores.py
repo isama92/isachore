@@ -660,6 +660,9 @@ async def _close_occurrence(
     occ.title = chore.title
     occ.completed_by_user_id = closed_by_id
     occ.completed_at = now
+    # Snapshotted alongside `title`, and for the same reason: both are facts about this closure
+    # that a later change to the chore or the household would otherwise rewrite.
+    occ.completed_timezone = str(tz)
     await session.flush()
 
     # Anchor the successor to the occurrence just cleared (skip-missed applied), so its

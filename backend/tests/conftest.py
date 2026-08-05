@@ -386,6 +386,7 @@ def make_occurrence(db_session: AsyncSession) -> Callable[..., Awaitable[ChoreOc
         status: OccurrenceStatus = OccurrenceStatus.open,
         completed_by: User | None = None,
         completed_at: datetime | None = None,
+        completed_timezone: str | None = None,
         title: str | None = None,
         skipped: bool = False,
     ) -> ChoreOccurrence:
@@ -402,6 +403,10 @@ def make_occurrence(db_session: AsyncSession) -> Callable[..., Awaitable[ChoreOc
             else None,
             completed_by_user_id=completed_by.id if completed_by is not None else None,
             completed_at=completed_at,
+            # NULL unless a test says otherwise, which is the same shape as a closure written
+            # before the column existed: the readers fall back to the household's current zone,
+            # so every pre-existing history assertion keeps meaning what it did.
+            completed_timezone=completed_timezone,
             skipped=skipped,
         )
         db_session.add(occurrence)

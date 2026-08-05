@@ -484,7 +484,7 @@
     "timezoneSearch": "Cerca fusi orari",
     "timezoneEmpty": "Nessun fuso orario corrispondente",
     "timezoneConfirmTitle": "Cambiare fuso orario?",
-    "timezoneConfirmBody": "Le faccende programmate di questo nucleo domestico verranno ridatate per mantenere le date che mostrano ora. Le faccende già completate mantengono l'orario in cui sono state svolte, ma il ritardo di ognuna viene ricalcolato secondo il nuovo fuso orario, quindi alcune potrebbero risultare diverse di un giorno.",
+    "timezoneConfirmBody": "Le faccende programmate di questo nucleo domestico verranno ridatate per mantenere le date che mostrano ora. Lo storico completato non viene modificato: ogni chiusura conserva il fuso orario in cui è stata valutata, quindi il suo ritardo non cambia.",
     "timezoneConfirmAction": "Cambia fuso orario",
     "notFound": "Impossibile trovare questo nucleo domestico.",
     "toastCreated": "Nucleo domestico creato",

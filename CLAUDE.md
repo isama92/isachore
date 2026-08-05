@@ -551,24 +551,36 @@ pre-commit run --all-files                           # what the git hook runs
     which validates against `available_timezones()` on write.
   - **Changing a household's zone re-anchors its OPEN slots** (`apply_timezone_change` ->
     `reanchor_open_occurrences`), reinterpreting each wall-clock reading in the new zone so
-    "due 5 August" still says 5 August. Done rows stay put, and that is a **trade rather than a
-    clean win**, so do not read "history records what happened" as the whole story. `completed_at`
-    is genuinely immutable, but `days_late` is derived at read time from the household's *current*
-    zone, so a closure that was on time can start reporting a day late: a slot at 22:00Z with a
-    completion at 21:00Z the next day is 0 days late in Amsterdam and 1 in Pacific/Niue. History's
-    badge, `punctuality` and `on_time_rate` all move with it, and the confirmation dialog says so.
-
-    Note the **migration makes the opposite choice** - it has no `status` filter, so it re-anchors
-    done rows too, which is what keeps historical lateness readings intact across the one-time
-    UTC-to-local reinterpretation. That asymmetry is deliberate and is about *how* each one
-    writes, not about what history means. The migration is a single statement applying a uniform
-    downward shift to rows that all sit at midnight UTC, so no intermediate state can collide.
-    The runtime path writes row by row through the ORM, where a uniform *forward* shift can put
-    one row onto the slot the next one has not vacated yet - reachable for a chore that was once
-    `manual`, whose done rows sit at arbitrary completion times. Re-anchoring history there would
-    need the updates ordered by shift direction. The durable answer is neither: snapshot the zone
-    (or the lateness) onto the occurrence at closing time, the way `title` is already snapshotted
-    so history survives a rename. Tracked in README's todo.
+    "due 5 August" still says 5 August. Done rows genuinely stay put, and that is now a clean win
+    rather than a trade, because of the column below.
+  - **`chore_occurrences.completed_timezone` snapshots the zone a closure was judged in**, and
+    `closure_zone` (`core/occurrences.py`) is the only place its NULL fallback is written down.
+    Lateness is a *calendar* judgement - `completed_at`'s local date minus `scheduled_for`'s - so
+    read against the household's current zone it moved whenever the household did: a slot at
+    22:00Z with a completion at 21:00Z the next day is 0 days late in Amsterdam and 1 in
+    Pacific/Niue, which silently re-scored History's badge, `punctuality` and `on_time_rate`.
+    Reading both operands in the snapshot makes the answer immutable, exactly as snapshotting
+    `title` makes history survive a rename. Four things to keep straight:
+    - **Shifting `completed_at` is NOT the alternative, and reviewers keep proposing it.** It is
+      the instant the work happened, and it is load-bearing as an absolute: stats windows filter
+      on it, `undo_completion` finds the latest closure by `max(completed_at)`, and Home's "done
+      today" compares it to real day bounds. Reinterpreting its wall clock produces a *different
+      instant*, so the row would claim the work happened at a time it did not - measured at 12
+      hours out for an Amsterdam to Kiritimati move.
+    - **Re-anchoring the done `scheduled_for` is not the alternative either.** It looks like it
+      works on the case you first try and does not generalise: a completion at 23:30 local on its
+      due day reads 0 days late in Amsterdam and 1 after the same move, re-anchored or not.
+    - **Only historical judgements read the snapshot**: `days_late` (History and stats) and the
+      stats bucket key. `days_since` on Unscheduled and Home's "done today" window are anchored
+      to *now*, so they stay in the household's current zone - pairing a snapshot operand with a
+      live one compares two calendars.
+    - NULL means "not judged yet" (every open row) or "closed before the column existed", where
+      the fallback is the household's current zone: the old behaviour, and all the migration's
+      backfill can honestly reconstruct. Note the timezone migration re-anchors done rows too (it
+      has no `status` filter), which is right there and would be wrong at runtime: one statement
+      applying a uniform downward shift to rows all at midnight UTC cannot collide, while
+      row-by-row ORM writes shifting *forward* can put one row onto a slot the next has not
+      vacated.
     Every candidate goes through `free_slot_from`, because the new instant can land on a slot
     the chore has already completed, and the select takes `FOR UPDATE OF chore_occurrences` so a
     concurrent `POST /complete` cannot flip a row to `done` between the read and the write - the

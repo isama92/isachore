@@ -36,7 +36,7 @@ from app.core.chores import (
     next_slot_after,
 )
 from app.core.households import household_zone
-from app.core.occurrences import free_slot_from
+from app.core.occurrences import closure_zone, free_slot_from
 from app.models import Chore, ChoreOccurrence, Household, OccurrenceStatus, RepeatPeriod, User
 
 MakeUser = Callable[..., Awaitable[User]]
@@ -633,6 +633,158 @@ async def test_changing_the_timezone_leaves_history_alone(
     assert row is not None
     assert row.scheduled_for == done_slot
     assert row.completed_at == completed
+
+
+async def test_lateness_survives_a_move_because_the_closure_snapshots_its_zone(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    """The whole reason `completed_timezone` exists.
+
+    Due 5 July, ticked off at 23:00 local on the day: on time. Read against the household's
+    *current* zone that becomes "1 day late" the moment the household moves west, silently
+    re-scoring History's badge, `punctuality` and `on_time_rate` for work nobody touched.
+    Judged in the snapshot it does not move.
+    """
+    user = await make_user()
+    household = await make_household(members=[user], admin=user, timezone="Europe/Amsterdam")
+    chore = await make_chore(
+        household=household,
+        start_date=date(2026, 7, 5),
+        repeats=RepeatPeriod.yearly,
+        with_occurrence=False,
+    )
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=first_occurrence(date(2026, 7, 5), YEARLY, AMSTERDAM),
+        status=OccurrenceStatus.done,
+        completed_at=datetime(2026, 7, 5, 21, 0, tzinfo=UTC),  # 23:00 local, same day
+        completed_timezone="Europe/Amsterdam",
+        completed_by=user,
+    )
+    client = await auth_client(user)
+
+    assert (await client.get("/api/v1/completions")).json()["items"][0]["days_late"] == 0
+
+    resp = await client.patch(
+        f"/api/v1/households/{household.id}", json={"timezone": "Pacific/Niue"}
+    )
+    assert resp.status_code == 200
+
+    # Still 0. Without the snapshot this reads 1.
+    assert (await client.get("/api/v1/completions")).json()["items"][0]["days_late"] == 0
+
+
+async def test_a_stats_bucket_survives_a_move_for_the_same_reason(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Which local day a completion is counted on is the same kind of judgement as its lateness,
+    so it reads the same snapshot. A completion at 22:30Z on the 4th is the 5th in Amsterdam and
+    the 4th in Niue; after a move it must stay on the 5th."""
+    user = await make_user()
+    household = await make_household(members=[user], admin=user, timezone="Europe/Amsterdam")
+    chore = await make_chore(
+        household=household,
+        start_date=date(2026, 8, 1),
+        repeats=RepeatPeriod.yearly,
+        with_occurrence=False,
+    )
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=first_occurrence(date(2026, 8, 1), YEARLY, AMSTERDAM),
+        status=OccurrenceStatus.done,
+        completed_at=datetime(2026, 8, 4, 22, 30, tzinfo=UTC),
+        completed_timezone="Europe/Amsterdam",
+        completed_by=user,
+    )
+    client = await auth_client(user)
+    pin_clock(monkeypatch, datetime(2026, 8, 5, 10, 0, tzinfo=UTC))
+
+    def counted(body: dict) -> dict[str, int]:
+        return {b["bucket"]: b["count"] for b in body["completions_over_time"] if b["count"]}
+
+    assert counted((await client.get("/api/v1/stats?range=7d")).json()) == {"2026-08-05": 1}
+
+    await client.patch(f"/api/v1/households/{household.id}", json={"timezone": "Pacific/Niue"})
+
+    # Still the 5th. Without the snapshot it re-buckets to the 4th.
+    assert counted((await client.get("/api/v1/stats?range=7d")).json()) == {"2026-08-05": 1}
+
+
+async def test_completing_and_skipping_stamp_the_household_zone(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    """Both closure paths go through `_close_occurrence`, so both must stamp it."""
+    user = await make_user()
+    household = await make_household(members=[user], timezone="Pacific/Kiritimati")
+    completed = await make_chore(household=household, title="Done one", assignees=[user])
+    skipped = await make_chore(household=household, title="Skipped one", assignees=[user])
+    client = await auth_client(user)
+
+    assert (
+        await client.post(f"/api/v1/chores/{completed.id}/complete", json={})
+    ).status_code == 201
+    assert (await client.post(f"/api/v1/chores/{skipped.id}/skip", json={})).status_code == 201
+
+    zones = (
+        (
+            await db_session.execute(
+                select(ChoreOccurrence.completed_timezone).where(
+                    ChoreOccurrence.status == OccurrenceStatus.done
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert set(zones) == {"Pacific/Kiritimati"}
+
+
+async def test_undoing_a_completion_clears_the_snapshot(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    """The row is open again, so there is no closure for a zone to have judged. Leaving it would
+    hand the next completion of this slot a zone from whenever the previous one happened."""
+    user = await make_user()
+    household = await make_household(members=[user], admin=user, timezone="Pacific/Kiritimati")
+    chore = await make_chore(household=household, assignees=[user])
+    client = await auth_client(user)
+    completion = (await client.post(f"/api/v1/chores/{chore.id}/complete", json={})).json()
+
+    assert (await client.delete(f"/api/v1/completions/{completion['id']}")).status_code == 204
+
+    reopened = await db_session.scalar(
+        select(ChoreOccurrence).where(ChoreOccurrence.id == completion["id"])
+    )
+    assert reopened is not None
+    assert reopened.status == OccurrenceStatus.open
+    assert reopened.completed_timezone is None
+
+
+def test_closure_zone_falls_back_to_the_household_for_a_pre_column_closure() -> None:
+    """NULL means "not judged yet" (any open row) or "closed before the column existed". The
+    fallback is the household's current zone, which is both the old behaviour and all the
+    migration's backfill can honestly reconstruct."""
+    assert closure_zone(None, "Europe/Amsterdam") == AMSTERDAM
+    assert closure_zone("Pacific/Niue", "Europe/Amsterdam") == NIUE
+    # And a snapshot the tz database no longer knows degrades the same way any stored zone does.
+    assert closure_zone("Mars/Olympus_Mons", "Europe/Amsterdam") == UTC_ZONE
 
 
 async def test_changing_the_timezone_leaves_unscheduled_chores_alone(

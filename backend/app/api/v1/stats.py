@@ -9,6 +9,7 @@ from app.api.deps import CurrentUser, SessionDep
 from app.core import clock
 from app.core.chores import DueStatus, days_late, days_until_due, due_status, local_day_bounds
 from app.core.households import household_zone, member_household_ids, zones_in_scope
+from app.core.occurrences import closure_zone
 from app.models import (
     Chore,
     ChoreOccurrence,
@@ -185,9 +186,12 @@ async def get_stats(
                 # Punctuality is only meaningful against a deadline, so the period rides
                 # along to exclude the unscheduled ones from it (see the loop below).
                 Chore.repeats,
-                # Which household's day this closure belongs to, for the bucket key and for
-                # lateness. Both are calendar questions, so both need the zone. Joined rather
-                # than looked up - see the live snapshot above.
+                # Which day this closure belongs to, for the bucket key and for lateness. Both
+                # are calendar judgements about the past, so both read the zone snapshotted when
+                # the row closed rather than wherever the household is now - otherwise moving a
+                # household re-buckets and re-scores work nobody touched. The household's zone
+                # rides along as the fallback for rows closed before that column existed.
+                ChoreOccurrence.completed_timezone,
                 Household.timezone,
                 User.id,
                 User.first_name,
@@ -247,12 +251,13 @@ async def get_stats(
         scheduled_for,
         was_skipped,
         repeats,
-        zone_name,
+        closed_in,
+        household_tz,
         uid,
         first_name,
         last_name,
     ) in done_rows:
-        tz = household_zone(zone_name)
+        tz = closure_zone(closed_in, household_tz)
         completed_day = completed_at.astimezone(tz).date()
         key = _week_start(completed_day) if weekly else completed_day
         # A skip closed the slot but produced nothing, so it is kept out of every count that

@@ -91,6 +91,23 @@ class ChoreOccurrence(Base):
         ForeignKey("users.id", ondelete="SET NULL"), default=None
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    # The household's timezone at the moment this row was closed, snapshotted for exactly the
+    # reason `title` is: so a later change cannot rewrite history.
+    #
+    # `completed_at` is a plain instant and needs no help, but *lateness* is a calendar
+    # judgement - `completed_at`'s local date minus `scheduled_for`'s - and read against the
+    # household's *current* zone it moves whenever the household does. A closure that was on
+    # time in Amsterdam started reporting a day late in Pacific/Niue. Reading both operands in
+    # the zone the closure actually happened in makes the answer immutable.
+    #
+    # NULL on every open row (nothing has been judged yet) and on closures written before this
+    # column existed, where the reader falls back to the household's current zone - the old
+    # behaviour, which is also all the migration's backfill can honestly reconstruct.
+    #
+    # Do NOT reach for this on a "how long ago" measure. `days_since` on the unscheduled view and
+    # Home's "done today" window are anchored to *now*, so they belong in the zone the household
+    # is in now; mixing a snapshot operand with a live one compares two different calendars.
+    completed_timezone: Mapped[str | None] = mapped_column(String(64), default=None)
     # A closure that produced no work: the occurrence was skipped rather than done. See
     # the class docstring for why this is a flag on a `done` row and not a third status.
     #
