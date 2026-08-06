@@ -307,6 +307,12 @@ export type StatsData = {
   punctuality: { on_time: number; late: number; early: number; skipped: number }
   // Ranked most-completions-first; excludes completions with no known completer, and skips.
   per_person: { user_id: number; first_name: string; last_name: string; count: number }[]
+  // Which chores keep being skipped, worst first, capped at five, and only ever chores with
+  // at least one skip (never a row reading 0). The one skip figure here that drops
+  // soft-deleted chores, since it is a shortlist to act on: their skips are still in
+  // skipped_in_range, so this deliberately does not sum to that KPI. `title` is the chore's
+  // *current* title, so a rename keeps one row rather than splitting it.
+  most_skipped: { chore_id: number; title: string; household_name: string; count: number }[]
 }
 
 // A chore due within the Home window (overdue / today / next 7 days), with its

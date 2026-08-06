@@ -231,6 +231,11 @@ export function makeStats(overrides: Partial<StatsData> = {}): StatsData {
       { user_id: 1, first_name: 'Ava', last_name: 'One', count: 7 },
       { user_id: 2, first_name: 'Ben', last_name: 'Two', count: 5 },
     ],
+    // Two households on purpose, so a test can tell the household line apart from the title.
+    most_skipped: [
+      { chore_id: 3, title: 'Take the bins out', household_name: 'Test Household', count: 4 },
+      { chore_id: 4, title: 'Mop the floor', household_name: 'Other Household', count: 2 },
+    ],
     ...overrides,
   }
 }

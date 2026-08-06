@@ -125,14 +125,15 @@ describe('Statistics', () => {
         status_breakdown: { overdue: 0, today: 0, soon: 0 },
         punctuality: { on_time: 0, late: 0, early: 0, skipped: 0 },
         per_person: [],
+        most_skipped: [],
       }),
     })
     renderWithProviders(<Statistics />)
 
-    // The time chart, both donuts and the per-person list each fall back to the
+    // The time chart, both donuts and both ranking lists each fall back to the
     // empty message.
     const empties = await screen.findAllByText('Not enough data yet.')
-    expect(empties.length).toBeGreaterThanOrEqual(3)
+    expect(empties.length).toBeGreaterThanOrEqual(5)
   })
 
   it('defaults to the 30-day range and refetches when the range changes', async () => {
@@ -261,5 +262,79 @@ describe('Statistics', () => {
       .getByText('Completions over time')
       .closest<HTMLElement>('div.rounded-xl')!
     expect(within(chartCard).queryByText('Not enough data yet.')).not.toBeInTheDocument()
+  })
+
+  it('ranks the most skipped chores with their counts', async () => {
+    stubFetch({})
+    renderWithProviders(<Statistics />)
+
+    // makeStats: bins skipped 4 times, mopping twice.
+    expect(await screen.findByText('Most skipped chores')).toBeInTheDocument()
+    const binsRow = (await screen.findByText('Take the bins out')).closest('li')!
+    expect(within(binsRow).getByText('4')).toBeInTheDocument()
+    const mopRow = screen.getByText('Mop the floor').closest('li')!
+    expect(within(mopRow).getByText('2')).toBeInTheDocument()
+  })
+
+  it('names the household on a most-skipped row while every household is included', async () => {
+    stubFetch({})
+    renderWithProviders(<Statistics />)
+
+    const binsRow = (await screen.findByText('Take the bins out')).closest('li')!
+    expect(within(binsRow).getByText('Test Household')).toBeInTheDocument()
+  })
+
+  it('drops the household from a most-skipped row once one household is selected', async () => {
+    // Two households and deputy in both, so the Household Select actually renders.
+    const fetchMock = stubFetch({
+      options: {
+        households: [
+          { id: 1, name: 'Test Household', timezone: 'UTC' },
+          { id: 2, name: 'Other Household', timezone: 'UTC' },
+        ],
+        members: [makeHouseholdMember()],
+      },
+    })
+    renderWithProviders(<Statistics />, {
+      authValue: {
+        memberships: [
+          { household_id: 1, role: 'deputy', owned: false },
+          { household_id: 2, role: 'deputy', owned: false },
+        ],
+      },
+    })
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    const before = (await screen.findByText('Take the bins out')).closest('li')!
+    expect(within(before).getByText('Test Household')).toBeInTheDocument()
+
+    await user.click(await screen.findByRole('combobox', { name: 'Household' }))
+    await user.click(await screen.findByRole('option', { name: 'Test Household' }))
+    await waitFor(() => expect(lastStatsGet(fetchMock)).toContain('household_id=1'))
+
+    // The stub answers with the SAME payload either way, household_name and all, so the
+    // filter is the only thing that changed - otherwise this would pass with the conditional
+    // deleted. Scoped to the row, because the Select trigger now shows that name too.
+    await waitFor(() => {
+      const after = screen.getByText('Take the bins out').closest('li')!
+      expect(within(after).queryByText('Test Household')).not.toBeInTheDocument()
+    })
+    expect(screen.getByText('Take the bins out')).toBeInTheDocument()
+  })
+
+  it('empties the most-skipped card on its own when nothing was skipped', async () => {
+    stubFetch({ stats: makeStats({ most_skipped: [] }) })
+    renderWithProviders(<Statistics />)
+
+    const skippedCard = (await screen.findByText('Most skipped chores')).closest<HTMLElement>(
+      'div.rounded-xl',
+    )!
+    expect(within(skippedCard).getByText('Not enough data yet.')).toBeInTheDocument()
+    // Its neighbour still has data, so the two cards gate independently rather than the whole
+    // row disappearing with one of them.
+    const personCard = screen
+      .getByText('Completions per person')
+      .closest<HTMLElement>('div.rounded-xl')!
+    expect(within(personCard).queryByText('Not enough data yet.')).not.toBeInTheDocument()
   })
 })

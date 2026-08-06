@@ -73,6 +73,33 @@ class PersonStat(BaseModel):
     count: int
 
 
+class SkippedChoreStat(BaseModel):
+    """One bar of the most-skipped ranking: how many times this chore was skipped in the
+    range. Only chores with at least one skip appear, worst-first and capped, so the list is
+    the short "go and look at these" set rather than a full table.
+
+    Soft-deleted chores are absent even though their skips still count in
+    `skipped_in_range`: the ranking is a list of chores to go and fix, and a deleted one
+    cannot be fixed. It is the only skip figure in this payload that drops them.
+
+    A chore switched to unscheduled after being skipped keeps its skips here, so these counts
+    can exceed `punctuality.skipped`, which reads the period live and drops such a chore.
+
+    `title` is the chore's *current* title, not the occurrence's snapshot, so a chore
+    renamed mid-range stays one row and reads the same here as on the Chores page. The
+    trade-off is the mirror image of History's: there the snapshot is right because a row
+    describes one past closure, here the live title is right because a row describes a chore
+    that still exists and is still being skipped.
+
+    `household_name` rides along because the page spans every household the caller is a
+    deputy in, and two of them can hold a chore with the same title."""
+
+    chore_id: int
+    title: str
+    household_name: str
+    count: int
+
+
 class StatsRead(BaseModel):
     """The aggregated Statistics payload. `range` echoes the requested window and
     `granularity` (`day`/`week`) tells the frontend how to label the time axis."""
@@ -84,3 +111,4 @@ class StatsRead(BaseModel):
     status_breakdown: StatusBreakdown
     punctuality: Punctuality
     per_person: list[PersonStat]
+    most_skipped: list[SkippedChoreStat]

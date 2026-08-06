@@ -23,6 +23,7 @@ from app.schemas.stats import (
     CompletionBucket,
     PersonStat,
     Punctuality,
+    SkippedChoreStat,
     StatsKpis,
     StatsRead,
     StatusBreakdown,
@@ -35,6 +36,11 @@ RANGE_DAYS: dict[str, int] = {"7d": 7, "30d": 30, "90d": 90}
 # Ranges longer than this bucket the time chart by week instead of by day, so the
 # 90-day view stays ~13 bars rather than 90.
 WEEKLY_ABOVE_DAYS = 30
+
+# How many chores the most-skipped ranking returns. A product decision - the card is a
+# glanceable shortlist, not a table - so a constant like MAX_PENDING_INVITATIONS and
+# LOG_RETENTION rather than a Settings field or a query parameter.
+MOST_SKIPPED_LIMIT = 5
 
 # The floor the chart axis falls back to when the caller reaches deputy in no household, so the
 # series stays a zero-seeded range rather than an empty array. See `axis_windows` below.
@@ -80,7 +86,12 @@ async def get_stats(
     the four together are exactly the scheduled occurrences that closed in the range. And
     `on_time_rate` deliberately does NOT count skips in its denominator, staying "of the work
     that was done, how much was punctual" - so the four buckets do not add up to that rate's
-    base either."""
+    base either.
+
+    `most_skipped` is the one skip figure here that answers *which* chore rather than how
+    many, so it is also the one that drops soft-deleted chores: it is a shortlist to act on,
+    and a deleted chore cannot be. Their skips do still count in `skipped_in_range`, so the
+    ranking deliberately does not sum to that KPI."""
     now = clock.now()
     range_days = RANGE_DAYS[time_range]
     weekly = range_days > WEEKLY_ABOVE_DAYS
@@ -196,6 +207,14 @@ async def get_stats(
                 User.id,
                 User.first_name,
                 User.last_name,
+                # For the most-skipped ranking: which chore, what it is called *now* (a
+                # rename should not split one chore into two rows), and where. `deleted_at`
+                # rides along to be branched on in the loop rather than filtered here - see
+                # the ranking's own comment below for why it must not join `done_filters`.
+                Chore.id,
+                Chore.title,
+                Household.name,
+                Chore.deleted_at,
             )
             .join(Chore, Chore.id == ChoreOccurrence.chore_id)
             .join(Household, Household.id == Chore.household_id)  # to-one: no row multiplication
@@ -246,6 +265,10 @@ async def get_stats(
     total = skipped_total = 0
     # user_id -> [first_name, last_name, count]
     person_counts: dict[int, list] = {}
+    # chore_id -> [title, household_name, count]. Keyed on the chore rather than on its title
+    # so a rename mid-range keeps one row, and only ever written to for a skip, which is what
+    # makes "count > 0" true by construction rather than by a filter.
+    skip_counts: dict[int, list] = {}
     for (
         completed_at,
         scheduled_for,
@@ -256,6 +279,10 @@ async def get_stats(
         uid,
         first_name,
         last_name,
+        chore_id,
+        chore_title,
+        household_name,
+        chore_deleted_at,
     ) in done_rows:
         tz = closure_zone(closed_in, household_tz)
         completed_day = completed_at.astimezone(tz).date()
@@ -266,6 +293,26 @@ async def get_stats(
         if was_skipped:
             skipped_total += 1
             skipped_buckets[key] = skipped_buckets.get(key, 0) + 1
+            # The ranking drops soft-deleted chores, and the count above deliberately does
+            # not: it answers "how many skips", which a deleted chore's history is still part
+            # of, while the ranking answers "which chore should I go and fix", which a deleted
+            # chore cannot be the answer to. So the filter belongs HERE and not in
+            # `done_filters` - four established metrics share that list and its comment above
+            # says completed history is intentionally kept for soft-deleted chores, so a
+            # predicate there would quietly re-scope all four. `Chore.deleted_at` is selected
+            # purely for this branch, exactly as `Chore.repeats` is for punctuality's.
+            #
+            # No `repeats != manual` guard, and the reason is subtler than punctuality's. A skip
+            # can only be *recorded* against a scheduled chore (skip_chore refuses an unscheduled
+            # one), but `update_chore` can switch a chore to `manual` afterwards and its existing
+            # skipped rows survive that - so a row here CAN belong to a chore that is unscheduled
+            # today. Those are kept deliberately: the skips happened and the chore is still there
+            # to be fixed, which is the whole point of the list. It is the one place this ranking
+            # parts company with `punctuality.skipped`, which reads `repeats` live and drops them,
+            # so the two can legitimately disagree.
+            if chore_deleted_at is None:
+                entry = skip_counts.setdefault(chore_id, [chore_title, household_name, 0])
+                entry[2] += 1
         else:
             total += 1
             done_buckets[key] = done_buckets.get(key, 0) + 1
@@ -316,6 +363,17 @@ async def get_stats(
         ),
         key=lambda p: (-p.count, p.first_name, p.last_name, p.user_id),
     )
+    # Worst-first, then by title for a stable order on ties (and by id for two chores that
+    # share a title, which two households can). Sliced rather than filtered on a threshold:
+    # only chores that were actually skipped have an entry at all, so "skip > 0" needs no
+    # predicate, and the cap is what keeps the card a shortlist.
+    most_skipped = sorted(
+        (
+            SkippedChoreStat(chore_id=cid, title=title, household_name=name, count=count)
+            for cid, (title, name, count) in skip_counts.items()
+        ),
+        key=lambda c: (-c.count, c.title, c.chore_id),
+    )[:MOST_SKIPPED_LIMIT]
 
     return StatsRead(
         range=time_range,
@@ -333,4 +391,5 @@ async def get_stats(
         status_breakdown=status_breakdown,
         punctuality=Punctuality(on_time=on_time, late=late, early=early, skipped=skipped),
         per_person=per_person,
+        most_skipped=most_skipped,
     )

@@ -827,6 +827,18 @@ pre-commit run --all-files                           # what the git hook runs
     `active_chores`"; `punctuality` deliberately no longer sums to
     `completed_in_range`, and `on_time_rate`'s denominator is the scheduled completions
     alone.
+
+    **`most_skipped` is the one entry on that list that needs neither treatment, and the
+    reason is worth reading before you "fix" it.** A skip can only be *recorded* against a
+    scheduled chore, since `skip_chore` refuses an unscheduled one - so it needs no
+    `repeats != manual` predicate the way `punctuality` does. But `update_chore` can switch a
+    chore to `manual` afterwards and its existing skipped rows survive that, so a row in the
+    ranking CAN belong to a chore that is unscheduled *today*. Those are kept on purpose (the
+    skips happened, and the chore is still there to be fixed), which makes this the one place
+    a skip figure and `punctuality.skipped` can legitimately disagree: the latter reads
+    `repeats` live and drops them. Do not add a predicate to make the two agree - it would
+    hide chores from the list exactly when somebody has just reacted to being nagged about
+    one by parking it as unscheduled.
   - The view is `GET /api/v1/unscheduled` + `pages/Unscheduled.tsx`, ordered
     **alphabetically** (sorting by slot would be a deadline in disguise) and reporting
     `days_since_last_completion` instead of any due field. Its dot uses the
