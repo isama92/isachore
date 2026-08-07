@@ -826,4 +826,3 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
 ### Todo
 
 - [ ] Live updates when a housemate completes a chore (websocket)
-- [ ] Api to fetch today chores for paper display (api key should bypass oidc login form restriction)
