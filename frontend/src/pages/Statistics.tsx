@@ -36,6 +36,7 @@ const EMPTY_OPTIONS: HistoryFilterOptions = { households: [], members: [] }
 
 type Filters = { user_id: string; household_id: string }
 type Slice = { key: string; label: string; value: number; color: string }
+type BarRow = { key: string | number; label: string; sublabel?: string; value: number }
 
 // A big headline number with its caption. No plot, so no chart machinery.
 function KpiCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
@@ -106,6 +107,70 @@ function DonutCard({
               ))}
             </ul>
           </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// A ranked horizontal bar list: a truncating label, a track scaled so the leader fills it,
+// and the exact count as text beside it. Plain CSS rather than a recharts BarChart - there is
+// no axis, nothing to hover and only a handful of rows, and the label has to be selectable
+// text rather than an SVG tick. Rows arrive already sorted by the server.
+function BarListCard({
+  title,
+  rows,
+  emptyLabel,
+}: {
+  title: string
+  rows: BarRow[]
+  emptyLabel: string
+}) {
+  // Relative to the leader, so the shape of the list is the comparison. Floored at 1 so an
+  // all-zero list cannot divide by zero (the server never sends one, but the guard is free).
+  const max = Math.max(1, ...rows.map((r) => r.value))
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {rows.length === 0 ? (
+          <p className="py-10 text-center text-sm text-muted-foreground">{emptyLabel}</p>
+        ) : (
+          <ul className="flex flex-col gap-3">
+            {rows.map((row) => (
+              <li key={row.key} className="flex items-center gap-3">
+                {/* Fixed width so every track starts at the same x and the bars stay
+                    comparable; wider only at lg, where the two cards sit side by side in a page
+                    finally broad enough to spend it - between sm and lg each card is HALF the
+                    width, so a wider label there would eat the bar it exists to compare.
+                    Two SIBLING spans in a grid (the shape AppSidebar's user block already uses)
+                    rather than one nested in the other, so each truncates on its own and can
+                    carry its own `title`: nested, the tooltip sat on the common ancestor, and
+                    hovering a clipped household name explained the chore title instead. */}
+                <div className="grid w-32 shrink-0 lg:w-44">
+                  <span className="truncate text-sm font-medium" title={row.label}>
+                    {row.label}
+                  </span>
+                  {row.sublabel && (
+                    <span className="truncate text-xs text-muted-foreground" title={row.sublabel}>
+                      {row.sublabel}
+                    </span>
+                  )}
+                </div>
+                <div className="h-5 flex-1 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full bg-primary"
+                    style={{ width: `${(row.value / max) * 100}%` }}
+                  />
+                </div>
+                <span className="w-8 shrink-0 text-right text-sm font-semibold tabular-nums">
+                  {row.value}
+                </span>
+              </li>
+            ))}
+          </ul>
         )}
       </CardContent>
     </Card>
@@ -252,7 +317,14 @@ export default function Statistics() {
   // Both series, or a range containing nothing but skips would render the empty state.
   const overTimeTotal =
     data?.completions_over_time.reduce((sum, b) => sum + b.count + b.skipped, 0) ?? 0
-  const perPersonMax = Math.max(1, ...(data?.per_person.map((p) => p.count) ?? [1]))
+  // Whether a most-skipped row needs to say which household it belongs to. Derived from the
+  // ROWS, not from the household filter: "one household is selected" is a different question,
+  // and answering this with that one was wrong for the commonest case of all. A user who
+  // reaches deputy in exactly one household never gets the Select (it renders only above one
+  // option), so `filters.household_id` could never leave '' for them and every row carried the
+  // same household name - the exact redundancy the line is suppressed to avoid. Asking the rows
+  // also covers a deputy of three households where only one has any skips.
+  const spansHouseholds = new Set(data?.most_skipped.map((c) => c.household_name)).size > 1
 
   return (
     <main className="mx-auto w-full max-w-5xl px-5 py-8">
@@ -327,7 +399,10 @@ export default function Statistics() {
             <Skeleton className="h-[260px] rounded-xl" />
             <Skeleton className="h-[260px] rounded-xl" />
           </div>
-          <Skeleton className="h-[220px] rounded-xl" />
+          <div className="grid gap-6 sm:grid-cols-2">
+            <Skeleton className="h-[220px] rounded-xl" />
+            <Skeleton className="h-[220px] rounded-xl" />
+          </div>
         </div>
       )}
 
@@ -437,37 +512,35 @@ export default function Statistics() {
             />
           </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>{t('statistics.perPerson.title')}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {data.per_person.length === 0 ? (
-                <p className="py-10 text-center text-sm text-muted-foreground">
-                  {t('statistics.empty')}
-                </p>
-              ) : (
-                <ul className="flex flex-col gap-3">
-                  {data.per_person.map((p) => (
-                    <li key={p.user_id} className="flex items-center gap-3">
-                      <span className="w-28 shrink-0 truncate text-sm font-medium">
-                        {fullName(p)}
-                      </span>
-                      <div className="h-5 flex-1 overflow-hidden rounded-full bg-muted">
-                        <div
-                          className="h-full rounded-full bg-primary"
-                          style={{ width: `${(p.count / perPersonMax) * 100}%` }}
-                        />
-                      </div>
-                      <span className="w-8 shrink-0 text-right text-sm font-semibold tabular-nums">
-                        {p.count}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
+          {/* Two rankings side by side: who did the work, and which chores nobody wants to.
+              Both are bar lists, so they read as a pair, and each gates its own empty state
+              like the donuts above rather than the row disappearing when one has no data. */}
+          <div className="grid gap-6 sm:grid-cols-2">
+            <BarListCard
+              title={t('statistics.perPerson.title')}
+              rows={data.per_person.map((p) => ({
+                key: p.user_id,
+                label: fullName(p),
+                value: p.count,
+              }))}
+              emptyLabel={t('statistics.empty')}
+            />
+            <BarListCard
+              title={t('statistics.mostSkipped.title')}
+              rows={data.most_skipped.map((c) => ({
+                key: c.chore_id,
+                label: c.title,
+                // Only where the rows actually span more than one household, since two of them
+                // can hold a chore with the same title. See `spansHouseholds`.
+                sublabel: spansHouseholds ? c.household_name : undefined,
+                value: c.count,
+              }))}
+              // NOT statistics.empty: nothing skipped is the best possible outcome, and "Not
+              // enough data yet" reads as a broken feature or too short a window, which invites
+              // widening the range to re-confirm a perfect result. Its own key says zero.
+              emptyLabel={t('statistics.mostSkipped.none')}
+            />
+          </div>
         </div>
       )}
     </main>

@@ -10,7 +10,14 @@ from datetime import UTC, datetime, timedelta
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import generate_token, hash_token
+from app.core.csrf import _AUTH_COOKIES
+from app.core.security import (
+    ADMIN_COOKIE_NAME,
+    COOKIE_NAME,
+    OIDC_STATE_COOKIE_NAME,
+    generate_token,
+    hash_token,
+)
 from app.models import AuthToken, User
 
 Login = Callable[..., Awaitable[User]]
@@ -163,3 +170,21 @@ async def test_two_factor_cookie_is_exempt(
     resp = await client.post("/api/v1/auth/verify-2fa", json={"code": "123456"})
 
     assert resp.status_code != 403
+
+
+def test_the_oidc_state_cookie_is_not_treated_as_a_session_cookie() -> None:
+    """`isachore_oidc` must stay out of `_AUTH_COOKIES`: it authenticates nobody, so it must
+    not turn an anonymous request into one the middleware reads as a session.
+
+    Asserted structurally rather than through a request, which is the exception here and worth
+    knowing why. The sibling rule about `isachore_2fa` gets a behavioural test (see above)
+    because `verify-2fa` is a POST, so the middleware actually inspects it. Both OIDC endpoints
+    are GET, and the middleware only looks at unsafe methods - so adding the cookie to that
+    tuple changes no response today and no behavioural test can catch it. The reason the rule
+    still holds is that it survives a change of method, and this is what keeps it from being
+    quietly undone in the meantime: a closed-set assertion, like
+    `test_every_role_is_on_the_ladder`.
+    """
+    assert OIDC_STATE_COOKIE_NAME not in _AUTH_COOKIES
+    # ...and the positive half, so this cannot pass by the tuple being empty or renamed.
+    assert _AUTH_COOKIES == (COOKIE_NAME, ADMIN_COOKIE_NAME)

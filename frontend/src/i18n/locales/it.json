@@ -334,6 +334,10 @@
     "perPerson": {
       "title": "Completamenti per persona",
       "completions": "Completamenti"
+    },
+    "mostSkipped": {
+      "title": "Faccende più saltate",
+      "none": "Nessuna faccenda saltata."
     }
   },
   "logs": {

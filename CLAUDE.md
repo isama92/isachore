@@ -332,6 +332,17 @@ pre-commit run --all-files                           # what the git hook runs
     known dead end all three share: the member list spans every household the caller belongs
     to, with no member -> household association to narrow it by, so a person plus a household
     that do not pair yields an empty page. Nothing leaks (those names are on Home already).
+
+    **Never read a filter's value as a proxy for how much is in scope.** Every household
+    `Select` in the app renders only *above one option* (`options.households.length > 1` on
+    Statistics, the same on Tags), so for the single-household user - the commonest case there
+    is - the control never renders and its filter state can never leave `''`. A conditional
+    written as "is a household selected?" therefore answers "no" forever for exactly the people
+    it was meant to help. Statistics' most-skipped card shipped this bug: it hid the per-row
+    household line when a household was picked, which for a deputy of one household meant the
+    same name on every row, the redundancy the line exists to avoid. The fix is to ask the
+    *data* (`new Set(rows.map(r => r.household_name)).size > 1`), which needs no filter, no
+    options list, and also covers a deputy of three households where only one has rows.
   - **`add_member` takes a required role, and the column's `server_default` is
     `helper`.** `household_members` is a Core `Table`, so the `members` relationship
     inserts the two foreign keys only and would leave any bypassing path on the default.
@@ -827,6 +838,18 @@ pre-commit run --all-files                           # what the git hook runs
     `active_chores`"; `punctuality` deliberately no longer sums to
     `completed_in_range`, and `on_time_rate`'s denominator is the scheduled completions
     alone.
+
+    **`most_skipped` is the one entry on that list that needs neither treatment, and the
+    reason is worth reading before you "fix" it.** A skip can only be *recorded* against a
+    scheduled chore, since `skip_chore` refuses an unscheduled one - so it needs no
+    `repeats != manual` predicate the way `punctuality` does. But `update_chore` can switch a
+    chore to `manual` afterwards and its existing skipped rows survive that, so a row in the
+    ranking CAN belong to a chore that is unscheduled *today*. Those are kept on purpose (the
+    skips happened, and the chore is still there to be fixed), which makes this the one place
+    a skip figure and `punctuality.skipped` can legitimately disagree: the latter reads
+    `repeats` live and drops them. Do not add a predicate to make the two agree - it would
+    hide chores from the list exactly when somebody has just reacted to being nagged about
+    one by parking it as unscheduled.
   - The view is `GET /api/v1/unscheduled` + `pages/Unscheduled.tsx`, ordered
     **alphabetically** (sorting by slot would be a deadline in disguise) and reporting
     `days_since_last_completion` instead of any due field. Its dot uses the
@@ -1180,6 +1203,53 @@ the negative paths (401/403/400/404/409), not just the happy one.
   too. Only a pure selection move is document-free, and jsdom refuses arrow keys
   outright ("Not implemented. The result of this interaction is unreliable."), so the
   test drives `setTextSelection` through a harness that owns the editor.
+
+- **When the decision is NOT to do something, the mutation is an addition, and the rule above
+  does not apply.** That rule is written entirely in terms of deleting a guard, so it silently
+  covers nothing when the protected behaviour is an omission: no automatic household
+  provisioning, no `repeats != manual` predicate on `most_skipped`, no local 2FA challenge in
+  the OIDC callback, no page number in stored table settings, no in-app OIDC unlink. There is
+  no guard to delete. The test has to assert **the thing still does not happen after a
+  plausible edit that would make it happen** - and since a comment is what usually carries
+  these decisions, and comments do not fail CI, the omission is the easiest kind of decision
+  to lose.
+
+  Do not add these to the four-instance tally above; it counts a different mistake.
+
+  Three techniques, all already in use here, strongest first:
+  - **Make it unrepresentable.** `OidcIdentity` (`core/oidc.py`) has no `claims` or
+    `email_verified` field at all, so "read the provider's `email_verified`" is not a one-line
+    edit somebody makes absent-mindedly - it needs a dataclass change that forces them past the
+    reasoning. Prefer this when the shape allows it: no test to rot.
+  - **Assert the absence at the surface that would do it, having first made the mechanism
+    live.** `test_create_user_creates_no_household` (plus
+    `..._waiting_confirmation_creates_no_household_either`, because the endpoint has two
+    branches and an omission has to hold on both) gives the admin a household, counts, POSTs,
+    and asserts the count did not move. Counting on an empty database would pass no matter what
+    the endpoint did. Same shape: `test_callback_skips_two_factor` turns `totp_enabled` **on**
+    before asserting no `isachore_2fa` cookie, and `useServerTable`'s "remembers a sort, page
+    size and filter change, but never the page" stores three siblings first, so the absent
+    fourth is the rule rather than a dead code path.
+  - **Execute the artefact rather than grepping it.** `src/serviceWorker.test.ts` runs `sw.js`
+    in a `node:vm` against a fake `self`, which is what lets it assert "never caches `/api/`"
+    as behaviour. Its own gotcha is already documented above and is the same one in a different
+    coat: give the request a shape that reaches a branch which *does* intercept, or the test
+    pins the fall-through.
+
+  **The trap that hides this: asserting the consequence through a fixture proves nothing about
+  the endpoint.** `test_history_is_empty_for_a_member_of_no_household` builds its user with
+  `make_user` and so would keep passing with provisioning reintroduced into `POST /users`; what
+  actually defends that is the pair named above, which go through the endpoint. When you audit
+  an omission, mutate it and check that a test naming *that surface* fails.
+
+  Audited by addition-mutation against the whole suite (with a known-caught control first, since
+  a broken harness reports everything as unpinned - `pytest` erroring on an unknown flag reads
+  as "failed" to a naive check). Everything above is caught. **One is knowingly not, and needs
+  no re-audit:** `isachore_oidc` absent from `_AUTH_COOKIES` (`core/csrf.py`). Adding it fails
+  nothing, because that middleware only inspects unsafe methods and both OIDC endpoints are GET.
+  Behaviour cannot distinguish it today, so `test_csrf.py` pins the tuple's contents directly -
+  a closed-set assertion like `test_every_role_is_on_the_ladder`, which is the fallback when
+  there is no behaviour to observe.
 
 - **Contenteditable is the one thing jsdom cannot drive**, which is why
   `src/test/richTextEditorMock.tsx` exists and is the **only** `vi.mock` in the repo.

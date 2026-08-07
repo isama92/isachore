@@ -826,5 +826,4 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
 ### Todo
 
 - [ ] Live updates when a housemate completes a chore (websocket)
-- [ ] In statistics, add a list of 5 most skipped chores (only show chores with skip > 0, a maximum of 5) (maybe a chart similar to Completions per person)
 - [ ] Api to fetch today chores for paper display (api key should bypass oidc login form restriction)

@@ -334,6 +334,10 @@
     "perPerson": {
       "title": "Completions per person",
       "completions": "Completions"
+    },
+    "mostSkipped": {
+      "title": "Most skipped chores",
+      "none": "Nothing was skipped."
     }
   },
   "logs": {

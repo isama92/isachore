@@ -659,3 +659,301 @@ async def test_stats_range_of_only_skips_reports_no_rate(
     assert body["kpis"]["on_time_rate"] is None
     assert body["punctuality"] == {"on_time": 0, "late": 0, "early": 0, "skipped": 1}
     assert body["per_person"] == []
+
+
+async def _skip_n_times(
+    make_occurrence: MakeOccurrence, chore: Chore, user: User, times: int
+) -> None:
+    """`times` skipped closures on one chore, on consecutive days. Distinct scheduled_for
+    keeps the (chore_id, scheduled_for) unique guard happy; the ranking keys off the chore."""
+    for day in range(times):
+        await make_occurrence(
+            chore=chore,
+            scheduled_for=TODAY_START - timedelta(days=day),
+            status=OccurrenceStatus.done,
+            completed_by=user,
+            completed_at=NOW,
+            skipped=True,
+        )
+
+
+async def test_stats_ranks_the_most_skipped_chores(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    """The ranking answers *which* chore keeps being skipped, worst first."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    for title, times in (("Bins", 3), ("Mop", 2), ("Dust", 1)):
+        chore = await make_chore(household=household, title=title, with_occurrence=False)
+        await _skip_n_times(make_occurrence, chore, user, times)
+    client = await auth_client(user)
+
+    body = (await client.get("/api/v1/stats")).json()
+    assert [(c["title"], c["count"]) for c in body["most_skipped"]] == [
+        ("Bins", 3),
+        ("Mop", 2),
+        ("Dust", 1),
+    ]
+    # Every skip is in the KPI too, which the ranking is a breakdown of, not a subset rule.
+    assert body["kpis"]["skipped_in_range"] == 6
+
+
+async def test_stats_most_skipped_omits_a_chore_that_was_never_skipped(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    """ "Only chores with a skip" - a chore that was completed and never skipped has no row,
+    rather than a row reading 0."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    done_only = await make_chore(household=household, title="Washing up", with_occurrence=False)
+    await make_occurrence(
+        chore=done_only,
+        scheduled_for=TODAY_START,
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=NOW,
+    )
+    skipped = await make_chore(household=household, title="Hoovering", with_occurrence=False)
+    await _skip_n_times(make_occurrence, skipped, user, 1)
+    client = await auth_client(user)
+
+    body = (await client.get("/api/v1/stats")).json()
+    assert [c["title"] for c in body["most_skipped"]] == ["Hoovering"]
+    # The completed chore is genuinely in the range, so its absence is the rule and not an
+    # empty window: it is on the per-person ranking, which counts work done.
+    assert body["kpis"]["completed_in_range"] == 1
+
+
+async def test_stats_most_skipped_caps_the_list(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    """Six skipped chores, five rows: the card is a shortlist, so the least-skipped drops off
+    rather than the list growing."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    for times in range(1, 7):
+        chore = await make_chore(household=household, title=f"Chore {times}", with_occurrence=False)
+        await _skip_n_times(make_occurrence, chore, user, times)
+    client = await auth_client(user)
+
+    body = (await client.get("/api/v1/stats")).json()
+    assert [(c["title"], c["count"]) for c in body["most_skipped"]] == [
+        ("Chore 6", 6),
+        ("Chore 5", 5),
+        ("Chore 4", 4),
+        ("Chore 3", 3),
+        ("Chore 2", 2),
+    ]
+    # Dropped from the list but not from the count, so the cap cannot be mistaken for a
+    # narrower window.
+    assert body["kpis"]["skipped_in_range"] == 21
+
+
+async def test_stats_most_skipped_breaks_ties_by_title(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    """Two chores skipped as often as each other come back alphabetically, so the card does
+    not reshuffle between requests. Created in reverse order deliberately: sorted by nothing
+    at all, this would come back the other way round.
+
+    One title is lowercase on purpose. A raw string compare is codepoint order, which puts
+    every capital ahead of every lowercase letter ("Z" is U+005A, "a" is U+0061), so two
+    capitalised ASCII titles would pass whether or not the key casefolds - and chore titles are
+    user-authored, so mixed case is the normal state of this list."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    for title in ("Zebra duty", "afwas draaien"):
+        chore = await make_chore(household=household, title=title, with_occurrence=False)
+        await _skip_n_times(make_occurrence, chore, user, 2)
+    client = await auth_client(user)
+
+    body = (await client.get("/api/v1/stats")).json()
+    assert [c["title"] for c in body["most_skipped"]] == ["afwas draaien", "Zebra duty"]
+
+
+async def test_stats_most_skipped_keeps_a_chore_later_parked_as_unscheduled(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    """Skipped three times as a weekly chore, then switched to unscheduled: still ranked.
+
+    `skip_chore` refuses an unscheduled chore, so a skip can only be *recorded* against a
+    scheduled one - but `update_chore` can switch the period afterwards and the skipped rows
+    survive it. Keeping them is the point of the list: somebody reacting to being nagged about a
+    chore by parking it as unscheduled is exactly who should still see it, and the chore is still
+    there to be fixed. `punctuality` is the other side of that and reads `repeats` live, so this
+    also pins the one place the two figures legitimately disagree.
+
+    Worth knowing why this test has to exist. The behaviour it protects is the ABSENCE of a
+    `repeats != manual` predicate, so the mutation that breaks it is an *addition* - and
+    CLAUDE.md's "delete the guard and watch a test fail" rule only covers guards that are there.
+    Without this case, adding the obvious-looking consistency fix to the skip branch leaves the
+    whole suite green, which makes the most tempting change in this feature the untested one."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(
+        household=household, title="Defrost the freezer", with_occurrence=False
+    )
+    await _skip_n_times(make_occurrence, chore, user, 3)
+    # What update_chore does: the period changes and `_normalised_schedule` drops the start date.
+    chore.repeats = RepeatPeriod.manual
+    chore.start_date = None
+    await db_session.commit()
+    client = await auth_client(user)
+
+    body = (await client.get("/api/v1/stats")).json()
+    assert [(c["title"], c["count"]) for c in body["most_skipped"]] == [("Defrost the freezer", 3)]
+    # The documented divergence: punctuality reads the period live and drops the same rows, so
+    # the ranking can legitimately outweigh `punctuality.skipped`.
+    assert body["punctuality"]["skipped"] == 0
+    assert body["kpis"]["skipped_in_range"] == 3
+
+
+async def test_stats_most_skipped_uses_the_chores_current_title(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    """A chore renamed mid-range is still one chore, and the ranking calls it what it is called
+    now - which is what the reader sees on the Chores page they are being sent to.
+
+    This is the mirror image of History, where the occurrence's snapshotted title is the right
+    answer because a row there describes one past closure. Here a row describes a chore that
+    still exists, so reading `chore_occurrences.title` would show a name nothing else in the app
+    uses any more, and *which* old name would depend on row order."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, title="Old name", with_occurrence=False)
+    await _skip_n_times(make_occurrence, chore, user, 2)
+    # The skips were recorded (and their titles snapshotted) under the old name.
+    chore.title = "New name"
+    await db_session.commit()
+    client = await auth_client(user)
+
+    body = (await client.get("/api/v1/stats")).json()
+    assert [(c["title"], c["count"]) for c in body["most_skipped"]] == [("New name", 2)]
+
+
+async def test_stats_most_skipped_drops_a_soft_deleted_chore_but_keeps_its_count(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    """The ranking is a list of chores to go and fix, so a deleted one has no place on it -
+    but its skips still happened, so `skipped_in_range` keeps them, exactly as completed
+    history outlives a soft delete.
+
+    Both halves matter. Without the first, a deleted chore can top the card with nothing to
+    click. Without the second, the exclusion has been written into `done_filters`, which four
+    other metrics share."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    live = await make_chore(household=household, title="Recycling", with_occurrence=False)
+    await _skip_n_times(make_occurrence, live, user, 1)
+    # More skips than the live one, so a missing filter puts it first rather than last.
+    gone = await make_chore(household=household, title="Old rota", with_occurrence=False)
+    await _skip_n_times(make_occurrence, gone, user, 2)
+    gone.deleted_at = datetime.now(UTC)
+    await db_session.commit()
+    client = await auth_client(user)
+
+    body = (await client.get("/api/v1/stats")).json()
+    assert [(c["title"], c["count"]) for c in body["most_skipped"]] == [("Recycling", 1)]
+    assert body["kpis"]["skipped_in_range"] == 3
+
+
+async def test_stats_most_skipped_names_each_chores_household(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    """The page spans every household the caller is a deputy in, so a row has to say where the
+    chore lives - two households can hold one with the same title, and the ranking would
+    otherwise show the same name twice with no way to tell them apart.
+
+    Both are skipped equally often on purpose, so the two rows are identical on every sort key
+    but the last one, `chore_id`. Be clear about what that does and does not prove: deleting
+    `chore_id` from the key leaves this test GREEN, because `sorted` is stable and the rows
+    happen to arrive in creation order, so what is left is unspecified rather than wrong. The
+    key is there for determinism across requests - Postgres promises no row order, so without
+    it the card is free to reshuffle between one poll and the next - and it matches
+    `per_person`'s trailing `user_id`. Unpinnable here, like the advisory lock and the boot
+    migration; equal counts at least drive the comparison rather than skipping past it."""
+    user = await make_user()
+    flat = await make_household(name="The Flat", members=[user])
+    cabin = await make_household(name="The Cabin", members=[user])
+    chores = []
+    for household in (flat, cabin):
+        chore = await make_chore(household=household, title="Bins", with_occurrence=False)
+        await _skip_n_times(make_occurrence, chore, user, 2)
+        chores.append(chore)
+    assert chores[0].id < chores[1].id  # the order the assertion below rests on
+    client = await auth_client(user)
+
+    body = (await client.get("/api/v1/stats")).json()
+    assert [(c["title"], c["household_name"], c["count"]) for c in body["most_skipped"]] == [
+        ("Bins", "The Flat", 2),
+        ("Bins", "The Cabin", 2),
+    ]
+    # And `household_id` narrows the ranking like every other metric, through the shared
+    # closure filter. The two are indistinguishable apart from the household, so a row coming
+    # back here can only be the right one.
+    narrowed = (await client.get(f"/api/v1/stats?household_id={cabin.id}")).json()
+    assert [(c["household_name"], c["count"]) for c in narrowed["most_skipped"]] == [
+        ("The Cabin", 2)
+    ]
+
+
+async def test_stats_most_skipped_narrows_to_one_person(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    """`user_id` reaches the ranking through the shared closure filter, so selecting somebody
+    answers "which chores does this person skip" rather than the household's whole list."""
+    user = await make_user(email="me@example.com")
+    other = await make_user(email="them@example.com")
+    household = await make_household(members=[user, other])
+    mine = await make_chore(household=household, title="Ironing", with_occurrence=False)
+    await _skip_n_times(make_occurrence, mine, user, 1)
+    theirs = await make_chore(household=household, title="Sweeping", with_occurrence=False)
+    await _skip_n_times(make_occurrence, theirs, other, 2)
+    client = await auth_client(user)
+
+    # Unfiltered, the household's whole list, worst first.
+    everyone = (await client.get("/api/v1/stats")).json()
+    assert [c["title"] for c in everyone["most_skipped"]] == ["Sweeping", "Ironing"]
+    # Narrowed, only the skips credited to them - and the busier chore is the OTHER person's,
+    # so this cannot pass by accidentally returning the top of the unfiltered list.
+    body = (await client.get(f"/api/v1/stats?user_id={user.id}")).json()
+    assert [(c["title"], c["count"]) for c in body["most_skipped"]] == [("Ironing", 1)]
