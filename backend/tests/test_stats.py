@@ -770,16 +770,63 @@ async def test_stats_most_skipped_breaks_ties_by_title(
 ) -> None:
     """Two chores skipped as often as each other come back alphabetically, so the card does
     not reshuffle between requests. Created in reverse order deliberately: sorted by nothing
-    at all, this would come back the other way round."""
+    at all, this would come back the other way round.
+
+    One title is lowercase on purpose. A raw string compare is codepoint order, which puts
+    every capital ahead of every lowercase letter ("Z" is U+005A, "a" is U+0061), so two
+    capitalised ASCII titles would pass whether or not the key casefolds - and chore titles are
+    user-authored, so mixed case is the normal state of this list."""
     user = await make_user()
     household = await make_household(members=[user])
-    for title in ("Zebra duty", "Apple duty"):
+    for title in ("Zebra duty", "afwas draaien"):
         chore = await make_chore(household=household, title=title, with_occurrence=False)
         await _skip_n_times(make_occurrence, chore, user, 2)
     client = await auth_client(user)
 
     body = (await client.get("/api/v1/stats")).json()
-    assert [c["title"] for c in body["most_skipped"]] == ["Apple duty", "Zebra duty"]
+    assert [c["title"] for c in body["most_skipped"]] == ["afwas draaien", "Zebra duty"]
+
+
+async def test_stats_most_skipped_keeps_a_chore_later_parked_as_unscheduled(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    """Skipped three times as a weekly chore, then switched to unscheduled: still ranked.
+
+    `skip_chore` refuses an unscheduled chore, so a skip can only be *recorded* against a
+    scheduled one - but `update_chore` can switch the period afterwards and the skipped rows
+    survive it. Keeping them is the point of the list: somebody reacting to being nagged about a
+    chore by parking it as unscheduled is exactly who should still see it, and the chore is still
+    there to be fixed. `punctuality` is the other side of that and reads `repeats` live, so this
+    also pins the one place the two figures legitimately disagree.
+
+    Worth knowing why this test has to exist. The behaviour it protects is the ABSENCE of a
+    `repeats != manual` predicate, so the mutation that breaks it is an *addition* - and
+    CLAUDE.md's "delete the guard and watch a test fail" rule only covers guards that are there.
+    Without this case, adding the obvious-looking consistency fix to the skip branch leaves the
+    whole suite green, which makes the most tempting change in this feature the untested one."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(
+        household=household, title="Defrost the freezer", with_occurrence=False
+    )
+    await _skip_n_times(make_occurrence, chore, user, 3)
+    # What update_chore does: the period changes and `_normalised_schedule` drops the start date.
+    chore.repeats = RepeatPeriod.manual
+    chore.start_date = None
+    await db_session.commit()
+    client = await auth_client(user)
+
+    body = (await client.get("/api/v1/stats")).json()
+    assert [(c["title"], c["count"]) for c in body["most_skipped"]] == [("Defrost the freezer", 3)]
+    # The documented divergence: punctuality reads the period live and drops the same rows, so
+    # the ranking can legitimately outweigh `punctuality.skipped`.
+    assert body["punctuality"]["skipped"] == 0
+    assert body["kpis"]["skipped_in_range"] == 3
 
 
 async def test_stats_most_skipped_uses_the_chores_current_title(

@@ -332,6 +332,17 @@ pre-commit run --all-files                           # what the git hook runs
     known dead end all three share: the member list spans every household the caller belongs
     to, with no member -> household association to narrow it by, so a person plus a household
     that do not pair yields an empty page. Nothing leaks (those names are on Home already).
+
+    **Never read a filter's value as a proxy for how much is in scope.** Every household
+    `Select` in the app renders only *above one option* (`options.households.length > 1` on
+    Statistics, the same on Tags), so for the single-household user - the commonest case there
+    is - the control never renders and its filter state can never leave `''`. A conditional
+    written as "is a household selected?" therefore answers "no" forever for exactly the people
+    it was meant to help. Statistics' most-skipped card shipped this bug: it hid the per-row
+    household line when a household was picked, which for a deputy of one household meant the
+    same name on every row, the redundancy the line exists to avoid. The fix is to ask the
+    *data* (`new Set(rows.map(r => r.household_name)).size > 1`), which needs no filter, no
+    options list, and also covers a deputy of three households where only one has rows.
   - **`add_member` takes a required role, and the column's `server_default` is
     `helper`.** `household_members` is a Core `Table`, so the `members` relationship
     inserts the two foreign keys only and would leave any bypassing path on the default.

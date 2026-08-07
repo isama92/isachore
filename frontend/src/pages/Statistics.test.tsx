@@ -130,10 +130,15 @@ describe('Statistics', () => {
     })
     renderWithProviders(<Statistics />)
 
-    // The time chart, both donuts and both ranking lists each fall back to the
-    // empty message.
+    // The time chart, both donuts and the per-person list each fall back to the empty
+    // message. The most-skipped card deliberately does NOT: zero skips is a real answer, so
+    // it has its own copy, asserted in its own test.
     const empties = await screen.findAllByText('Not enough data yet.')
-    expect(empties.length).toBeGreaterThanOrEqual(5)
+    expect(empties.length).toBeGreaterThanOrEqual(4)
+    const skippedCard = screen
+      .getByText('Most skipped chores')
+      .closest<HTMLElement>('div.rounded-xl')!
+    expect(within(skippedCard).getByText('Nothing was skipped.')).toBeInTheDocument()
   })
 
   it('defaults to the 30-day range and refetches when the range changes', async () => {
@@ -276,7 +281,8 @@ describe('Statistics', () => {
     expect(within(mopRow).getByText('2')).toBeInTheDocument()
   })
 
-  it('names the household on a most-skipped row while every household is included', async () => {
+  it('names the household on a most-skipped row when the rows span more than one', async () => {
+    // makeStats' two rows are deliberately in different households.
     stubFetch({})
     renderWithProviders(<Statistics />)
 
@@ -284,52 +290,48 @@ describe('Statistics', () => {
     expect(within(binsRow).getByText('Test Household')).toBeInTheDocument()
   })
 
-  it('drops the household from a most-skipped row once one household is selected', async () => {
-    // Two households and deputy in both, so the Household Select actually renders.
-    const fetchMock = stubFetch({
-      options: {
-        households: [
-          { id: 1, name: 'Test Household', timezone: 'UTC' },
-          { id: 2, name: 'Other Household', timezone: 'UTC' },
+  it('drops the household line when every skipped chore is in the same household', async () => {
+    // The rows are the only variable: same two chores, same counts, one household between
+    // them. No filter is touched and no Select is even rendered, which is the case a
+    // filter-based gate got wrong - a deputy of a single household never gets the Select, so
+    // the filter could never leave '' and the same name appeared on every row.
+    stubFetch({
+      stats: makeStats({
+        most_skipped: [
+          { chore_id: 3, title: 'Take the bins out', household_name: 'Test Household', count: 4 },
+          { chore_id: 4, title: 'Mop the floor', household_name: 'Test Household', count: 2 },
         ],
-        members: [makeHouseholdMember()],
-      },
+      }),
     })
-    renderWithProviders(<Statistics />, {
-      authValue: {
-        memberships: [
-          { household_id: 1, role: 'deputy', owned: false },
-          { household_id: 2, role: 'deputy', owned: false },
-        ],
-      },
-    })
-    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderWithProviders(<Statistics />)
 
-    const before = (await screen.findByText('Take the bins out')).closest('li')!
-    expect(within(before).getByText('Test Household')).toBeInTheDocument()
-
-    await user.click(await screen.findByRole('combobox', { name: 'Household' }))
-    await user.click(await screen.findByRole('option', { name: 'Test Household' }))
-    await waitFor(() => expect(lastStatsGet(fetchMock)).toContain('household_id=1'))
-
-    // The stub answers with the SAME payload either way, household_name and all, so the
-    // filter is the only thing that changed - otherwise this would pass with the conditional
-    // deleted. Scoped to the row, because the Select trigger now shows that name too.
-    await waitFor(() => {
-      const after = screen.getByText('Take the bins out').closest('li')!
-      expect(within(after).queryByText('Test Household')).not.toBeInTheDocument()
-    })
-    expect(screen.getByText('Take the bins out')).toBeInTheDocument()
+    const binsRow = (await screen.findByText('Take the bins out')).closest('li')!
+    expect(within(binsRow).queryByText('Test Household')).not.toBeInTheDocument()
+    // The row itself is still there, so this is the sublabel going away and not the card.
+    expect(within(binsRow).getByText('4')).toBeInTheDocument()
   })
 
-  it('empties the most-skipped card on its own when nothing was skipped', async () => {
+  it('gives each truncating part of a row its own tooltip', async () => {
+    // Nested, the title sat on the common ancestor, so hovering a clipped household name
+    // explained the chore instead. Two siblings, two titles.
+    stubFetch({})
+    renderWithProviders(<Statistics />)
+
+    expect(await screen.findByTitle('Take the bins out')).toBeInTheDocument()
+    expect(screen.getByTitle('Test Household')).toBeInTheDocument()
+  })
+
+  it('says nothing was skipped rather than reporting missing data', async () => {
+    // Zero skips is the best possible outcome. "Not enough data yet." reads as a broken
+    // feature or too short a window, and sends the reader off to widen the range for nothing.
     stubFetch({ stats: makeStats({ most_skipped: [] }) })
     renderWithProviders(<Statistics />)
 
     const skippedCard = (await screen.findByText('Most skipped chores')).closest<HTMLElement>(
       'div.rounded-xl',
     )!
-    expect(within(skippedCard).getByText('Not enough data yet.')).toBeInTheDocument()
+    expect(within(skippedCard).getByText('Nothing was skipped.')).toBeInTheDocument()
+    expect(within(skippedCard).queryByText('Not enough data yet.')).not.toBeInTheDocument()
     // Its neighbour still has data, so the two cards gate independently rather than the whole
     // row disappearing with one of them.
     const personCard = screen

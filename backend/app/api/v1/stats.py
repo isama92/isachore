@@ -367,12 +367,18 @@ async def get_stats(
     # share a title, which two households can). Sliced rather than filtered on a threshold:
     # only chores that were actually skipped have an entry at all, so "skip > 0" needs no
     # predicate, and the cap is what keeps the card a shortlist.
+    #
+    # `casefold()` because a raw string compare is codepoint order, which puts every capitalised
+    # title ahead of every lowercase one - "Zebra duty" before "afwas" is not what the docstring
+    # means by alphabetically, and chore titles are user-authored so mixed case is the norm.
+    # Accented titles still sort after Z (É is U+00C9); fixing that needs real collation, which
+    # is more than a cosmetic tie-break inside a five-row list is worth.
     most_skipped = sorted(
         (
             SkippedChoreStat(chore_id=cid, title=title, household_name=name, count=count)
             for cid, (title, name, count) in skip_counts.items()
         ),
-        key=lambda c: (-c.count, c.title, c.chore_id),
+        key=lambda c: (-c.count, c.title.casefold(), c.chore_id),
     )[:MOST_SKIPPED_LIMIT]
 
     return StatsRead(

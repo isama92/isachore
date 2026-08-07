@@ -336,7 +336,8 @@
       "completions": "Completamenti"
     },
     "mostSkipped": {
-      "title": "Faccende più saltate"
+      "title": "Faccende più saltate",
+      "none": "Nessuna faccenda saltata."
     }
   },
   "logs": {

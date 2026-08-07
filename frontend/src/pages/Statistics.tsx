@@ -142,21 +142,23 @@ function BarListCard({
             {rows.map((row) => (
               <li key={row.key} className="flex items-center gap-3">
                 {/* Fixed width so every track starts at the same x and the bars stay
-                    comparable; `title` gives the full text back when it truncates. Wider
-                    only at lg, where the two cards are side by side in a page that is finally
-                    broad enough to spend it - between sm and lg each card is HALF the width,
-                    so a wider label there would eat the bar it exists to compare. */}
-                <span
-                  className="w-32 shrink-0 truncate text-sm font-medium lg:w-44"
-                  title={row.label}
-                >
-                  {row.label}
+                    comparable; wider only at lg, where the two cards sit side by side in a page
+                    finally broad enough to spend it - between sm and lg each card is HALF the
+                    width, so a wider label there would eat the bar it exists to compare.
+                    Two SIBLING spans in a grid (the shape AppSidebar's user block already uses)
+                    rather than one nested in the other, so each truncates on its own and can
+                    carry its own `title`: nested, the tooltip sat on the common ancestor, and
+                    hovering a clipped household name explained the chore title instead. */}
+                <div className="grid w-32 shrink-0 lg:w-44">
+                  <span className="truncate text-sm font-medium" title={row.label}>
+                    {row.label}
+                  </span>
                   {row.sublabel && (
-                    <span className="block truncate text-xs font-normal text-muted-foreground">
+                    <span className="truncate text-xs text-muted-foreground" title={row.sublabel}>
                       {row.sublabel}
                     </span>
                   )}
-                </span>
+                </div>
                 <div className="h-5 flex-1 overflow-hidden rounded-full bg-muted">
                   <div
                     className="h-full rounded-full bg-primary"
@@ -315,6 +317,14 @@ export default function Statistics() {
   // Both series, or a range containing nothing but skips would render the empty state.
   const overTimeTotal =
     data?.completions_over_time.reduce((sum, b) => sum + b.count + b.skipped, 0) ?? 0
+  // Whether a most-skipped row needs to say which household it belongs to. Derived from the
+  // ROWS, not from the household filter: "one household is selected" is a different question,
+  // and answering this with that one was wrong for the commonest case of all. A user who
+  // reaches deputy in exactly one household never gets the Select (it renders only above one
+  // option), so `filters.household_id` could never leave '' for them and every row carried the
+  // same household name - the exact redundancy the line is suppressed to avoid. Asking the rows
+  // also covers a deputy of three households where only one has any skips.
+  const spansHouseholds = new Set(data?.most_skipped.map((c) => c.household_name)).size > 1
 
   return (
     <main className="mx-auto w-full max-w-5xl px-5 py-8">
@@ -520,13 +530,15 @@ export default function Statistics() {
               rows={data.most_skipped.map((c) => ({
                 key: c.chore_id,
                 label: c.title,
-                // Only worth a line while the page spans several households, where two of
-                // them can hold a chore with the same title. With one selected it would be
-                // the same word on every row.
-                sublabel: filters.household_id ? undefined : c.household_name,
+                // Only where the rows actually span more than one household, since two of them
+                // can hold a chore with the same title. See `spansHouseholds`.
+                sublabel: spansHouseholds ? c.household_name : undefined,
                 value: c.count,
               }))}
-              emptyLabel={t('statistics.empty')}
+              // NOT statistics.empty: nothing skipped is the best possible outcome, and "Not
+              // enough data yet" reads as a broken feature or too short a window, which invites
+              // widening the range to re-confirm a perfect result. Its own key says zero.
+              emptyLabel={t('statistics.mostSkipped.none')}
             />
           </div>
         </div>

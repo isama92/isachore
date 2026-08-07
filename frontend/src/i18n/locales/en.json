@@ -336,7 +336,8 @@
       "completions": "Completions"
     },
     "mostSkipped": {
-      "title": "Most skipped chores"
+      "title": "Most skipped chores",
+      "none": "Nothing was skipped."
     }
   },
   "logs": {
