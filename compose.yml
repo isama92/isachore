@@ -25,6 +25,10 @@ services:
     volumes:
       - ./backend:/app
       - ./backend/storage:/app/storage
+      # Read-only, and only so `pytest` inside the container can reach the committed
+      # API spec, which lives outside the backend context. CI runs the suite on the
+      # runner from a full checkout and needs no equivalent.
+      - ./docs:/app/docs:ro
     depends_on:
       db:
         condition: service_healthy

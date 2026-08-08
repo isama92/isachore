@@ -150,6 +150,7 @@ Then open http://localhost:5173 and log in.
 | Frontend (SPA)       | http://localhost:5173                 |
 | Backend API          | http://localhost:8000/api/v1          |
 | API docs (Swagger)   | http://localhost:8000/docs            |
+| API docs (ReDoc)     | http://localhost:8000/redoc           |
 | Health check         | http://localhost:8000/api/v1/health   |
 | Postgres             | localhost:5432                        |
 | Mailpit (dev email)  | http://localhost:8025                 |
@@ -783,6 +784,49 @@ cd frontend && npm run test                                      # frontend
 docker compose exec backend uv run pytest --cov=app --cov-report=term-missing --cov-report=html
 cd frontend && npm run test:coverage
 ```
+
+### API documentation
+
+The API describes itself. FastAPI derives an OpenAPI 3.1 document from the routes
+and their pydantic models, and serves it three ways while the dev stack is up:
+
+| Endpoint                           | What it is                                    |
+| ---------------------------------- | --------------------------------------------- |
+| http://localhost:8000/docs         | Swagger UI: "Try it out" fires a real request  |
+| http://localhost:8000/redoc        | ReDoc: better for reading the whole surface    |
+| http://localhost:8000/openapi.json | the raw document                               |
+
+All three are **dev-only in practice**: FastAPI mounts them at the root, while the
+prod nginx proxies `/api` alone, so in a deployment they fall through to the SPA.
+Nothing serves the spec in production either (the frontend image contains only the
+built SPA), so `docs/api/openapi.yaml` is a reference read from the repository
+rather than a published url.
+
+Regenerate it whenever you add or change an endpoint, from the repository root with
+the dev stack running:
+
+```bash
+npx @redocly/cli@2 bundle http://localhost:8000/openapi.json -o docs/api/openapi.yaml
+npx @redocly/cli@2 build-docs docs/api/openapi.yaml -o docs/api/openapi.html   # offline reader
+```
+
+The major is pinned because a reformat from a future one would produce a
+4,000-line diff nobody can review. The YAML is committed; the HTML is a ~900 kB
+render of it and is gitignored, so build it when you want to read the reference
+without a server, or hand it to someone without a checkout.
+
+`docs/**` sits in both workflows' `paths-ignore`, so editing the spec runs no CI.
+What keeps it in step is `backend/tests/test_openapi_spec.py`, which parses the
+committed file and compares it to the live schema, and *does* run whenever a route
+changes. If it fails, the spec is behind the code: regenerate and commit it.
+
+The spec is also only as honest as the routes' annotations. A handler annotated
+`-> JSONResponse` or `-> RedirectResponse` tells the generator nothing, so it
+publishes an unconstrained 200 and silently drops the other branches: before they
+were declared, `/health` hid its 503 and both `/auth/oidc/*` endpoints claimed to
+return a JSON body when they answer 302 with a `Location` header. Anything not
+derivable from the return type needs `response_model` and `responses=` spelling it
+out, as those three now do.
 
 ### Continuous integration
 

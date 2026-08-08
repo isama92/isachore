@@ -129,7 +129,15 @@ async def _refuse(
     return response
 
 
-@router.get("/start")
+@router.get(
+    "/start",
+    status_code=status.HTTP_302_FOUND,
+    response_class=RedirectResponse,
+    responses={
+        status.HTTP_302_FOUND: {"description": "Redirect to the provider's authorisation endpoint"},
+        status.HTTP_404_NOT_FOUND: {"description": NO_OIDC_DETAIL},
+    },
+)
 async def start(
     session: SessionDep, redis: RedisDep, request: Request, return_to: str | None = None
 ) -> RedirectResponse:
@@ -246,7 +254,17 @@ async def _find_linked_user(session: SessionDep, identity: OidcIdentity) -> User
     return result.scalar_one_or_none()
 
 
-@router.get("/callback")
+@router.get(
+    "/callback",
+    status_code=status.HTTP_302_FOUND,
+    response_class=RedirectResponse,
+    responses={
+        status.HTTP_302_FOUND: {
+            "description": "Redirect back to the SPA: signed in, or ?sso_error=<code>"
+        },
+        status.HTTP_404_NOT_FOUND: {"description": NO_OIDC_DETAIL},
+    },
+)
 async def callback(
     session: SessionDep,
     redis: RedisDep,
