@@ -114,11 +114,28 @@ def next_assignee(
             # others. Only a tie, though - somebody genuinely behind keeps the chore while
             # they catch up, which is why this is not `random`'s blanket exclusion of
             # `current` above. A plain `min` over the ordered pool is what this used to be,
-            # and it re-picked whoever sorted first, so two people level meant the one who
-            # had just finished kept it (issue #58).
-            ordered = _ordered(pool)
-            fewest = min(counts.get(u.id, 0) for u in ordered)
-            tied = [u for u in ordered if counts.get(u.id, 0) == fewest]
+            # and it re-picked whoever sorted first, so two people level meant the chore
+            # stayed where it was (issue #58).
+            #
+            # **The exclusion anchors on `current` - who is on the hook - and NOT on whoever
+            # was credited with the completion.** The two diverge whenever anybody but the
+            # person up does the chore, which is everyday rather than rare: the credit
+            # defaults to the caller, and Home shows no credit dialog at all to a caller who
+            # is one of the assignees. On a level tally that means the chore can pass to
+            # somebody who has just done it. Kept deliberately, for three reasons: the ask
+            # was to force the *assignment* to move; `alphabetical` steps from `current` and
+            # `random` excludes it, so any other anchor makes this the one strategy whose
+            # rotation reads a different column; and a completion can be credited to somebody
+            # outside the pool (`complete_chore` always lets a caller credit themselves),
+            # where excluding them would silently do nothing. The tally is what carries the
+            # completer's work, so only who is up next is at stake. See CLAUDE.md before
+            # re-opening it.
+            #
+            # `scored` is built once so the counts behind `fewest` are, structurally, the
+            # counts behind `tied` - not two comprehensions that happen to agree.
+            scored = [(u, counts.get(u.id, 0)) for u in _ordered(pool)]
+            fewest = min(count for _, count in scored)
+            tied = [u for u, count in scored if count == fewest]
             return next((u for u in tied if u.id != current.id), tied[0])
         case _:  # pragma: no cover - all non-manual strategies handled above
             return current
