@@ -35,6 +35,91 @@ describe('AppSidebar', () => {
     expect(screen.getByText('ada@example.com')).toBeInTheDocument()
   })
 
+  // The identity block IS the way to Profile; there is no nav item for it any more.
+  function profileLink(): HTMLElement {
+    // By role and accessible name, not by href: the name is what this whole change turns
+    // on, and a querySelector would pass just as happily with the label aria-hidden or
+    // the avatar announcing its initials. A regex because the name is content-derived
+    // ("Ada Lovelace ada@example.com Profile"), so an exact match would miss it.
+    return screen.getByRole('link', { name: /Profile/ })
+  }
+
+  it('makes the user block the link to Profile', () => {
+    renderSidebar({
+      user: makeUser({ first_name: 'Ada', last_name: 'Lovelace', email: 'ada@example.com' }),
+    })
+    const link = profileLink()
+    expect(link).toHaveAttribute('href', '/profile')
+    // Anchored at both ends, because a "contains" assertion would pass with the avatar's
+    // initials leading the name ("AL Ada Lovelace...") - which is exactly what dropping
+    // its aria-hidden does, and what icon mode would then announce as the whole name.
+    // Not an equality check: jsdom runs the two grid spans together ("Lovelaceada@")
+    // where a real browser separates them by display, so the middle is jsdom's, not ours.
+    expect(link).toHaveAccessibleName(/^Ada Lovelace.*Profile$/)
+  })
+
+  it('marks the user block active on the Profile page', () => {
+    renderSidebar({ user: makeUser() }, '/profile')
+    expect(profileLink()).toHaveAttribute('data-active', 'true')
+  })
+
+  it('keeps a name for the Profile link when icon mode hides the text', () => {
+    // Same problem as the brand link above: in icon mode the name and email are
+    // display:none, which takes them out of the accessibility tree too, so without a
+    // label that survives the collapse the link would be an unnamed avatar. The label
+    // therefore sits OUTSIDE the div that collapsing hides.
+    renderSidebar({ user: makeUser() })
+    const label = screen.getByText('Profile')
+    expect(label).toHaveClass('sr-only')
+    expect(profileLink()).toContainElement(label)
+    expect(label.closest('.group-data-\\[collapsible\\=icon\\]\\:hidden')).toBeNull()
+  })
+
+  it('carries the untruncated name and email as hover titles', () => {
+    // Both lines clip to one line each in a 16rem sidebar, so the full values are only
+    // reachable on hover. One title per span, not one on the parent: hovering the clipped
+    // email has to explain the email rather than the name.
+    const long = makeUser({
+      first_name: 'Alexandra',
+      last_name: 'Featherstonehaugh-Smythe',
+      email: 'alexandra.featherstonehaugh@a-rather-long-domain.example.com',
+    })
+    renderSidebar({ user: long })
+    expect(screen.getByText('Alexandra Featherstonehaugh-Smythe')).toHaveAttribute(
+      'title',
+      'Alexandra Featherstonehaugh-Smythe',
+    )
+    expect(screen.getByText(long.email)).toHaveAttribute('title', long.email)
+  })
+
+  it('lets the secondary text follow the row colour on hover and when active', () => {
+    // Asserted as classes rather than as contrast, because jsdom compiles no Tailwind and
+    // computes no cascade - the fallback this project uses when there is no behaviour to
+    // observe. What it guards: the row takes the accent background now that it is a link,
+    // and a pinned text-muted-foreground drops the email to 2.7:1 against it in latte,
+    // permanently so on /profile where the row stays active. Measured, not predicted.
+    renderSidebar({
+      user: makeUser({ first_name: 'Ada', last_name: 'Lovelace', email: 'ada@example.com' }),
+    })
+    for (const cls of [
+      'group-hover/menu-button:text-sidebar-accent-foreground',
+      'group-data-active/menu-button:text-sidebar-accent-foreground',
+    ]) {
+      expect(screen.getByText('ada@example.com')).toHaveClass(cls)
+    }
+  })
+
+  it('drops Profile from the nav while keeping it reachable', () => {
+    // The absence needs the presence beside it, and the presence half is profileLink()'s
+    // own getByRole, which throws if the block stopped linking anywhere. Asserting only
+    // that the nav lacks a Profile item would pass in that case too.
+    renderSidebar({ user: makeUser() })
+    const link = profileLink()
+    expect(link).toHaveAttribute('href', '/profile')
+    expect(navLabels()).not.toContain('Profile')
+    expect(screen.getByRole('navigation', { name: 'Main navigation' })).not.toContainElement(link)
+  })
+
   it('renders the brand mark beside the wordmark', () => {
     const { container } = renderSidebar({ user: makeUser() })
     const brand = screen.getByRole('link', { name: 'isachore' })
@@ -66,7 +151,6 @@ describe('AppSidebar', () => {
       '/chores',
     )
     expect(screen.getByRole('link', { name: 'History' })).toHaveAttribute('href', '/history')
-    expect(screen.getByRole('link', { name: 'Profile' })).toHaveAttribute('href', '/profile')
   })
 
   it('renders the core nav items in order', () => {
@@ -83,7 +167,6 @@ describe('AppSidebar', () => {
       'Tags',
       'Chores Management',
       'Households',
-      'Profile',
     ])
   })
 
@@ -102,13 +185,7 @@ describe('AppSidebar', () => {
     // household they only help in) rather than refusing, so hiding the item would hide the
     // one place they can undo a mis-skip of their own.
     renderSidebar({ user: makeUser(), memberships: membershipsFor('helper', 1) })
-    expect(navLabels()).toEqual([
-      'My Chores',
-      'Unscheduled Chores',
-      'History',
-      'Households',
-      'Profile',
-    ])
+    expect(navLabels()).toEqual(['My Chores', 'Unscheduled Chores', 'History', 'Households'])
   })
 
   it('adds Statistics for a deputy, but not the management pages', () => {
@@ -121,7 +198,6 @@ describe('AppSidebar', () => {
       'History',
       'Statistics',
       'Households',
-      'Profile',
     ])
   })
 
@@ -130,13 +206,7 @@ describe('AppSidebar', () => {
     // become its organiser, and the rest appears. History is in the minimal set because it
     // is unconditional; for them it renders its empty state.
     renderSidebar({ user: makeUser(), memberships: [] })
-    expect(navLabels()).toEqual([
-      'My Chores',
-      'Unscheduled Chores',
-      'History',
-      'Households',
-      'Profile',
-    ])
+    expect(navLabels()).toEqual(['My Chores', 'Unscheduled Chores', 'History', 'Households'])
   })
 
   it('hides Logs from an organiser who owns nothing', () => {
