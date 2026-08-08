@@ -38,9 +38,8 @@ describe('AppSidebar', () => {
   // The identity block IS the way to Profile; there is no nav item for it any more.
   function profileLink(): HTMLElement {
     // By role and accessible name, not by href: the name is what this whole change turns
-    // on, and a querySelector would pass just as happily with the label aria-hidden or
-    // the avatar announcing its initials. A regex because the name is content-derived
-    // ("Ada Lovelace ada@example.com Profile"), so an exact match would miss it.
+    // on, and a querySelector would pass just as happily with the label removed or the
+    // avatar announcing its initials.
     return screen.getByRole('link', { name: /Profile/ })
   }
 
@@ -50,12 +49,12 @@ describe('AppSidebar', () => {
     })
     const link = profileLink()
     expect(link).toHaveAttribute('href', '/profile')
-    // Anchored at both ends, because a "contains" assertion would pass with the avatar's
-    // initials leading the name ("AL Ada Lovelace...") - which is exactly what dropping
-    // its aria-hidden does, and what icon mode would then announce as the whole name.
-    // Not an equality check: jsdom runs the two grid spans together ("Lovelaceada@")
-    // where a real browser separates them by display, so the middle is jsdom's, not ours.
-    expect(link).toHaveAccessibleName(/^Ada Lovelace.*Profile$/)
+    // Exactly this, not merely "contains Profile". Naming the link by its contents instead
+    // would announce the whole email address every time and leave the destination until
+    // last, and would put the avatar's initials in front of it once icon mode hides the
+    // text. Destination first, identity kept, address dropped.
+    expect(link).toHaveAccessibleName('Profile: Ada Lovelace')
+    expect(link).not.toHaveAccessibleName(/ada@example\.com/)
   })
 
   it('marks the user block active on the Profile page', () => {
@@ -65,14 +64,11 @@ describe('AppSidebar', () => {
 
   it('keeps a name for the Profile link when icon mode hides the text', () => {
     // Same problem as the brand link above: in icon mode the name and email are
-    // display:none, which takes them out of the accessibility tree too, so without a
-    // label that survives the collapse the link would be an unnamed avatar. The label
-    // therefore sits OUTSIDE the div that collapsing hides.
-    renderSidebar({ user: makeUser() })
-    const label = screen.getByText('Profile')
-    expect(label).toHaveClass('sr-only')
-    expect(profileLink()).toContainElement(label)
-    expect(label.closest('.group-data-\\[collapsible\\=icon\\]\\:hidden')).toBeNull()
+    // display:none, which takes them out of the accessibility tree too, so a link named
+    // by its contents would collapse into an unnamed avatar. An aria-label does not
+    // depend on anything being rendered, which is what makes it survive.
+    renderSidebar({ user: makeUser({ first_name: 'Ada', last_name: 'Lovelace' }) })
+    expect(profileLink()).toHaveAttribute('aria-label', 'Profile: Ada Lovelace')
   })
 
   it('carries the untruncated name and email as hover titles', () => {

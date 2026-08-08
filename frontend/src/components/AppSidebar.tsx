@@ -123,15 +123,26 @@ export default function AppSidebar() {
             <SidebarMenuButton
               size="lg"
               asChild
-              // Names the person AND the destination: collapsed, the chevron is hidden and
-              // this tooltip is the only thing left saying the avatar goes anywhere.
-              tooltip={`${fullName(user)} · ${t('sidebar.profile')}`}
+              // Same string as the link's name. Collapsed, the chevron is hidden and this
+              // tooltip is the only thing left saying the avatar goes anywhere.
+              tooltip={t('sidebar.profileOf', { name: fullName(user) })}
               isActive={isActive(routes.profile)}
             >
-              <Link to={routes.profile} onClick={closeMobile}>
-                {/* Both halves are decorative: expanded, the name sits right beside them;
-                    collapsed, the sr-only label below is what names the link. Without this
-                    the initials are announced as the link's name, so icon mode read "AA". */}
+              {/* Labelled rather than named by its contents, which would announce the whole
+                  email address on every encounter and leave the destination until last
+                  ("Ada Lovelace ada@example.com Profile"). Destination first, identity kept,
+                  address dropped - it is on the page this links to. The label also survives
+                  icon mode, where the text is display:none and out of the tree entirely,
+                  which is the same reason the brand link above carries one. */}
+              <Link
+                to={routes.profile}
+                onClick={closeMobile}
+                aria-label={t('sidebar.profileOf', { name: fullName(user) })}
+              >
+                {/* aria-label replaces the link's NAME, not its contents, so without this the
+                    initials stay in the accessibility tree for anyone reading through the
+                    link with a virtual cursor. Decorative either way: they render the name
+                    that sits right beside them. */}
                 <Avatar aria-hidden="true">
                   {user.avatar_url && <AvatarImage src={user.avatar_url} alt="" />}
                   <AvatarFallback className="bg-primary/10 font-bold text-primary">
@@ -157,10 +168,6 @@ export default function AppSidebar() {
                     {user.email}
                   </span>
                 </div>
-                {/* Outside the div above, so the link keeps a name once icon mode takes the
-                    text out of the accessibility tree - the same reason the brand link above
-                    carries an aria-label. */}
-                <span className="sr-only">{t('sidebar.profile')}</span>
                 <ChevronRight className="text-muted-foreground group-hover/menu-button:text-sidebar-accent-foreground group-data-active/menu-button:text-sidebar-accent-foreground group-data-[collapsible=icon]:hidden" />
               </Link>
             </SidebarMenuButton>

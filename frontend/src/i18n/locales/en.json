@@ -98,7 +98,7 @@
     "statistics": "Statistics",
     "logs": "Logs",
     "tags": "Tags",
-    "profile": "Profile",
+    "profileOf": "Profile: {{name}}",
     "admin": "Admin",
     "users": "Users",
     "adminHouseholds": "Households",

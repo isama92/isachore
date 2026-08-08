@@ -149,14 +149,35 @@ paths:
       responses:
         '302':
           description: Redirect to the provider's authorisation endpoint
+          headers:
+            Location:
+              description: Where the browser is sent next.
+              schema:
+                type: string
+                format: uri
         '404':
           description: Single sign-on is not configured on this server
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          description: Too many sign-on attempts from this address.
+          headers:
+            Retry-After:
+              description: Seconds until the throttle window clears.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
   /api/v1/auth/oidc/callback:
     get:
       tags:
@@ -192,14 +213,35 @@ paths:
       responses:
         '302':
           description: 'Redirect back to the SPA: signed in, or ?sso_error=<code>'
+          headers:
+            Location:
+              description: Where the browser is sent next.
+              schema:
+                type: string
+                format: uri
         '404':
           description: Single sign-on is not configured on this server
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          description: Too many sign-on attempts from this address.
+          headers:
+            Retry-After:
+              description: Seconds until the throttle window clears.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
   /api/v1/confirm/{token}:
     get:
       tags:
@@ -3054,6 +3096,23 @@ components:
       description: |-
         Where a chore's next occurrence falls relative to today, as the chore's household
         reckons a day.
+    ErrorDetail:
+      properties:
+        detail:
+          type: string
+          title: Detail
+      type: object
+      required:
+        - detail
+      title: ErrorDetail
+      description: |-
+        The body FastAPI sends for a raised `HTTPException`.
+
+        Declared so a refusal can be documented as carrying its explanation rather than as
+        bodyless, which is what a route with only a `description` claims. Every hand-raised
+        HTTPException in this app answers in this shape; only the routes that declare it say
+        so, and wiring that up everywhere is the job of the security-scheme step in README's
+        todo rather than of any single endpoint.
     HTTPValidationError:
       properties:
         detail:

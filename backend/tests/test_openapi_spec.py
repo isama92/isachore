@@ -20,10 +20,11 @@ RELATIVE = Path("docs") / "api" / "openapi.yaml"
 
 
 def _find_spec() -> Path | None:
-    """Walk up looking for the spec, because it sits at a different depth in the two
-    places the suite runs: the dev container mounts it at /app/docs (one level up from
-    tests/), while CI runs on the runner from a full checkout, where docs/ is a sibling
-    of backend/ and so two levels up."""
+    """Walk up looking for the spec, because it sits at a different depth in the two places
+    the suite runs: CI runs on the runner from a full checkout, where docs/ is a sibling of
+    backend/ and so two levels above tests/, while the dev container mounts it at /docs, the
+    filesystem root, deliberately outside the ./backend bind (see compose.yml). Nearest match
+    wins, so a checkout always finds its own copy first."""
     for parent in Path(__file__).resolve().parents:
         if (parent / RELATIVE).exists():
             return parent / RELATIVE

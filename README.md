@@ -881,3 +881,24 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
 ### Todo
 
 - [ ] Live updates when a housemate completes a chore (websocket)
+- [ ] Document authentication in the OpenAPI spec. There is no `securitySchemes` entry
+      and not one of the 72 operations declares a 401 or 403, so a client generated from
+      `docs/api/openapi.yaml` presents every gated route as anonymous. The two halves
+      travel differently: `securitySchemes` and per-operation `security` are derived from
+      a *security* dependency, so those ride on the shared `CurrentUser` / `AdminUser`,
+      but `Depends` has no `responses`, so the refusals (400/403/409/429) need
+      `responses=` on the router or the `include_router` call, or a custom `APIRoute`.
+- [ ] Run something on a spec-only pull request. `docs/**` sits in both workflows'
+      `paths-ignore`, so a PR touching *only* prose and `docs/api/openapi.yaml` runs no
+      checks at all - the one kind of PR that changes the spec is the one kind nothing
+      guards. A hand-edited or stale spec therefore merges green and then fails
+      `test_openapi_spec.py` on the *next* person's PR, blaming them. Either narrow the
+      ignore lists or add a `redocly lint` step.
+- [ ] Regenerate the spec automatically once a PR merges, so it cannot drift while the
+      one command that updates it stays manual (README's API documentation section).
+      Needs care: `publish.yml` builds `:latest` from `main`, so a commit pushed back by
+      an action must not retrigger it.
+- [ ] Serve the rendered API reference somewhere, e.g. `/docs`. FastAPI mounts Swagger
+      and ReDoc at the root while the prod nginx proxies `/api` alone, so both fall
+      through to the SPA in a deployment and the reference is repository-only today.
+      Decide deliberately whether it is public or behind auth.

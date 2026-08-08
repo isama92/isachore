@@ -12,17 +12,29 @@ describe('endpoints', () => {
   })
 
   it('puts every admin-gated group under /api/v1/admin', () => {
-    // A closed-set assertion on the rule itself, not a second guard on today's paths:
-    // those are pinned exactly, both here and by the page tests, whose fetch stubs
-    // carry the full prefix and so stop matching if one slips back. What this adds is
-    // cover for a group that has no page test yet - a new admin surface declared on
-    // the wrong prefix would otherwise reach the API before anything complained.
-    for (const path of [
-      endpoints.adminUsers.root,
-      endpoints.adminSettings.root,
-      endpoints.adminHouseholds.root,
-    ]) {
-      expect(path.startsWith('/api/v1/admin/')).toBe(true)
+    // A biconditional over every group, not a check on today's three: naming and prefix
+    // have to agree in both directions. Filtering to keys starting with "admin" would
+    // only move the blind spot - a group called `operators` or `audit` would be skipped
+    // and the suite would stay green - so an admin-prefixed path under a non-admin key
+    // fails too. Builders as well as plain strings, since a group can move its root and
+    // leave a sub-path behind. The backend states the same rule from the other end, over
+    // its live route table, in tests/test_admin_prefix.py.
+    const paths: [string, string][] = []
+    for (const [key, group] of Object.entries(endpoints)) {
+      if (typeof group !== 'object') continue
+      for (const [name, value] of Object.entries(group as Record<string, unknown>)) {
+        const path = typeof value === 'function' ? (value as (id: string) => string)('x') : value
+        if (typeof path === 'string') paths.push([`${key}.${name}`, path])
+      }
+    }
+    expect(paths.some(([label]) => label.startsWith('admin'))).toBe(true)
+
+    for (const [label, path] of paths) {
+      const named = label.startsWith('admin')
+      const prefixed = path.startsWith('/api/v1/admin/')
+      expect(`${label} named=${named} prefixed=${prefixed}`).toBe(
+        `${label} named=${named} prefixed=${named}`,
+      )
     }
     // Not admin-gated despite its name: it authenticates off the parked admin cookie,
     // and during impersonation the caller's own session is not an admin one.

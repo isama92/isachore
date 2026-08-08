@@ -1,6 +1,7 @@
 from app.schemas.auth import AuthMethodsRead
 from app.schemas.chore import ChoreCreate, ChoreListRead, ChoreRead, ChoreUpdate
 from app.schemas.completion import HistoryEntryRead, HistoryFilterOptions
+from app.schemas.error import ErrorDetail
 from app.schemas.health import HealthRead
 from app.schemas.home import (
     CompleteChoreRequest,
@@ -53,6 +54,7 @@ __all__ = [
     "ConfirmRequest",
     "ConfirmTokenInfo",
     "DueChoreRead",
+    "ErrorDetail",
     "HealthRead",
     "HistoryEntryRead",
     "HistoryFilterOptions",

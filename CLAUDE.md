@@ -1229,6 +1229,25 @@ the negative paths (401/403/400/404/409), not just the happy one.
   outright ("Not implemented. The result of this interaction is unreliable."), so the
   test drives `setTextSelection` through a harness that owns the editor.
 
+- **The sentence saying what a guard covers is the part most likely to be wrong, and nothing
+  executes prose.** Distinct from the rule above, which is about a test that pins too little:
+  this is a test, comment, docstring or README line that pins the right thing and then
+  *claims more than it does*. It costs a reviewer's time every release, and it is the one
+  defect CI cannot catch, because a comment compiles whatever it says. Five instances in the
+  OpenAPI/admin-prefix work alone: a README sentence naming a drift guard that did not exist
+  yet; a test docstring asserting `response_model` validation that a measurement in the same
+  session had already disproved; an `endpoints.ts` comment describing a 2FA reset the UI does
+  not have; a comment claiming several page tests were prefix-blind when their `endsWith`
+  needles carried the full path; and a `responses=` block introduced as "what both endpoints
+  answer with" while omitting the 429 both reach *before* the 404 it did document.
+
+  So when you write down what something guards, mutate it and read the sentence again against
+  what actually failed. Three habits that catch most of it: name the mechanism rather than
+  the intent ("the `endsWith` needles carry the full prefix", not "the page tests catch it");
+  say what is *not* covered in the same breath, since a set claimed complete is the shape
+  that rots; and prefer a claim that a later reader can check in one grep over one that needs
+  the whole call graph.
+
 - **When the decision is NOT to do something, the mutation is an addition, and the rule above
   does not apply.** That rule is written entirely in terms of deleting a guard, so it silently
   covers nothing when the protected behaviour is an omission: no automatic household
@@ -1511,10 +1530,14 @@ the negative paths (401/403/400/404/409), not just the happy one.
   workflows' `paths-ignore`, so editing it runs nothing; `tests/test_openapi_spec.py`
   is the guard, comparing the committed file to `app.openapi()` on every backend
   change. It reaches outside `backend/`, which the dev container cannot normally see,
-  hence the read-only `./docs:/app/docs:ro` mount on the backend service in
-  `compose.yml` - a container predating that mount fails the test with a message
-  saying so. `pyyaml` is a declared dev dependency for it rather than borrowed from
-  `uvicorn[standard]`, where it merely happens to be today.
+  hence the read-only `./docs:/docs:ro` mount on the backend service in `compose.yml` -
+  a container predating that mount fails the test with a message saying so. **At `/docs`,
+  never `/app/docs`**: nested inside the `./backend:/app` bind, Docker has to materialise
+  the mountpoint, which leaves an untracked root-owned `backend/docs/` in the source tree,
+  and deleting that empty directory silently breaks the mount in the running container.
+  `_find_spec` walks parents to `/`, so the depth does not matter to the test. `pyyaml` is
+  a declared dev dependency for it rather than borrowed from `uvicorn[standard]`, where it
+  merely happens to be today.
 - Alembic files generated inside the container are root-owned on the host:
   `docker compose exec backend chown -R $(id -u):$(id -g) alembic/versions`.
 - Smoke-testing prod compose no longer builds anything: the mode files pull

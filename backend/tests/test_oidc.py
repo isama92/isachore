@@ -2110,7 +2110,25 @@ def test_both_endpoints_document_the_redirect_they_answer_with() -> None:
         succeeds_with = {code for code in responses if code < "400"}
         assert succeeds_with == {"302"}, f"{path} documents {sorted(succeeds_with)}"
         assert responses["302"].get("content") is None, f"{path} gives its redirect a body"
-        assert "404" in responses, f"{path} hides the unconfigured refusal"
+        # Where it goes, not only that it goes. Asserting the absent body while leaving the
+        # header unasserted made adding a body fail and omitting the destination pass
+        # forever, which left a client able to tell it had been redirected and unable to
+        # follow. Two clauses of one condition; both need pinning.
+        location = responses["302"].get("headers", {}).get("Location", {})
+        assert location.get("schema", {}).get("type") == "string", f"{path} hides Location"
+        # The 404 really does carry `{"detail": ...}`, and it is the only text saying why
+        # sign-in failed. Declaring it bodyless would be this pass's own defect, reintroduced.
+        # Every refusal, not only the one this pass first noticed. The 429 is reached
+        # BEFORE the 404, since both handlers take their rate limit before testing
+        # `oidc_configured()`, so documenting the 404 alone describes the rarer answer.
+        for code in ("404", "429"):
+            assert code in responses, f"{path} hides its {code}"
+            body = responses[code].get("content", {}).get("application/json", {})
+            assert body.get("schema", {}).get("$ref", "").endswith("/ErrorDetail"), (
+                f"{path} documents its {code} as bodyless"
+            )
+        retry = responses["429"].get("headers", {}).get("Retry-After", {})
+        assert retry.get("schema", {}).get("type") == "integer", f"{path} hides Retry-After"
         # The descriptions too, not just the codes: `status_code` alone already publishes
         # a 302, so without this the hand-written entries could be deleted and the only
         # loss would be the prose - including the one line recording that the callback
