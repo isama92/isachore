@@ -4,7 +4,6 @@ import {
   CalendarOff,
   ChartColumn,
   ChevronRight,
-  CircleUser,
   ClipboardList,
   History,
   Home,
@@ -80,7 +79,6 @@ export default function AppSidebar() {
     { to: routes.tags.list, icon: TagIcon, label: t('sidebar.tags'), show: canManage },
     { to: routes.chores.list, icon: ClipboardList, label: t('sidebar.chores'), show: canManage },
     { to: routes.households.list, icon: House, label: t('sidebar.households') },
-    { to: routes.profile, icon: CircleUser, label: t('sidebar.profile') },
   ].filter((item) => item.show !== false)
 
   // Admin section: a foldable parent (links nowhere) with one sub-item per
@@ -114,30 +112,64 @@ export default function AppSidebar() {
             isachore
           </span>
         </Link>
+        {/* The way in to Profile, which has no nav item of its own. It has to be the whole
+            block rather than a button beside the name, because in icon mode the primitive
+            hides a SidebarMenuAction along with the text, and Profile would become
+            unreachable while the sidebar is collapsed. The chevron is the resting
+            affordance, since hover styling says nothing on a touch screen; it does not
+            rotate, unlike the Admin item's, which is the same glyph meaning "expand". */}
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
               size="lg"
               asChild
-              tooltip={fullName(user)}
-              className="cursor-default hover:bg-transparent active:bg-transparent"
+              // Same string as the link's name. Collapsed, the chevron is hidden and this
+              // tooltip is the only thing left saying the avatar goes anywhere.
+              tooltip={t('sidebar.profileOf', { name: fullName(user) })}
+              isActive={isActive(routes.profile)}
             >
-              <div>
-                <Avatar>
-                  {user.avatar_url && <AvatarImage src={user.avatar_url} alt={fullName(user)} />}
+              {/* Labelled rather than named by its contents, which would announce the whole
+                  email address on every encounter and leave the destination until last
+                  ("Ada Lovelace ada@example.com Profile"). Destination first, identity kept,
+                  address dropped - it is on the page this links to. The label also survives
+                  icon mode, where the text is display:none and out of the tree entirely,
+                  which is the same reason the brand link above carries one. */}
+              <Link
+                to={routes.profile}
+                onClick={closeMobile}
+                aria-label={t('sidebar.profileOf', { name: fullName(user) })}
+              >
+                {/* aria-label replaces the link's NAME, not its contents, so without this the
+                    initials stay in the accessibility tree for anyone reading through the
+                    link with a virtual cursor. Decorative either way: they render the name
+                    that sits right beside them. */}
+                <Avatar aria-hidden="true">
+                  {user.avatar_url && <AvatarImage src={user.avatar_url} alt="" />}
                   <AvatarFallback className="bg-primary/10 font-bold text-primary">
                     {initials(user)}
                   </AvatarFallback>
                 </Avatar>
-                <div className="grid flex-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
-                  <span className="truncate text-sm font-bold text-sidebar-foreground">
+                {/* Sibling spans, each truncating and carrying its own title, so hovering the
+                    clipped email explains the email rather than the name. The email tracks
+                    the button's hover/active colour: the row takes the accent background now
+                    that it is a link, and a pinned muted foreground measures 2.7:1 against
+                    it - permanently so on /profile, where the row stays active. */}
+                <div className="grid min-w-0 flex-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
+                  <span
+                    className="truncate text-sm font-bold text-sidebar-foreground"
+                    title={fullName(user)}
+                  >
                     {fullName(user)}
                   </span>
-                  <span className="truncate text-xs font-medium text-muted-foreground">
+                  <span
+                    className="truncate text-xs font-medium text-muted-foreground group-hover/menu-button:text-sidebar-accent-foreground group-data-active/menu-button:text-sidebar-accent-foreground"
+                    title={user.email}
+                  >
                     {user.email}
                   </span>
                 </div>
-              </div>
+                <ChevronRight className="text-muted-foreground group-hover/menu-button:text-sidebar-accent-foreground group-data-active/menu-button:text-sidebar-accent-foreground group-data-[collapsible=icon]:hidden" />
+              </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

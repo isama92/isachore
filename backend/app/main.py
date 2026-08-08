@@ -56,7 +56,7 @@ app.include_router(api_router, prefix="/api/v1")
 # StaticFiles serves no directory listing, and the name is only ever returned by
 # UserRead.avatar_url, which every route exposing it puts behind auth. So the holders
 # are the user themselves (profile, auth, two-factor and the signup confirmation) and
-# site admins (the users router), both of whom see the picture in the UI regardless.
+# site admins (the admin users router), both of whom see the picture in the UI regardless.
 # Household peers do NOT hold one: ChoreRead used to embed its assignees as full
 # UserReads, which made it the only route handing a UserRead to a household peer, and
 # it now uses HouseholdMemberRead (id and names, no avatar) - so keep any new payload

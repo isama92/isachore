@@ -30,7 +30,7 @@ PASSWORD = "password12345"
 
 
 def _reset(user_id: int) -> str:
-    return f"/api/v1/users/{user_id}/reset-2fa"
+    return f"/api/v1/admin/users/{user_id}/reset-2fa"
 
 
 async def _enroll(session: AsyncSession, user: User, *, recovery: tuple[str, ...] = ()) -> str:

@@ -34,3 +34,11 @@ backend/storage/*
 # prod compose runtime data (TLS certs, postgres data). Unanchored so it also
 # covers docker/volumes/, which is where a mode file run from docker/ puts them.
 volumes/
+
+# rendered API reference. openapi.yaml IS committed (it is the published contract);
+# this is a ~900 kB single-file render of it that anyone can rebuild in one command.
+docs/api/openapi.html
+
+# browser-session artefacts (page snapshots, console logs) written by the
+# Playwright MCP server during by-hand UI checks
+.playwright-mcp/

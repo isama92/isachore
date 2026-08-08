@@ -98,7 +98,7 @@
     "statistics": "Statistiche",
     "logs": "Registro attività",
     "tags": "Etichette",
-    "profile": "Profilo",
+    "profileOf": "Profilo: {{name}}",
     "admin": "Admin",
     "users": "Utenti",
     "adminHouseholds": "Nuclei domestici",

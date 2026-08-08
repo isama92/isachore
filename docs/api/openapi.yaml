@@ -1,0 +1,4622 @@
+openapi: 3.1.0
+info:
+  title: isachore API
+  version: 0.1.0
+paths:
+  /api/v1/health:
+    get:
+      tags:
+        - health
+      summary: Health
+      operationId: health_api_v1_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthRead'
+        '503':
+          description: The database is unreachable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthRead'
+  /api/v1/auth/login:
+    post:
+      tags:
+        - auth
+      summary: Login
+      operationId: login_api_v1_auth_login_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/auth/verify-2fa:
+    post:
+      tags:
+        - auth
+      summary: Verify Two Factor
+      description: |-
+        Second step of a two-step login: verify the TOTP (or recovery) code
+        against the challenge parked by /login, then mint the real session.
+      operationId: verify_two_factor_api_v1_auth_verify_2fa_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TwoFactorVerifyRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/auth/logout:
+    post:
+      tags:
+        - auth
+      summary: Logout
+      operationId: logout_api_v1_auth_logout_post
+      responses:
+        '204':
+          description: Successful Response
+  /api/v1/auth/methods:
+    get:
+      tags:
+        - auth
+      summary: Auth Methods
+      description: |-
+        Which ways in the login page should offer. Public: the page that asks has nobody
+        signed in yet, by definition.
+
+        `password_enabled` reads the same condition as the 403 in `login` above, so the two
+        cannot disagree - the form is never hidden while the endpoint works, nor offered
+        while it refuses.
+      operationId: auth_methods_api_v1_auth_methods_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthMethodsRead'
+  /api/v1/auth/me:
+    get:
+      tags:
+        - auth
+      summary: Me
+      operationId: me_api_v1_auth_me_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeRead'
+  /api/v1/auth/stop-impersonating:
+    post:
+      tags:
+        - auth
+      summary: Stop Impersonating
+      operationId: stop_impersonating_api_v1_auth_stop_impersonating_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserRead'
+  /api/v1/auth/oidc/start:
+    get:
+      tags:
+        - auth
+      summary: Start
+      description: 'Begin a sign-on: park the flow''s secrets and send the browser to the provider.'
+      operationId: start_api_v1_auth_oidc_start_get
+      parameters:
+        - name: return_to
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+            title: Return To
+      responses:
+        '302':
+          description: Redirect to the provider's authorisation endpoint
+          headers:
+            Location:
+              description: Where the browser is sent next.
+              schema:
+                type: string
+                format: uri
+        '404':
+          description: Single sign-on is not configured on this server
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          description: Too many sign-on attempts from this address.
+          headers:
+            Retry-After:
+              description: Seconds until the throttle window clears.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+  /api/v1/auth/oidc/callback:
+    get:
+      tags:
+        - auth
+      summary: Callback
+      description: 'Finish a sign-on: verify what the provider said, then decide who that is here.'
+      operationId: callback_api_v1_auth_oidc_callback_get
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+            title: Code
+        - name: state
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+            title: State
+        - name: error
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+            title: Error
+      responses:
+        '302':
+          description: 'Redirect back to the SPA: signed in, or ?sso_error=<code>'
+          headers:
+            Location:
+              description: Where the browser is sent next.
+              schema:
+                type: string
+                format: uri
+        '404':
+          description: Single sign-on is not configured on this server
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          description: Too many sign-on attempts from this address.
+          headers:
+            Retry-After:
+              description: Seconds until the throttle window clears.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+  /api/v1/confirm/{token}:
+    get:
+      tags:
+        - confirm
+      summary: Confirmation Info
+      description: |-
+        Validate a confirmation link so the set-password page can greet the user
+        (or show an invalid/expired state) before they submit.
+      operationId: confirmation_info_api_v1_confirm__token__get
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Token
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfirmTokenInfo'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+        - confirm
+      summary: Confirm Account
+      description: |-
+        Set the user's password from the confirmation link, activate the account,
+        consume the token, and log the user straight in.
+      operationId: confirm_account_api_v1_confirm__token__post
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/profile:
+    patch:
+      tags:
+        - profile
+      summary: Update Profile
+      description: |-
+        Update the current user's own name, appearance (theme/accent), language
+        and/or password. Self-service edits reuse the user_updated audit action
+        (actor == target); if an admin is doing this while impersonating,
+        impersonator_id keeps the trail back to them.
+      operationId: update_profile_api_v1_profile_patch
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileUpdate'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/profile/avatar:
+    put:
+      tags:
+        - profile
+      summary: Upload Avatar
+      description: |-
+        Replace the current user's avatar. The file is decoded, validated and
+        re-encoded before it touches disk (see app.core.avatars).
+      operationId: upload_avatar_api_v1_profile_avatar_put
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_upload_avatar_api_v1_profile_avatar_put'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+        - profile
+      summary: Remove Avatar
+      description: Remove the current user's avatar (falls back to initials). Idempotent.
+      operationId: remove_avatar_api_v1_profile_avatar_delete
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserRead'
+  /api/v1/profile/2fa/setup:
+    post:
+      tags:
+        - two-factor
+      summary: Setup Two Factor
+      description: |-
+        Begin enrolment: generate a fresh secret (stored encrypted but not yet
+        active) and return the QR / manual key. Confirm with a code to activate.
+      operationId: setup_two_factor_api_v1_profile_2fa_setup_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TwoFactorSetupRead'
+  /api/v1/profile/2fa/confirm:
+    post:
+      tags:
+        - two-factor
+      summary: Confirm Two Factor
+      description: |-
+        Finish enrolment: verify a code from the just-scanned authenticator, then
+        activate 2FA and hand back the one-time recovery codes.
+      operationId: confirm_two_factor_api_v1_profile_2fa_confirm_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TwoFactorConfirmRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecoveryCodesRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/profile/2fa/recovery-codes:
+    post:
+      tags:
+        - two-factor
+      summary: Regenerate Recovery Codes
+      description: |-
+        Replace the recovery codes with a fresh set (invalidating the old ones).
+        Requires a valid current code to prove possession of the second factor.
+      operationId: regenerate_recovery_codes_api_v1_profile_2fa_recovery_codes_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TwoFactorDisableRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecoveryCodesRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/profile/2fa/disable:
+    post:
+      tags:
+        - two-factor
+      summary: Disable Two Factor
+      description: |-
+        Turn 2FA off. Requires a valid TOTP or recovery code (not the password),
+        so only someone holding the second factor can remove it.
+      operationId: disable_two_factor_api_v1_profile_2fa_disable_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TwoFactorDisableRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/home:
+    get:
+      tags:
+        - home
+      summary: Get Home
+      description: |-
+        The due view: scheduled chores that are overdue, due today, or upcoming (no cut-off,
+        so a chore due weeks out still shows), plus today's completion progress,
+        across the user's active households. Unscheduled chores are not due dated and so
+        never appear here; `api/v1/unscheduled.py` lists those.
+
+        Filters (both optional): `household_id` narrows to one of the user's
+        households; `assignee_id` (repeatable) keeps chores assigned to any of those
+        members PLUS unassigned/shared chores (which belong to everyone). With no
+        `assignee_id` the whole household is shown. The frontend seeds `assignee_id`
+        with the current user, so the default view is "your chores + shared", and
+        adding or clearing members widens it. Progress is computed over the same
+        filtered scope. A household or member id the user can't see just yields an
+        empty scope, like the chores list.
+      operationId: get_home_api_v1_home_get
+      parameters:
+        - name: household_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: integer
+                minimum: 1
+              - type: 'null'
+            title: Household Id
+        - name: assignee_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: array
+                items:
+                  type: integer
+              - type: 'null'
+            title: Assignee Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HomeRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/unscheduled:
+    get:
+      tags:
+        - unscheduled
+      summary: Get Unscheduled
+      description: |-
+        The unscheduled view: chores with no schedule, which you do whenever you feel like
+        it, across the user's active households. They have no due date and are never overdue,
+        so there is no progress and no ordering by urgency: the list is alphabetical, and each
+        row reports how long since it was last done.
+
+        Unlike the due view every chore here stays listed forever, because completing an
+        unscheduled chore reopens it at once (see `core.chores.next_occurrence_after`). Filters
+        match the due view: `household_id` narrows to one household, `assignee_id` (repeatable)
+        keeps those members' chores plus unassigned/shared ones. Unpaginated, like the due view.
+      operationId: get_unscheduled_api_v1_unscheduled_get
+      parameters:
+        - name: household_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: integer
+                minimum: 1
+              - type: 'null'
+            title: Household Id
+        - name: assignee_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: array
+                items:
+                  type: integer
+              - type: 'null'
+            title: Assignee Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnscheduledRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/households:
+    get:
+      tags:
+        - households
+      summary: List Households
+      operationId: list_households_api_v1_households_get
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+            title: Page
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+            minimum: 1
+            default: 20
+            title: Page Size
+        - name: sort_by
+          in: query
+          required: false
+          schema:
+            enum:
+              - id
+              - name
+              - created_at
+            type: string
+            default: created_at
+            title: Sort By
+        - name: sort_dir
+          in: query
+          required: false
+          schema:
+            enum:
+              - asc
+              - desc
+            type: string
+            default: desc
+            title: Sort Dir
+        - name: name
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+                maxLength: 255
+              - type: 'null'
+            title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Page_HouseholdListRead_'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+        - households
+      summary: Create Household
+      operationId: create_household_api_v1_households_post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HouseholdCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdListRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/households/{household_id}:
+    get:
+      tags:
+        - households
+      summary: Get Household
+      operationId: get_household_api_v1_households__household_id__get
+      parameters:
+        - name: household_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Household Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdListRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+        - households
+      summary: Update Household
+      operationId: update_household_api_v1_households__household_id__patch
+      parameters:
+        - name: household_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Household Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HouseholdUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdListRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+        - households
+      summary: Delete Household
+      operationId: delete_household_api_v1_households__household_id__delete
+      parameters:
+        - name: household_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Household Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/households/{household_id}/members:
+    get:
+      tags:
+        - households
+      summary: List Household Members
+      operationId: list_household_members_api_v1_households__household_id__members_get
+      parameters:
+        - name: household_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Household Id
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+            title: Page
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+            minimum: 1
+            default: 20
+            title: Page Size
+        - name: sort_by
+          in: query
+          required: false
+          schema:
+            enum:
+              - id
+              - name
+            type: string
+            default: name
+            title: Sort By
+        - name: sort_dir
+          in: query
+          required: false
+          schema:
+            enum:
+              - asc
+              - desc
+            type: string
+            default: asc
+            title: Sort Dir
+        - name: name
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+                maxLength: 255
+              - type: 'null'
+            title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Page_HouseholdMemberRoleRead_'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/households/{household_id}/members/{user_id}:
+    patch:
+      tags:
+        - households
+      summary: Update Household Member
+      description: |-
+        Set one member's role. The owner may set any of the three; an organiser may only move
+        people between deputy and helper.
+
+        That asymmetry is the point: an organiser can share the day-to-day load without being able
+        to grow the set of people who could demote them. So they may not hand out `organiser`, may
+        not touch a row that already holds it, and therefore may not demote themselves either -
+        that last one falls out of the same rule rather than needing its own check.
+
+        The checks are ordered deliberately. The owner's row is refused with a 409 **before** any
+        caller-specific rule, because "the owner is always an organiser" is a property of the
+        target: everyone gets the same actionable answer (transfer ownership, which promotes the
+        new owner) instead of an organiser getting a 403 about a rule that is not the real reason.
+      operationId: update_household_member_api_v1_households__household_id__members__user_id__patch
+      parameters:
+        - name: household_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Household Id
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: User Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HouseholdMemberUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdMemberRoleRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+        - households
+      summary: Remove Household Member
+      operationId: remove_household_member_api_v1_households__household_id__members__user_id__delete
+      parameters:
+        - name: household_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Household Id
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: User Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/households/{household_id}/leave:
+    post:
+      tags:
+        - households
+      summary: Leave Household
+      operationId: leave_household_api_v1_households__household_id__leave_post
+      parameters:
+        - name: household_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Household Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/households/{household_id}/invitations:
+    post:
+      tags:
+        - households
+      summary: Create Invitation
+      operationId: create_invitation_api_v1_households__household_id__invitations_post
+      parameters:
+        - name: household_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Household Id
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdInvitationRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+        - households
+      summary: List Invitations
+      operationId: list_invitations_api_v1_households__household_id__invitations_get
+      parameters:
+        - name: household_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Household Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HouseholdInvitationRead'
+                title: Response List Invitations Api V1 Households  Household Id  Invitations Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/households/{household_id}/invitations/{invitation_id}/revoke:
+    post:
+      tags:
+        - households
+      summary: Revoke Invitation
+      operationId: revoke_invitation_api_v1_households__household_id__invitations__invitation_id__revoke_post
+      parameters:
+        - name: household_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Household Id
+        - name: invitation_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Invitation Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdInvitationRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/households/{household_id}/invitations/{invitation_id}:
+    delete:
+      tags:
+        - households
+      summary: Delete Invitation
+      operationId: delete_invitation_api_v1_households__household_id__invitations__invitation_id__delete
+      parameters:
+        - name: household_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Household Id
+        - name: invitation_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Invitation Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/invitations/{token}:
+    get:
+      tags:
+        - invitations
+      summary: Invitation Info
+      description: 'Public: what the accept page shows before the recipient joins.'
+      operationId: invitation_info_api_v1_invitations__token__get
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Token
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdInvitationInfo'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/invitations/{token}/accept:
+    post:
+      tags:
+        - invitations
+      summary: Accept Invitation
+      description: The logged-in recipient joins the household; the invite is single-use.
+      operationId: accept_invitation_api_v1_invitations__token__accept_post
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Token
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tags:
+    get:
+      tags:
+        - tags
+      summary: List Tags
+      operationId: list_tags_api_v1_tags_get
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+            title: Page
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+            minimum: 1
+            default: 20
+            title: Page Size
+        - name: sort_by
+          in: query
+          required: false
+          schema:
+            enum:
+              - id
+              - name
+              - created_at
+            type: string
+            default: name
+            title: Sort By
+        - name: sort_dir
+          in: query
+          required: false
+          schema:
+            enum:
+              - asc
+              - desc
+            type: string
+            default: asc
+            title: Sort Dir
+        - name: household_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: integer
+                minimum: 1
+              - type: 'null'
+            title: Household Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Page_TagRead_'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+        - tags
+      summary: Create Tag
+      operationId: create_tag_api_v1_tags_post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TagCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TagRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tags/{tag_id}:
+    get:
+      tags:
+        - tags
+      summary: Get Tag
+      operationId: get_tag_api_v1_tags__tag_id__get
+      parameters:
+        - name: tag_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Tag Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TagRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+        - tags
+      summary: Update Tag
+      operationId: update_tag_api_v1_tags__tag_id__patch
+      parameters:
+        - name: tag_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Tag Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TagUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TagRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+        - tags
+      summary: Delete Tag
+      operationId: delete_tag_api_v1_tags__tag_id__delete
+      parameters:
+        - name: tag_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Tag Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/chores:
+    post:
+      tags:
+        - chores
+      summary: Create Chore
+      operationId: create_chore_api_v1_chores_post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChoreCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChoreRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+        - chores
+      summary: List Chores
+      operationId: list_chores_api_v1_chores_get
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+            title: Page
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+            minimum: 1
+            default: 20
+            title: Page Size
+        - name: sort_by
+          in: query
+          required: false
+          schema:
+            enum:
+              - id
+              - title
+              - start_date
+              - created_at
+              - household
+            type: string
+            default: start_date
+            title: Sort By
+        - name: sort_dir
+          in: query
+          required: false
+          schema:
+            enum:
+              - asc
+              - desc
+            type: string
+            default: asc
+            title: Sort Dir
+        - name: household_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: integer
+                minimum: 1
+              - type: 'null'
+            title: Household Id
+        - name: title
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+                maxLength: 255
+              - type: 'null'
+            title: Title
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Page_ChoreListRead_'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/chores/{chore_id}:
+    get:
+      tags:
+        - chores
+      summary: Get Chore
+      operationId: get_chore_api_v1_chores__chore_id__get
+      parameters:
+        - name: chore_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Chore Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChoreRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+        - chores
+      summary: Update Chore
+      operationId: update_chore_api_v1_chores__chore_id__patch
+      parameters:
+        - name: chore_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Chore Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChoreUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChoreRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+        - chores
+      summary: Delete Chore
+      operationId: delete_chore_api_v1_chores__chore_id__delete
+      parameters:
+        - name: chore_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Chore Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/chores/{chore_id}/complete:
+    post:
+      tags:
+        - chores
+      summary: Complete Chore
+      description: |-
+        Mark a chore's current occurrence done. Any member of the chore's household
+        may complete it. Flips the open occurrence to `done` (the history row) and materialises
+        the next open occurrence - one interval on for a recurring chore, at the completion
+        moment for an unscheduled one, reassigned to the next person when the turn ends (see
+        _successor_assignee). Every chore therefore stays completable, over and over.
+
+        By default the completion is credited to the caller. An optional
+        `completed_by_user_id` credits it to another member so the History shows it under
+        their name (used by the Home due view's credit dialog), but only if that member is
+        one of the chore's assignees; the assignee pool is never modified.
+      operationId: complete_chore_api_v1_chores__chore_id__complete_post
+      parameters:
+        - name: chore_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Chore Id
+      requestBody:
+        content:
+          application/json:
+            schema:
+              anyOf:
+                - $ref: '#/components/schemas/CompleteChoreRequest'
+                - type: 'null'
+              title: Payload
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompletionRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/chores/{chore_id}/skip:
+    post:
+      tags:
+        - chores
+      summary: Skip Chore
+      description: |-
+        Skip a chore's current occurrence: close it and move the chore on to its next slot
+        without recording any work. Ungated like completing, since every role that can complete a
+        chore can decide not to do one.
+
+        Two things it deliberately is not. It takes no `completed_by_user_id`, because there is no
+        credit to hand out - a skip is always recorded against whoever pressed the button. And it
+        refuses an unscheduled chore (400): those are never due, so there is no deadline to move
+        past and nothing to skip. That refusal is also what keeps "every skipped row belongs to a
+        scheduled chore" true at the data layer rather than only in the UI, which is what lets the
+        punctuality breakdown in stats.py host a skipped slice alongside its three due-date ones.
+
+        Deliberately UNBOUNDED, as a recorded decision rather than an oversight: nothing checks
+        that the occurrence is actually due, so a chore can be skipped repeatedly and pushed
+        arbitrarily far forward, and skipping somebody else's chore moves their deadline with no
+        notification. That is exactly the latitude completing already has (nothing stops you
+        completing a chore weeks early either), every skip leaves a history row naming who did it,
+        and Home only ever surfaces overdue/today/soon, so a pushed-out chore simply leaves the
+        view. Bounding it would need a notion of "too early" that the completion path does not
+        have; if that is ever wanted, both paths should get it together.
+      operationId: skip_chore_api_v1_chores__chore_id__skip_post
+      parameters:
+        - name: chore_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Chore Id
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompletionRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/completions/filters:
+    get:
+      tags:
+        - completions
+      summary: Completion Filters
+      description: |-
+        The option lists for the History filters: the households the user belongs
+        to, and the distinct active members across them (candidate completers).
+
+        Deliberately NOT narrowed by role, unlike the history list right below it. This
+        endpoint also feeds the filter bars on Home and Unscheduled (see
+        `frontend/src/components/chores/useFilterOptions.ts`), which every role uses, so
+        restricting it to deputies would empty the household and member pickers there. Note
+        that makes it a superset of what History can show a helper (their own closures only),
+        which is why History hides its filter bar entirely rather than narrowing this. It
+        exposes household names and member names, both of which every member already sees on
+        Home.
+      operationId: completion_filters_api_v1_completions_filters_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryFilterOptions'
+  /api/v1/completions:
+    get:
+      tags:
+        - completions
+      summary: List Completions
+      description: |-
+        Chore history across every active household the caller belongs to, narrowed per
+        household by their role: where they are at least a deputy they see everybody's closures,
+        where they are only a helper they see their own and nothing else. Reads the `done`
+        occurrences of the merged occurrences table, which is both real completions and skips:
+        each entry carries `skipped` so the list can tell them apart, and `outcome` narrows to
+        one kind. Optional user_id / household_id narrow the list too; a household they do not
+        belong to, or a stranger's id in a household they are only a helper in, yields an empty
+        page rather than a 403, since the list spans every household at once. History of
+        soft-deleted chores is kept (the title is snapshotted for exactly this and the chore row
+        still resolves the join).
+      operationId: list_completions_api_v1_completions_get
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+            title: Page
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+            minimum: 1
+            default: 20
+            title: Page Size
+        - name: sort_by
+          in: query
+          required: false
+          schema:
+            enum:
+              - created_at
+              - title
+            type: string
+            default: created_at
+            title: Sort By
+        - name: sort_dir
+          in: query
+          required: false
+          schema:
+            enum:
+              - asc
+              - desc
+            type: string
+            default: desc
+            title: Sort Dir
+        - name: user_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: integer
+                minimum: 1
+              - type: 'null'
+            title: User Id
+        - name: household_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: integer
+                minimum: 1
+              - type: 'null'
+            title: Household Id
+        - name: outcome
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - enum:
+                  - completed
+                  - skipped
+                type: string
+              - type: 'null'
+            title: Outcome
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Page_HistoryEntryRead_'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/completions/{completion_id}:
+    delete:
+      tags:
+        - completions
+      summary: Undo Completion
+      description: |-
+        Undo a closure, completion or skip alike (identified by its done-occurrence id).
+        Either the user it is recorded against (completed_by) or an organiser of that household
+        may undo it. Both halves matter: the occurrence stores no separate record of who
+        submitted it, so somebody who completes a chore on another member's behalf cannot undo
+        it themselves, and before the organiser half existed a helper's closure could be undone
+        by nobody at all.
+        Undoing the chore's latest closure (the most recently *closed* one, see below)
+        reopens that occurrence (deleting the successor open occurrence first) so the chore is
+        available again with its original assignee; undoing an older one just removes that
+        history row. A skip counts as a closure for "latest" here, because it really did close
+        its slot and its successor really is the open row. Note that reopening rolls a rotating
+        chore's turn back, so an organiser undoing a housemate's closure can move work between
+        people - deliberately, since fixing a mis-skip is the point.
+      operationId: undo_completion_api_v1_completions__completion_id__delete
+      parameters:
+        - name: completion_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Completion Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/stats:
+    get:
+      tags:
+        - stats
+      summary: Get Stats
+      description: |-
+        Aggregated completion and overdue statistics across the active households where the
+        caller is at least a deputy (so housemates' work is included), for the Statistics page.
+
+        `range` (7d/30d/90d) windows the completion-based metrics; the overdue snapshot
+        (`status_breakdown`, `currently_overdue`, `active_chores`) is always live. Optional
+        `household_id` narrows to one household; `user_id` narrows completions to that
+        person's credited completions and the live snapshot to occurrences currently on
+        their plate. A household/person the user can't see just yields empty scope, and so does a
+        household they are only a helper in - a helper is not shown other people's numbers, and
+        the page spans every household at once, so narrowing the scope is what enforces that
+        rather than a 403.
+
+        Unscheduled chores have no deadline, so they are counted where the question is "how much
+        got done, and by whom" (`completed_in_range`, `completions_over_time`, `per_person`) and
+        excluded where the answer needs a due date (`currently_overdue`, `status_breakdown`,
+        `active_chores`, `punctuality`, `on_time_rate`). One consequence to keep in mind:
+        `punctuality` therefore does not sum to `completed_in_range`.
+
+        Skipped occurrences are closures that produced no work, so every "work done" metric here
+        excludes them and they are reported alongside instead: `skipped_in_range`, a per-bucket
+        `skipped` on `completions_over_time`, and a fourth `punctuality` bucket. Two notes on that
+        last one. It is the one place the two exclusions meet, and it is not a special case: skips
+        are counted inside the same `repeats != manual` branch as the three due-date buckets, so
+        the four together are exactly the scheduled occurrences that closed in the range. And
+        `on_time_rate` deliberately does NOT count skips in its denominator, staying "of the work
+        that was done, how much was punctual" - so the four buckets do not add up to that rate's
+        base either.
+
+        `most_skipped` is the one skip figure here that answers *which* chore rather than how
+        many, so it is also the one that drops soft-deleted chores: it is a shortlist to act on,
+        and a deleted chore cannot be. Their skips do still count in `skipped_in_range`, so the
+        ranking deliberately does not sum to that KPI.
+      operationId: get_stats_api_v1_stats_get
+      parameters:
+        - name: range
+          in: query
+          required: false
+          schema:
+            enum:
+              - 7d
+              - 30d
+              - 90d
+            type: string
+            default: 30d
+            title: Range
+        - name: household_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: integer
+                minimum: 1
+              - type: 'null'
+            title: Household Id
+        - name: user_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: integer
+                minimum: 1
+              - type: 'null'
+            title: User Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatsRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/logs:
+    get:
+      tags:
+        - logs
+      summary: List Log Entries
+      description: |-
+        The activity log of every active household the caller OWNS, newest first.
+
+        Ownership rather than a role: an organiser manages the chores, and this is the record of
+        that management, so it answers to whoever the household belongs to. A non-owner - organiser
+        included - gets an empty page rather than a 403, because the list spans several households
+        at once and narrowing is what that surface does. Same for `household_id` naming a household
+        they do not own, and `user_id` narrows by the *actor*.
+      operationId: list_log_entries_api_v1_logs_get
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+            title: Page
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+            minimum: 1
+            default: 20
+            title: Page Size
+        - name: sort_by
+          in: query
+          required: false
+          schema:
+            const: created_at
+            type: string
+            default: created_at
+            title: Sort By
+        - name: sort_dir
+          in: query
+          required: false
+          schema:
+            enum:
+              - asc
+              - desc
+            type: string
+            default: desc
+            title: Sort Dir
+        - name: household_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: integer
+                minimum: 1
+              - type: 'null'
+            title: Household Id
+        - name: user_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: integer
+                minimum: 1
+              - type: 'null'
+            title: User Id
+        - name: action
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - $ref: '#/components/schemas/HouseholdLogAction'
+              - type: 'null'
+            title: Action
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Page_LogEntryRead_'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/users:
+    get:
+      tags:
+        - admin-users
+      summary: List Users
+      operationId: list_users_api_v1_admin_users_get
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+            title: Page
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+            minimum: 1
+            default: 20
+            title: Page Size
+        - name: sort_by
+          in: query
+          required: false
+          schema:
+            enum:
+              - id
+              - name
+              - email
+              - created_at
+            type: string
+            default: created_at
+            title: Sort By
+        - name: sort_dir
+          in: query
+          required: false
+          schema:
+            enum:
+              - asc
+              - desc
+            type: string
+            default: desc
+            title: Sort Dir
+        - name: name
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+                maxLength: 255
+              - type: 'null'
+            title: Name
+        - name: email
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+                maxLength: 255
+              - type: 'null'
+            title: Email
+        - name: status
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - $ref: '#/components/schemas/UserStatus'
+              - type: 'null'
+            title: Status
+        - name: role
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - enum:
+                  - admins
+                  - members
+                type: string
+              - type: 'null'
+            title: Role
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Page_UserRead_'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+        - admin-users
+      summary: Create User
+      operationId: create_user_api_v1_admin_users_post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/users/{user_id}:
+    get:
+      tags:
+        - admin-users
+      summary: Get User
+      operationId: get_user_api_v1_admin_users__user_id__get
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: User Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+        - admin-users
+      summary: Update User
+      operationId: update_user_api_v1_admin_users__user_id__patch
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: User Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+        - admin-users
+      summary: Deactivate User
+      operationId: deactivate_user_api_v1_admin_users__user_id__delete
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: User Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/users/{user_id}/impersonate:
+    post:
+      tags:
+        - admin-users
+      summary: Impersonate User
+      operationId: impersonate_user_api_v1_admin_users__user_id__impersonate_post
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: User Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/users/{user_id}/reset-2fa:
+    post:
+      tags:
+        - admin-users
+      summary: Reset Two Factor
+      description: |-
+        Clear a user's two-factor enrolment (secret + recovery codes + any pending
+        challenges), for when they've lost their authenticator and can't get in.
+        Deliberately does NOT revoke the user's sessions: 2FA reset is about future
+        logins, and a locked-out user usually has no live session anyway. Idempotent.
+      operationId: reset_two_factor_api_v1_admin_users__user_id__reset_2fa_post
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: User Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/users/{user_id}/resend-confirmation:
+    post:
+      tags:
+        - admin-users
+      summary: Resend Confirmation
+      operationId: resend_confirmation_api_v1_admin_users__user_id__resend_confirmation_post
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: User Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/settings:
+    get:
+      tags:
+        - admin-settings
+      summary: Read Settings
+      operationId: read_settings_api_v1_admin_settings_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServerSettingsRead'
+    patch:
+      tags:
+        - admin-settings
+      summary: Update Settings
+      operationId: update_settings_api_v1_admin_settings_patch
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServerSettingsUpdate'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServerSettingsRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/settings/test-email:
+    post:
+      tags:
+        - admin-settings
+      summary: Send Test Email
+      operationId: send_test_email_api_v1_admin_settings_test_email_post
+      responses:
+        '204':
+          description: Successful Response
+  /api/v1/admin/households:
+    get:
+      tags:
+        - admin-households
+      summary: List Households
+      operationId: list_households_api_v1_admin_households_get
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+            title: Page
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+            minimum: 1
+            default: 20
+            title: Page Size
+        - name: sort_by
+          in: query
+          required: false
+          schema:
+            enum:
+              - id
+              - name
+              - created_at
+            type: string
+            default: created_at
+            title: Sort By
+        - name: sort_dir
+          in: query
+          required: false
+          schema:
+            enum:
+              - asc
+              - desc
+            type: string
+            default: desc
+            title: Sort Dir
+        - name: name
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+                maxLength: 255
+              - type: 'null'
+            title: Name
+        - name: status
+          in: query
+          required: false
+          schema:
+            enum:
+              - active
+              - deleted
+              - all
+            type: string
+            default: active
+            title: Status
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Page_HouseholdListRead_'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+        - admin-households
+      summary: Create Household
+      operationId: create_household_api_v1_admin_households_post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HouseholdCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdListRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/households/{household_id}:
+    get:
+      tags:
+        - admin-households
+      summary: Get Household
+      operationId: get_household_api_v1_admin_households__household_id__get
+      parameters:
+        - name: household_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Household Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdListRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+        - admin-households
+      summary: Update Household
+      operationId: update_household_api_v1_admin_households__household_id__patch
+      parameters:
+        - name: household_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Household Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HouseholdUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdListRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+        - admin-households
+      summary: Delete Household
+      operationId: delete_household_api_v1_admin_households__household_id__delete
+      parameters:
+        - name: household_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Household Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/households/{household_id}/restore:
+    post:
+      tags:
+        - admin-households
+      summary: Restore Household
+      operationId: restore_household_api_v1_admin_households__household_id__restore_post
+      parameters:
+        - name: household_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Household Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdListRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/households/{household_id}/members:
+    get:
+      tags:
+        - admin-households
+      summary: List Household Members
+      operationId: list_household_members_api_v1_admin_households__household_id__members_get
+      parameters:
+        - name: household_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Household Id
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+            title: Page
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+            minimum: 1
+            default: 20
+            title: Page Size
+        - name: sort_by
+          in: query
+          required: false
+          schema:
+            enum:
+              - id
+              - name
+            type: string
+            default: name
+            title: Sort By
+        - name: sort_dir
+          in: query
+          required: false
+          schema:
+            enum:
+              - asc
+              - desc
+            type: string
+            default: asc
+            title: Sort Dir
+        - name: name
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+                maxLength: 255
+              - type: 'null'
+            title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Page_HouseholdMemberRoleRead_'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/households/{household_id}/members/{user_id}:
+    patch:
+      tags:
+        - admin-households
+      summary: Update Household Member
+      description: |-
+        Set a member's role from the admin surface. Any of the three, on any active member.
+
+        No organiser asymmetry here, unlike the user surface: that rule exists so an organiser
+        cannot grow the set of people who could demote *them*, which is a rule about a household
+        member and does not describe a site admin. An operator on this page can already transfer
+        the household and remove members, so withholding the organiser role would be arbitrary.
+
+        Resolves through `_get_household_or_404`, so it reaches soft-deleted households like the
+        other routes here - a role is worth fixing before restoring one.
+      operationId: update_household_member_api_v1_admin_households__household_id__members__user_id__patch
+      parameters:
+        - name: household_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Household Id
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: User Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HouseholdMemberUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdMemberRoleRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+        - admin-households
+      summary: Remove Household Member
+      operationId: remove_household_member_api_v1_admin_households__household_id__members__user_id__delete
+      parameters:
+        - name: household_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Household Id
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: User Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+components:
+  schemas:
+    AssignmentType:
+      type: string
+      enum:
+        - manual
+        - alphabetical
+        - random
+        - least_done
+      title: AssignmentType
+    AuthMethodsRead:
+      properties:
+        password_enabled:
+          type: boolean
+          title: Password Enabled
+        oidc_enabled:
+          type: boolean
+          title: Oidc Enabled
+        oidc_provider_name:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Oidc Provider Name
+      type: object
+      required:
+        - password_enabled
+        - oidc_enabled
+      title: AuthMethodsRead
+      description: |-
+        Which ways in the login page should offer. Public and unauthenticated, because
+        the page that needs it is the one nobody has signed in to yet.
+
+        Safe to expose: it carries no secret and nothing account-specific, only what a
+        visitor is about to be shown anyway. The admin-only /settings payload reports the
+        same provider from an operator's angle (issuer, client id, the redirect uri to
+        register), which is why this one stays deliberately minimal - a public endpoint is
+        the wrong place to grow configuration detail.
+    Body_upload_avatar_api_v1_profile_avatar_put:
+      properties:
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+      type: object
+      required:
+        - file
+      title: Body_upload_avatar_api_v1_profile_avatar_put
+    ChoreCreate:
+      properties:
+        household_id:
+          type: integer
+          title: Household Id
+        title:
+          type: string
+          maxLength: 255
+          minLength: 1
+          title: Title
+        description:
+          anyOf:
+            - type: string
+              maxLength: 20000
+            - type: 'null'
+          title: Description
+        start_date:
+          anyOf:
+            - type: string
+              format: date
+            - type: 'null'
+          title: Start Date
+        repeats:
+          $ref: '#/components/schemas/RepeatPeriod'
+        assignment_type:
+          $ref: '#/components/schemas/AssignmentType'
+        turn_length:
+          type: integer
+          minimum: 1
+          title: Turn Length
+          default: 1
+        repeat_interval:
+          type: integer
+          maximum: 365
+          minimum: 1
+          title: Repeat Interval
+          default: 1
+        weekdays:
+          anyOf:
+            - items:
+                type: integer
+                maximum: 6
+                minimum: 0
+              type: array
+            - type: 'null'
+          title: Weekdays
+        assignee_ids:
+          items:
+            type: integer
+          type: array
+          title: Assignee Ids
+        current_assignee_id:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Current Assignee Id
+        clear_current_assignee:
+          type: boolean
+          title: Clear Current Assignee
+          default: false
+        tag_ids:
+          items:
+            type: integer
+          type: array
+          title: Tag Ids
+      type: object
+      required:
+        - household_id
+        - title
+        - repeats
+        - assignment_type
+      title: ChoreCreate
+    ChoreHouseholdRead:
+      properties:
+        id:
+          type: integer
+          title: Id
+        name:
+          type: string
+          title: Name
+        timezone:
+          type: string
+          title: Timezone
+      type: object
+      required:
+        - id
+        - name
+        - timezone
+      title: ChoreHouseholdRead
+      description: |-
+        The household a chore belongs to, embedded in both chore reads (it sits on
+        ChoreReadBase) so the list column and the read-only edit header can show its name
+        without a second request.
+
+        Also embedded in `DueChoreRead`, `UnscheduledChoreRead`, `HistoryEntryRead` and the
+        History filter options, which is what makes `timezone` here reach every household-scoped
+        surface at once.
+    ChoreListRead:
+      properties:
+        id:
+          type: integer
+          title: Id
+        title:
+          type: string
+          title: Title
+        start_date:
+          anyOf:
+            - type: string
+              format: date
+            - type: 'null'
+          title: Start Date
+        repeats:
+          $ref: '#/components/schemas/RepeatPeriod'
+        assignment_type:
+          $ref: '#/components/schemas/AssignmentType'
+        turn_length:
+          type: integer
+          title: Turn Length
+        repeat_interval:
+          type: integer
+          title: Repeat Interval
+        weekdays:
+          anyOf:
+            - items:
+                type: integer
+              type: array
+            - type: 'null'
+          title: Weekdays
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        household:
+          $ref: '#/components/schemas/ChoreHouseholdRead'
+        assignees:
+          items:
+            $ref: '#/components/schemas/HouseholdMemberRead'
+          type: array
+          title: Assignees
+        current_assignee:
+          anyOf:
+            - $ref: '#/components/schemas/HouseholdMemberRead'
+            - type: 'null'
+        tags:
+          items:
+            $ref: '#/components/schemas/TagRead'
+          type: array
+          title: Tags
+        has_description:
+          type: boolean
+          title: Has Description
+      type: object
+      required:
+        - id
+        - title
+        - start_date
+        - repeats
+        - assignment_type
+        - turn_length
+        - repeat_interval
+        - weekdays
+        - created_at
+        - household
+        - assignees
+        - tags
+        - has_description
+      title: ChoreListRead
+      description: |-
+        A row of the management list.
+
+        The management table never renders the HTML, and at 100 rows a page a
+        `MAX_RICH_TEXT_LENGTH` field on each was by some way the largest payload in the app
+        (measured on the dev seed with five described chores: 103 kB down to 12 kB). Whoever
+        wants the description reads the chore.
+
+        Unlike DueChoreRead / UnscheduledChoreRead, whose flag drives the marker icon on the
+        ChoreRow, nothing on the management page renders this one *yet*: it is here so every
+        chore list answers "is there a description" the same way, and so adding that marker
+        later needs no API change.
+
+        NULL is the only "no description" - `core.richtext` collapses visually-empty HTML on
+        write - so this needs no emptiness check.
+    ChoreRead:
+      properties:
+        id:
+          type: integer
+          title: Id
+        title:
+          type: string
+          title: Title
+        start_date:
+          anyOf:
+            - type: string
+              format: date
+            - type: 'null'
+          title: Start Date
+        repeats:
+          $ref: '#/components/schemas/RepeatPeriod'
+        assignment_type:
+          $ref: '#/components/schemas/AssignmentType'
+        turn_length:
+          type: integer
+          title: Turn Length
+        repeat_interval:
+          type: integer
+          title: Repeat Interval
+        weekdays:
+          anyOf:
+            - items:
+                type: integer
+              type: array
+            - type: 'null'
+          title: Weekdays
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        household:
+          $ref: '#/components/schemas/ChoreHouseholdRead'
+        assignees:
+          items:
+            $ref: '#/components/schemas/HouseholdMemberRead'
+          type: array
+          title: Assignees
+        current_assignee:
+          anyOf:
+            - $ref: '#/components/schemas/HouseholdMemberRead'
+            - type: 'null'
+        tags:
+          items:
+            $ref: '#/components/schemas/TagRead'
+          type: array
+          title: Tags
+        description:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Description
+      type: object
+      required:
+        - id
+        - title
+        - start_date
+        - repeats
+        - assignment_type
+        - turn_length
+        - repeat_interval
+        - weekdays
+        - created_at
+        - household
+        - assignees
+        - tags
+        - description
+      title: ChoreRead
+      description: |-
+        A single chore: create, `GET /chores/{id}` and patch. Open to every role, since the
+        description dialog on My Chores and Unscheduled fetches it.
+    ChoreUpdate:
+      properties:
+        title:
+          type: string
+          maxLength: 255
+          minLength: 1
+          title: Title
+        description:
+          anyOf:
+            - type: string
+              maxLength: 20000
+            - type: 'null'
+          title: Description
+        start_date:
+          anyOf:
+            - type: string
+              format: date
+            - type: 'null'
+          title: Start Date
+        repeats:
+          $ref: '#/components/schemas/RepeatPeriod'
+        assignment_type:
+          $ref: '#/components/schemas/AssignmentType'
+        turn_length:
+          type: integer
+          minimum: 1
+          title: Turn Length
+          default: 1
+        repeat_interval:
+          type: integer
+          maximum: 365
+          minimum: 1
+          title: Repeat Interval
+          default: 1
+        weekdays:
+          anyOf:
+            - items:
+                type: integer
+                maximum: 6
+                minimum: 0
+              type: array
+            - type: 'null'
+          title: Weekdays
+        assignee_ids:
+          items:
+            type: integer
+          type: array
+          title: Assignee Ids
+        current_assignee_id:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Current Assignee Id
+        clear_current_assignee:
+          type: boolean
+          title: Clear Current Assignee
+          default: false
+        tag_ids:
+          items:
+            type: integer
+          type: array
+          title: Tag Ids
+      type: object
+      required:
+        - title
+        - repeats
+        - assignment_type
+      title: ChoreUpdate
+      description: |-
+        Full replace of an editable chore. The household is fixed at creation and
+        intentionally not editable here.
+    CompleteChoreRequest:
+      properties:
+        completed_by_user_id:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Completed By User Id
+      type: object
+      title: CompleteChoreRequest
+      description: |-
+        Optional body for POST /chores/{id}/complete. `completed_by_user_id` credits
+        the completion to another member so the History shows it under their name;
+        it must be one of the chore's current assignees (the chore itself is never
+        modified). Omitted or None credits the current user (the default).
+    CompletionBucket:
+      properties:
+        bucket:
+          type: string
+          title: Bucket
+        count:
+          type: integer
+          title: Count
+        skipped:
+          type: integer
+          title: Skipped
+      type: object
+      required:
+        - bucket
+        - count
+        - skipped
+      title: CompletionBucket
+      description: |-
+        One point on the completions-over-time chart. `bucket` is an ISO date: the day
+        itself when granularity is `day`, or the week's Monday when granularity is `week`.
+
+        Two series over the same buckets: `count` is the work completed, `skipped` the
+        occurrences closed without being done. Every bucket in the range is present with both
+        at 0 if need be, so the stacked bars keep a continuous axis.
+    CompletionRead:
+      properties:
+        id:
+          type: integer
+          title: Id
+        chore_id:
+          type: integer
+          title: Chore Id
+        title:
+          type: string
+          title: Title
+        scheduled_for:
+          type: string
+          format: date-time
+          title: Scheduled For
+        completed_by_user_id:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Completed By User Id
+        skipped:
+          type: boolean
+          title: Skipped
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        next_due:
+          type: string
+          format: date-time
+          title: Next Due
+        days_until_due:
+          type: integer
+          title: Days Until Due
+        status:
+          $ref: '#/components/schemas/DueStatus'
+      type: object
+      required:
+        - id
+        - chore_id
+        - title
+        - scheduled_for
+        - completed_by_user_id
+        - skipped
+        - created_at
+        - next_due
+        - days_until_due
+        - status
+      title: CompletionRead
+      description: |-
+        The result of closing a chore's occurrence: the recorded closure plus the chore's
+        recomputed due state. Always populated, since closing a chore always reopens it
+        (an unscheduled chore reopens at the completion moment, so it reads as due today).
+
+        Shared by `POST /chores/{id}/complete` and `POST /chores/{id}/skip`, and `skipped` is
+        what tells them apart. It is echoed rather than inferred from the route so a non-browser
+        client can read what it created straight off the 201; `completed_by_user_id` is whoever
+        the closure is recorded against either way, which for a skip is always the caller.
+    ConfirmRequest:
+      properties:
+        password:
+          type: string
+          minLength: 8
+          title: Password
+      type: object
+      required:
+        - password
+      title: ConfirmRequest
+    ConfirmTokenInfo:
+      properties:
+        email:
+          type: string
+          title: Email
+        first_name:
+          type: string
+          title: First Name
+        last_name:
+          type: string
+          title: Last Name
+      type: object
+      required:
+        - email
+        - first_name
+        - last_name
+      title: ConfirmTokenInfo
+      description: |-
+        Public info returned for a valid confirmation token so the set-password
+        page can greet the user before they submit.
+    DueChoreRead:
+      properties:
+        id:
+          type: integer
+          title: Id
+        title:
+          type: string
+          title: Title
+        repeats:
+          $ref: '#/components/schemas/RepeatPeriod'
+        repeat_interval:
+          type: integer
+          title: Repeat Interval
+        weekdays:
+          anyOf:
+            - items:
+                type: integer
+              type: array
+            - type: 'null'
+          title: Weekdays
+        next_due:
+          type: string
+          format: date-time
+          title: Next Due
+        days_until_due:
+          type: integer
+          title: Days Until Due
+        status:
+          $ref: '#/components/schemas/DueStatus'
+        has_description:
+          type: boolean
+          title: Has Description
+        household:
+          $ref: '#/components/schemas/ChoreHouseholdRead'
+        assignees:
+          items:
+            $ref: '#/components/schemas/HouseholdMemberRead'
+          type: array
+          title: Assignees
+      type: object
+      required:
+        - id
+        - title
+        - repeats
+        - repeat_interval
+        - weekdays
+        - next_due
+        - days_until_due
+        - status
+        - has_description
+        - household
+        - assignees
+      title: DueChoreRead
+      description: |-
+        A chore due within the Home window, with its computed due state plus the
+        household it belongs to and its assignees, so a row can show whose chore it is
+        (data-minimised member shape: no email).
+    DueStatus:
+      type: string
+      enum:
+        - overdue
+        - today
+        - soon
+      title: DueStatus
+      description: |-
+        Where a chore's next occurrence falls relative to today, as the chore's household
+        reckons a day.
+    ErrorDetail:
+      properties:
+        detail:
+          type: string
+          title: Detail
+      type: object
+      required:
+        - detail
+      title: ErrorDetail
+      description: |-
+        The body FastAPI sends for a raised `HTTPException`.
+
+        Declared so a refusal can be documented as carrying its explanation rather than as
+        bodyless, which is what a route with only a `description` claims. Every hand-raised
+        HTTPException in this app answers in this shape; only the routes that declare it say
+        so, and wiring that up everywhere is the job of the security-scheme step in README's
+        todo rather than of any single endpoint.
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    HealthRead:
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+            - error
+          title: Status
+        database:
+          type: string
+          enum:
+            - ok
+            - unreachable
+          title: Database
+      type: object
+      required:
+        - status
+        - database
+      title: HealthRead
+      description: |-
+        What the probe reports.
+
+        `database` names the subsystem rather than only the verdict, so a 503 says *what* is
+        down; the endpoint answers with this shape on both codes.
+    HistoryEntryRead:
+      properties:
+        id:
+          type: integer
+          title: Id
+        title:
+          type: string
+          title: Title
+        scheduled_for:
+          type: string
+          format: date-time
+          title: Scheduled For
+        completed_at:
+          type: string
+          format: date-time
+          title: Completed At
+        completed_timezone:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Completed Timezone
+        skipped:
+          type: boolean
+          title: Skipped
+        days_late:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Days Late
+        completed_by:
+          anyOf:
+            - $ref: '#/components/schemas/HouseholdMemberRead'
+            - type: 'null'
+        household:
+          $ref: '#/components/schemas/ChoreHouseholdRead'
+      type: object
+      required:
+        - id
+        - title
+        - scheduled_for
+        - completed_at
+        - completed_timezone
+        - skipped
+        - days_late
+        - completed_by
+        - household
+      title: HistoryEntryRead
+      description: |-
+        One closed-occurrence row for the History view.
+
+        `title` is the snapshot taken at closing time (survives a later rename or a
+        soft-deleted chore); `completed_at` is when it was actually checked off and
+        `scheduled_for` is the occurrence's due datetime, so `days_late` (>0 late, <=0
+        on time/early) is the date-based difference between them. It is None for an
+        unscheduled chore, which had no due date to be late against: there the slot merely
+        records when the chore became available, so subtracting it would report the gap since
+        the last completion as lateness. `completed_by` is
+        None when the completer's account has been hard-deleted (users are normally
+        soft-deleted, so in practice it stays set). Names only on `completed_by`
+        (HouseholdMemberRead is data-minimised: no email).
+
+        `skipped` marks the rows where the occurrence was closed without the work being done.
+        They belong in the list (something did happen to that slot, and it can be undone like
+        any other) but must be readable as distinct from real completions, which is what this
+        flag is for. Their `days_late` is None too: there was a deadline, but no work to be
+        punctual about.
+    HistoryFilterOptions:
+      properties:
+        households:
+          items:
+            $ref: '#/components/schemas/ChoreHouseholdRead'
+          type: array
+          title: Households
+        members:
+          items:
+            $ref: '#/components/schemas/HouseholdMemberRead'
+          type: array
+          title: Members
+      type: object
+      required:
+        - households
+        - members
+      title: HistoryFilterOptions
+      description: |-
+        The option lists for the History filters: the households the current user
+        belongs to, and the distinct active members across those households (the
+        people who could appear in the "completed by" column).
+    HomeRead:
+      properties:
+        progress:
+          $ref: '#/components/schemas/ProgressRead'
+        items:
+          items:
+            $ref: '#/components/schemas/DueChoreRead'
+          type: array
+          title: Items
+      type: object
+      required:
+        - progress
+        - items
+      title: HomeRead
+    HouseholdCreate:
+      properties:
+        name:
+          type: string
+          maxLength: 255
+          minLength: 1
+          title: Name
+        timezone:
+          type: string
+          maxLength: 64
+          title: Timezone
+      type: object
+      required:
+        - name
+        - timezone
+      title: HouseholdCreate
+    HouseholdInvitationInfo:
+      properties:
+        household_name:
+          type: string
+          title: Household Name
+        invited_by:
+          $ref: '#/components/schemas/HouseholdMemberRead'
+      type: object
+      required:
+        - household_name
+        - invited_by
+      title: HouseholdInvitationInfo
+      description: 'Public info shown on the accept page: which household and who invited.'
+    HouseholdInvitationRead:
+      properties:
+        id:
+          type: integer
+          title: Id
+        url:
+          type: string
+          title: Url
+        status:
+          $ref: '#/components/schemas/HouseholdInvitationStatus'
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        expires_at:
+          type: string
+          format: date-time
+          title: Expires At
+      type: object
+      required:
+        - id
+        - url
+        - status
+        - created_at
+        - expires_at
+      title: HouseholdInvitationRead
+      description: |-
+        An invitation as the owner sees it in the list. `url` is the shareable
+        link; `status` carries the full lifecycle including `expired` (set by the
+        hourly sweep), which the UI uses for the display state and the row's action.
+        `expires_at` is kept only for the "expires/expired {when}" label.
+    HouseholdInvitationStatus:
+      type: string
+      enum:
+        - pending
+        - accepted
+        - revoked
+        - expired
+      title: HouseholdInvitationStatus
+      description: |-
+        Stored lifecycle of an invitation. `expired` is set by the hourly sweep
+        (mark_expired_invitations) once a `pending` invite passes `expires_at`;
+        runtime checks trust `status`, not the date. Stored as a plain String
+        (closed set enforced at the schema layer, like UserStatus), so adding this
+        value stays migration-free.
+    HouseholdListRead:
+      properties:
+        id:
+          type: integer
+          title: Id
+        name:
+          type: string
+          title: Name
+        admin_id:
+          type: integer
+          title: Admin Id
+        timezone:
+          type: string
+          title: Timezone
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        deleted_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+          title: Deleted At
+        member_count:
+          type: integer
+          title: Member Count
+        chore_count:
+          type: integer
+          title: Chore Count
+      type: object
+      required:
+        - id
+        - name
+        - admin_id
+        - timezone
+        - created_at
+        - deleted_at
+        - member_count
+        - chore_count
+      title: HouseholdListRead
+      description: |-
+        A household row for the management tables and the edit-page header.
+
+        `member_count` counts active members only (disabled users are hidden
+        everywhere); `chore_count` counts every chore in the household. `deleted_at`
+        is NULL for active households and a timestamp for soft-deleted ones.
+    HouseholdLogAction:
+      type: string
+      enum:
+        - chore_created
+        - chore_updated
+        - chore_deleted
+        - completion_undone
+        - skip_undone
+      title: HouseholdLogAction
+      description: |-
+        What a log entry records. A closed set enforced at the schema layer, since the
+        column is a plain String - see the note on HouseholdLogEntry.action.
+
+        Undoing a completion and undoing a skip are two actions rather than one with a flag:
+        they read completely differently to whoever is looking at the log ("Sam undid Jo's
+        completion of Bins" is somebody's work being erased, "Sam undid Jo's skip of Bins" is
+        a mis-skip being fixed), and nothing downstream would re-derive which it was.
+    HouseholdMemberRead:
+      properties:
+        id:
+          type: integer
+          title: Id
+        first_name:
+          type: string
+          title: First Name
+        last_name:
+          type: string
+          title: Last Name
+      type: object
+      required:
+        - id
+        - first_name
+        - last_name
+      title: HouseholdMemberRead
+    HouseholdMemberRoleRead:
+      properties:
+        id:
+          type: integer
+          title: Id
+        first_name:
+          type: string
+          title: First Name
+        last_name:
+          type: string
+          title: Last Name
+        role:
+          $ref: '#/components/schemas/HouseholdRole'
+      type: object
+      required:
+        - id
+        - first_name
+        - last_name
+        - role
+      title: HouseholdMemberRoleRead
+      description: |-
+        A member as the household's own members table sees them: with their role.
+
+        Deliberately a subclass used by the two members endpoints alone. `role` lives on the
+        `household_members` association row, and the six other payloads built from
+        `HouseholdMemberRead` (assignees on Home, Unscheduled and a chore read, History's
+        `completed_by`, the filter options, an invitation's `invited_by`) have no membership in
+        hand to read one from - putting it on the base would either leak a role into all of them
+        or fail validation there.
+    HouseholdMemberUpdate:
+      properties:
+        role:
+          $ref: '#/components/schemas/HouseholdRole'
+      type: object
+      required:
+        - role
+      title: HouseholdMemberUpdate
+      description: |-
+        Body of PATCH /households/{id}/members/{user_id}. Role is the only mutable
+        thing about a membership, and an unknown one is a 422 rather than a stored value
+        the permission checks would silently read as "no role".
+    HouseholdRole:
+      type: string
+      enum:
+        - organiser
+        - deputy
+        - helper
+      title: HouseholdRole
+      description: |-
+        What a member may do inside one household. A ladder, not a set of flags:
+        organiser > deputy > helper, and `app.core.households.roles_at_least` is the
+        only place that ordering is written down.
+
+        organiser manages the household's chores and tags on top of everything a
+        deputy can do; deputy adds Statistics, and the whole household's History
+        rather than only their own rows; helper ticks chores off and sees their own
+        closures on History. Household *ownership* stays a separate fact
+        (`Household.admin_id`) and outranks all three: the owner is always an
+        organiser, and only they rename or delete the household, remove members or
+        transfer it. Setting roles and inviting are organiser-level, with one
+        asymmetry - an organiser may not grant `organiser` or change a row that
+        already holds it, so only the owner can grow that set.
+    HouseholdUpdate:
+      properties:
+        name:
+          anyOf:
+            - type: string
+              maxLength: 255
+              minLength: 1
+            - type: 'null'
+          title: Name
+        admin_id:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Admin Id
+        timezone:
+          anyOf:
+            - type: string
+              maxLength: 64
+            - type: 'null'
+          title: Timezone
+      type: object
+      title: HouseholdUpdate
+    LogEntryRead:
+      properties:
+        id:
+          type: integer
+          title: Id
+        action:
+          type: string
+          title: Action
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        household:
+          $ref: '#/components/schemas/ChoreHouseholdRead'
+        actor:
+          anyOf:
+            - $ref: '#/components/schemas/HouseholdMemberRead'
+            - type: 'null'
+        target:
+          anyOf:
+            - $ref: '#/components/schemas/HouseholdMemberRead'
+            - type: 'null'
+        chore_id:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Chore Id
+        chore_title:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Chore Title
+        changed_fields:
+          items:
+            type: string
+          type: array
+          title: Changed Fields
+          default: []
+        by_admin:
+          type: boolean
+          title: By Admin
+          default: false
+      type: object
+      required:
+        - id
+        - action
+        - created_at
+        - household
+        - actor
+        - target
+        - chore_id
+        - chore_title
+      title: LogEntryRead
+      description: |-
+        One row of a household's activity log, for the owner-only Logs view.
+
+        `chore_title` is the snapshot taken when the entry was written, so a renamed or
+        soft-deleted chore still reads correctly; `chore_id` is carried alongside it so a future UI
+        could link to the chore (nothing does yet), and is None only after a hard delete (chores are
+        soft-deleted, so in practice it stays set). `actor` is None when that account has been
+        hard-deleted, the same way History's `completed_by` is. `target` is who a closure was
+        recorded against, and is None for the three chore actions.
+
+        Both people are `HouseholdMemberRead` (data-minimised: no email), and there is no IP
+        address here at all - unlike `audit_events`, which this table deliberately is not.
+
+        `action` and `changed_fields` are both plain strings on the wire rather than the enum and a
+        Literal union, for the same reason: a value written by a differently-versioned server must
+        not break a read, so the closed set lives on the client, which degrades an unknown name
+        instead. Coercing `action` back through `HouseholdLogAction` here would raise `ValueError`
+        on a row a newer release wrote - a 500 on every page containing it, unfilterable, because
+        the coercion is per row after the query. The enum still guards the `action` *query
+        parameter*, where a 422 on nonsense input is exactly right.
+
+        `changed_fields` is populated for `chore_updated` alone and is a plain list of names, never
+        values, in the order `CHORE_LOG_FIELDS` declares.
+
+        `by_admin` says the action was taken through an impersonated session. A boolean, never the
+        operator's identity: the impersonator is a site admin, potentially a stranger to this
+        household, so who they were stays in the table for the operator-level trail.
+    LoginRequest:
+      properties:
+        email:
+          type: string
+          format: email
+          title: Email
+        password:
+          type: string
+          title: Password
+        remember:
+          type: boolean
+          title: Remember
+          default: false
+      type: object
+      required:
+        - email
+        - password
+      title: LoginRequest
+    LoginResponse:
+      properties:
+        two_factor_required:
+          type: boolean
+          title: Two Factor Required
+          default: false
+        user:
+          anyOf:
+            - $ref: '#/components/schemas/MeRead'
+            - type: 'null'
+      type: object
+      title: LoginResponse
+      description: |-
+        Outcome of the password step. When two_factor_required is False the user
+        is fully logged in and `user` is populated; when True a short-lived 2FA
+        challenge cookie has been set and the client must POST the code to
+        /auth/verify-2fa (user is None until then).
+    MeRead:
+      properties:
+        id:
+          type: integer
+          title: Id
+        email:
+          type: string
+          title: Email
+        first_name:
+          type: string
+          title: First Name
+        last_name:
+          type: string
+          title: Last Name
+        is_admin:
+          type: boolean
+          title: Is Admin
+        status:
+          $ref: '#/components/schemas/UserStatus'
+        confirmed_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+          title: Confirmed At
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        theme:
+          anyOf:
+            - type: string
+              enum:
+                - latte
+                - frappe
+                - macchiato
+                - mocha
+            - type: 'null'
+          title: Theme
+        accent_color:
+          anyOf:
+            - type: string
+              enum:
+                - rosewater
+                - flamingo
+                - pink
+                - mauve
+                - red
+                - maroon
+                - peach
+                - yellow
+                - green
+                - teal
+                - sky
+                - sapphire
+                - blue
+                - lavender
+            - type: 'null'
+          title: Accent Color
+        language:
+          anyOf:
+            - type: string
+              enum:
+                - en
+                - it
+            - type: 'null'
+          title: Language
+        two_factor_enabled:
+          type: boolean
+          title: Two Factor Enabled
+          default: false
+        impersonating:
+          type: boolean
+          title: Impersonating
+          default: false
+        memberships:
+          items:
+            $ref: '#/components/schemas/MembershipRead'
+          type: array
+          title: Memberships
+          default: []
+        email_confirmation_required:
+          type: boolean
+          title: Email Confirmation Required
+          default: false
+        avatar_url:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Avatar Url
+          description: |-
+            URL the SPA can load the avatar from. Served by the StaticFiles mount
+            at /api/v1/media (proxied untouched by the prod nginx /api rule).
+          readOnly: true
+      type: object
+      required:
+        - id
+        - email
+        - first_name
+        - last_name
+        - is_admin
+        - status
+        - created_at
+        - avatar_url
+      title: MeRead
+    MembershipRead:
+      properties:
+        household_id:
+          type: integer
+          title: Household Id
+        role:
+          $ref: '#/components/schemas/HouseholdRole'
+        owned:
+          type: boolean
+          title: Owned
+      type: object
+      required:
+        - household_id
+        - role
+        - owned
+      title: MembershipRead
+      description: |-
+        One of the caller's household memberships: which household, what they may do in it,
+        and whether they own *this* household (not whether they own any).
+
+        Ownership is `households.admin_id`, a separate fact from the role ladder rather than a
+        rung on it: the owner is always an organiser, but not every organiser owns. It rides here
+        because the sidebar has to decide whether to offer the Logs page before any household has
+        been fetched.
+    Page_ChoreListRead_:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ChoreListRead'
+          type: array
+          title: Items
+        total:
+          type: integer
+          title: Total
+        page:
+          type: integer
+          title: Page
+        page_size:
+          type: integer
+          title: Page Size
+      type: object
+      required:
+        - items
+        - total
+        - page
+        - page_size
+      title: Page[ChoreListRead]
+    Page_HistoryEntryRead_:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/HistoryEntryRead'
+          type: array
+          title: Items
+        total:
+          type: integer
+          title: Total
+        page:
+          type: integer
+          title: Page
+        page_size:
+          type: integer
+          title: Page Size
+      type: object
+      required:
+        - items
+        - total
+        - page
+        - page_size
+      title: Page[HistoryEntryRead]
+    Page_HouseholdListRead_:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/HouseholdListRead'
+          type: array
+          title: Items
+        total:
+          type: integer
+          title: Total
+        page:
+          type: integer
+          title: Page
+        page_size:
+          type: integer
+          title: Page Size
+      type: object
+      required:
+        - items
+        - total
+        - page
+        - page_size
+      title: Page[HouseholdListRead]
+    Page_HouseholdMemberRoleRead_:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/HouseholdMemberRoleRead'
+          type: array
+          title: Items
+        total:
+          type: integer
+          title: Total
+        page:
+          type: integer
+          title: Page
+        page_size:
+          type: integer
+          title: Page Size
+      type: object
+      required:
+        - items
+        - total
+        - page
+        - page_size
+      title: Page[HouseholdMemberRoleRead]
+    Page_LogEntryRead_:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/LogEntryRead'
+          type: array
+          title: Items
+        total:
+          type: integer
+          title: Total
+        page:
+          type: integer
+          title: Page
+        page_size:
+          type: integer
+          title: Page Size
+      type: object
+      required:
+        - items
+        - total
+        - page
+        - page_size
+      title: Page[LogEntryRead]
+    Page_TagRead_:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/TagRead'
+          type: array
+          title: Items
+        total:
+          type: integer
+          title: Total
+        page:
+          type: integer
+          title: Page
+        page_size:
+          type: integer
+          title: Page Size
+      type: object
+      required:
+        - items
+        - total
+        - page
+        - page_size
+      title: Page[TagRead]
+    Page_UserRead_:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/UserRead'
+          type: array
+          title: Items
+        total:
+          type: integer
+          title: Total
+        page:
+          type: integer
+          title: Page
+        page_size:
+          type: integer
+          title: Page Size
+      type: object
+      required:
+        - items
+        - total
+        - page
+        - page_size
+      title: Page[UserRead]
+    PersonStat:
+      properties:
+        user_id:
+          type: integer
+          title: User Id
+        first_name:
+          type: string
+          title: First Name
+        last_name:
+          type: string
+          title: Last Name
+        count:
+          type: integer
+          title: Count
+      type: object
+      required:
+        - user_id
+        - first_name
+        - last_name
+        - count
+      title: PersonStat
+      description: |-
+        One bar of the per-person chart: how many in-range completions this person was
+        credited with, skips excluded (it ranks work done). Names only (data-minimised, like
+        HouseholdMemberRead).
+    ProfileUpdate:
+      properties:
+        first_name:
+          anyOf:
+            - type: string
+              maxLength: 255
+              minLength: 1
+            - type: 'null'
+          title: First Name
+        last_name:
+          anyOf:
+            - type: string
+              maxLength: 255
+              minLength: 1
+            - type: 'null'
+          title: Last Name
+        current_password:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Current Password
+        new_password:
+          anyOf:
+            - type: string
+              minLength: 8
+            - type: 'null'
+          title: New Password
+        theme:
+          anyOf:
+            - type: string
+              enum:
+                - latte
+                - frappe
+                - macchiato
+                - mocha
+            - type: 'null'
+          title: Theme
+        accent_color:
+          anyOf:
+            - type: string
+              enum:
+                - rosewater
+                - flamingo
+                - pink
+                - mauve
+                - red
+                - maroon
+                - peach
+                - yellow
+                - green
+                - teal
+                - sky
+                - sapphire
+                - blue
+                - lavender
+            - type: 'null'
+          title: Accent Color
+        language:
+          anyOf:
+            - type: string
+              enum:
+                - en
+                - it
+            - type: 'null'
+          title: Language
+      type: object
+      title: ProfileUpdate
+      description: |-
+        Self-service profile edit. Changing the password requires the current one
+        (the confirm-new-password field is a frontend-only check; the API takes the
+        old and new passwords only).
+    ProgressRead:
+      properties:
+        done_today:
+          type: integer
+          title: Done Today
+        total_today:
+          type: integer
+          title: Total Today
+      type: object
+      required:
+        - done_today
+        - total_today
+      title: ProgressRead
+      description: 'Today''s progress: how many of the overdue-or-due-today chores are done.'
+    Punctuality:
+      properties:
+        on_time:
+          type: integer
+          title: On Time
+        late:
+          type: integer
+          title: Late
+        early:
+          type: integer
+          title: Early
+        skipped:
+          type: integer
+          title: Skipped
+      type: object
+      required:
+        - on_time
+        - late
+        - early
+        - skipped
+      title: Punctuality
+      description: |-
+        What became of the in-range occurrences of *scheduled* chores: `late` (>0 days late),
+        `on_time` (same UTC day), `early` (completed before the due day), or `skipped` (closed
+        with the work not done).
+
+        Unscheduled chores are absent, having no deadline to be measured against, so the four do
+        NOT sum to `completed_in_range`. They do partition the scheduled occurrences closed in the
+        range, since skipping an unscheduled chore is refused outright. Note they do not sum to
+        `on_time_rate`'s denominator either, which is the first three only.
+    RecoveryCodesRead:
+      properties:
+        recovery_codes:
+          items:
+            type: string
+          type: array
+          title: Recovery Codes
+      type: object
+      required:
+        - recovery_codes
+      title: RecoveryCodesRead
+      description: The one-time backup codes, returned once at enable / regeneration.
+    RepeatPeriod:
+      type: string
+      enum:
+        - manual
+        - daily
+        - weekly
+        - monthly
+        - yearly
+      title: RepeatPeriod
+    ServerSettingsRead:
+      properties:
+        require_confirmation:
+          type: boolean
+          title: Require Confirmation
+        smtp_configured:
+          type: boolean
+          title: Smtp Configured
+        smtp_host:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Smtp Host
+        smtp_port:
+          type: integer
+          title: Smtp Port
+        smtp_from:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Smtp From
+        oidc_configured:
+          type: boolean
+          title: Oidc Configured
+        oidc_provider_name:
+          type: string
+          title: Oidc Provider Name
+        oidc_issuer:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Oidc Issuer
+        oidc_client_id:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Oidc Client Id
+        oidc_redirect_uri:
+          type: string
+          title: Oidc Redirect Uri
+        oidc_only:
+          type: boolean
+          title: Oidc Only
+      type: object
+      required:
+        - require_confirmation
+        - smtp_configured
+        - smtp_port
+        - oidc_configured
+        - oidc_provider_name
+        - oidc_redirect_uri
+        - oidc_only
+      title: ServerSettingsRead
+    ServerSettingsUpdate:
+      properties:
+        require_confirmation:
+          type: boolean
+          title: Require Confirmation
+      type: object
+      required:
+        - require_confirmation
+      title: ServerSettingsUpdate
+    SkippedChoreStat:
+      properties:
+        chore_id:
+          type: integer
+          title: Chore Id
+        title:
+          type: string
+          title: Title
+        household_name:
+          type: string
+          title: Household Name
+        count:
+          type: integer
+          title: Count
+      type: object
+      required:
+        - chore_id
+        - title
+        - household_name
+        - count
+      title: SkippedChoreStat
+      description: |-
+        One bar of the most-skipped ranking: how many times this chore was skipped in the
+        range. Only chores with at least one skip appear, worst-first and capped, so the list is
+        the short "go and look at these" set rather than a full table.
+
+        Soft-deleted chores are absent even though their skips still count in
+        `skipped_in_range`: the ranking is a list of chores to go and fix, and a deleted one
+        cannot be fixed. It is the only skip figure in this payload that drops them.
+
+        A chore switched to unscheduled after being skipped keeps its skips here, so these counts
+        can exceed `punctuality.skipped`, which reads the period live and drops such a chore.
+
+        `title` is the chore's *current* title, not the occurrence's snapshot, so a chore
+        renamed mid-range stays one row and reads the same here as on the Chores page. The
+        trade-off is the mirror image of History's: there the snapshot is right because a row
+        describes one past closure, here the live title is right because a row describes a chore
+        that still exists and is still being skipped.
+
+        `household_name` rides along because the page spans every household the caller is a
+        deputy in, and two of them can hold a chore with the same title.
+    StatsKpis:
+      properties:
+        completed_in_range:
+          type: integer
+          title: Completed In Range
+        skipped_in_range:
+          type: integer
+          title: Skipped In Range
+        currently_overdue:
+          type: integer
+          title: Currently Overdue
+        on_time_rate:
+          anyOf:
+            - type: number
+            - type: 'null'
+          title: On Time Rate
+        active_chores:
+          type: integer
+          title: Active Chores
+      type: object
+      required:
+        - completed_in_range
+        - skipped_in_range
+        - currently_overdue
+        - on_time_rate
+        - active_chores
+      title: StatsKpis
+      description: |-
+        The headline numbers shown as stat tiles. `completed_in_range`, `skipped_in_range` and
+        `on_time_rate` follow the selected range; `currently_overdue` and
+        `active_chores` are a live snapshot (range-independent). `on_time_rate` is the
+        fraction of in-range completions that were not late (on time or early), or None
+        when none of them had a due date (avoids a divide-by-zero).
+
+        Unscheduled chores count in `completed_in_range` but in none of the other three, which
+        all need a due date to mean anything: `on_time_rate`'s denominator is the *scheduled*
+        completions only, so it can be None even when `completed_in_range` is not.
+
+        Skipped occurrences are counted apart, in `skipped_in_range`, and are in none of the
+        others: `completed_in_range` is work done, and `on_time_rate` measures the punctuality of
+        that work, so a run of skips leaves the rate untouched rather than dragging it down.
+    StatsRead:
+      properties:
+        range:
+          type: string
+          title: Range
+        granularity:
+          type: string
+          title: Granularity
+        kpis:
+          $ref: '#/components/schemas/StatsKpis'
+        completions_over_time:
+          items:
+            $ref: '#/components/schemas/CompletionBucket'
+          type: array
+          title: Completions Over Time
+        status_breakdown:
+          $ref: '#/components/schemas/StatusBreakdown'
+        punctuality:
+          $ref: '#/components/schemas/Punctuality'
+        per_person:
+          items:
+            $ref: '#/components/schemas/PersonStat'
+          type: array
+          title: Per Person
+        most_skipped:
+          items:
+            $ref: '#/components/schemas/SkippedChoreStat'
+          type: array
+          title: Most Skipped
+      type: object
+      required:
+        - range
+        - granularity
+        - kpis
+        - completions_over_time
+        - status_breakdown
+        - punctuality
+        - per_person
+        - most_skipped
+      title: StatsRead
+      description: |-
+        The aggregated Statistics payload. `range` echoes the requested window and
+        `granularity` (`day`/`week`) tells the frontend how to label the time axis.
+    StatusBreakdown:
+      properties:
+        overdue:
+          type: integer
+          title: Overdue
+        today:
+          type: integer
+          title: Today
+        soon:
+          type: integer
+          title: Soon
+      type: object
+      required:
+        - overdue
+        - today
+        - soon
+      title: StatusBreakdown
+      description: |-
+        The currently-open occurrences of *scheduled* chores, split by how their due date sits
+        relative to today (a live snapshot). The three sum to `active_chores`, which excludes
+        unscheduled chores for the same reason: they have no due date to bucket.
+    TagCreate:
+      properties:
+        household_id:
+          type: integer
+          title: Household Id
+        name:
+          type: string
+          maxLength: 50
+          minLength: 1
+          title: Name
+        color:
+          type: string
+          pattern: ^#[0-9a-fA-F]{6}$
+          title: Color
+      type: object
+      required:
+        - household_id
+        - name
+        - color
+      title: TagCreate
+    TagRead:
+      properties:
+        id:
+          type: integer
+          title: Id
+        name:
+          type: string
+          title: Name
+        color:
+          type: string
+          title: Color
+      type: object
+      required:
+        - id
+        - name
+        - color
+      title: TagRead
+    TagUpdate:
+      properties:
+        name:
+          type: string
+          maxLength: 50
+          minLength: 1
+          title: Name
+        color:
+          type: string
+          pattern: ^#[0-9a-fA-F]{6}$
+          title: Color
+      type: object
+      required:
+        - name
+        - color
+      title: TagUpdate
+      description: |-
+        Full replace of an editable tag. The household is fixed at creation and
+        intentionally not editable here (mirrors ChoreUpdate).
+    TwoFactorConfirmRequest:
+      properties:
+        code:
+          type: string
+          maxLength: 64
+          minLength: 1
+          title: Code
+      type: object
+      required:
+        - code
+      title: TwoFactorConfirmRequest
+      description: Code confirming an authenticator was set up correctly (enable).
+    TwoFactorDisableRequest:
+      properties:
+        code:
+          type: string
+          maxLength: 64
+          minLength: 1
+          title: Code
+      type: object
+      required:
+        - code
+      title: TwoFactorDisableRequest
+      description: Code proving possession of the second factor when disabling / regenerating.
+    TwoFactorSetupRead:
+      properties:
+        secret:
+          type: string
+          title: Secret
+        otpauth_uri:
+          type: string
+          title: Otpauth Uri
+        qr:
+          type: string
+          title: Qr
+      type: object
+      required:
+        - secret
+        - otpauth_uri
+        - qr
+      title: TwoFactorSetupRead
+      description: Everything the setup UI needs to enrol an authenticator.
+    TwoFactorVerifyRequest:
+      properties:
+        code:
+          type: string
+          maxLength: 64
+          minLength: 1
+          title: Code
+      type: object
+      required:
+        - code
+      title: TwoFactorVerifyRequest
+      description: Code submitted at the login verify step.
+    UnscheduledChoreRead:
+      properties:
+        id:
+          type: integer
+          title: Id
+        title:
+          type: string
+          title: Title
+        days_since_last_completion:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Days Since Last Completion
+        has_description:
+          type: boolean
+          title: Has Description
+        household:
+          $ref: '#/components/schemas/ChoreHouseholdRead'
+        assignees:
+          items:
+            $ref: '#/components/schemas/HouseholdMemberRead'
+          type: array
+          title: Assignees
+      type: object
+      required:
+        - id
+        - title
+        - days_since_last_completion
+        - has_description
+        - household
+        - assignees
+      title: UnscheduledChoreRead
+      description: |-
+        An unscheduled chore, as its own view lists it. Deliberately carries no due state:
+        there is no deadline to report, and keeping `next_due` / `days_until_due` / `status` off
+        the wire is what stops the due vocabulary creeping back into a view that has none. It
+        reports how long since the chore was last done instead, which is what you actually want
+        to know about something you do ad hoc. `repeats` is omitted too: every item here is
+        unscheduled, so the label would be noise.
+    UnscheduledRead:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/UnscheduledChoreRead'
+          type: array
+          title: Items
+      type: object
+      required:
+        - items
+      title: UnscheduledRead
+    UserCreate:
+      properties:
+        email:
+          type: string
+          format: email
+          title: Email
+        first_name:
+          type: string
+          maxLength: 255
+          minLength: 1
+          title: First Name
+        last_name:
+          type: string
+          maxLength: 255
+          minLength: 1
+          title: Last Name
+        password:
+          anyOf:
+            - type: string
+              minLength: 8
+            - type: 'null'
+          title: Password
+        is_admin:
+          type: boolean
+          title: Is Admin
+          default: false
+      type: object
+      required:
+        - email
+        - first_name
+        - last_name
+      title: UserCreate
+    UserRead:
+      properties:
+        id:
+          type: integer
+          title: Id
+        email:
+          type: string
+          title: Email
+        first_name:
+          type: string
+          title: First Name
+        last_name:
+          type: string
+          title: Last Name
+        is_admin:
+          type: boolean
+          title: Is Admin
+        status:
+          $ref: '#/components/schemas/UserStatus'
+        confirmed_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+          title: Confirmed At
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        theme:
+          anyOf:
+            - type: string
+              enum:
+                - latte
+                - frappe
+                - macchiato
+                - mocha
+            - type: 'null'
+          title: Theme
+        accent_color:
+          anyOf:
+            - type: string
+              enum:
+                - rosewater
+                - flamingo
+                - pink
+                - mauve
+                - red
+                - maroon
+                - peach
+                - yellow
+                - green
+                - teal
+                - sky
+                - sapphire
+                - blue
+                - lavender
+            - type: 'null'
+          title: Accent Color
+        language:
+          anyOf:
+            - type: string
+              enum:
+                - en
+                - it
+            - type: 'null'
+          title: Language
+        two_factor_enabled:
+          type: boolean
+          title: Two Factor Enabled
+          default: false
+        avatar_url:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Avatar Url
+          description: |-
+            URL the SPA can load the avatar from. Served by the StaticFiles mount
+            at /api/v1/media (proxied untouched by the prod nginx /api rule).
+          readOnly: true
+      type: object
+      required:
+        - id
+        - email
+        - first_name
+        - last_name
+        - is_admin
+        - status
+        - created_at
+        - avatar_url
+      title: UserRead
+    UserStatus:
+      type: string
+      enum:
+        - waiting_confirmation
+        - active
+        - disabled
+      title: UserStatus
+      description: |-
+        Account lifecycle. A user is created either waiting_confirmation (they
+        set their own password via an emailed link) or active (an admin set the
+        password directly); disabled is the soft-deleted / suspended state. Only an
+        active user can log in or be impersonated.
+    UserUpdate:
+      properties:
+        email:
+          anyOf:
+            - type: string
+              format: email
+            - type: 'null'
+          title: Email
+        first_name:
+          anyOf:
+            - type: string
+              maxLength: 255
+              minLength: 1
+            - type: 'null'
+          title: First Name
+        last_name:
+          anyOf:
+            - type: string
+              maxLength: 255
+              minLength: 1
+            - type: 'null'
+          title: Last Name
+        password:
+          anyOf:
+            - type: string
+              minLength: 8
+            - type: 'null'
+          title: Password
+        is_admin:
+          anyOf:
+            - type: boolean
+            - type: 'null'
+          title: Is Admin
+        status:
+          anyOf:
+            - $ref: '#/components/schemas/UserStatus'
+            - type: 'null'
+      type: object
+      title: UserUpdate
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+              - type: string
+              - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+        - loc
+        - msg
+        - type
+      title: ValidationError

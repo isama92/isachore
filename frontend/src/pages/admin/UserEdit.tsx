@@ -26,8 +26,8 @@ export default function UserEdit() {
     // Only the user fetch drives the not-found state; a settings failure just
     // falls back to defaults so a loadable user can still be edited.
     Promise.all([
-      api.get<ServerSettings>(endpoints.settings.root).catch(() => null),
-      api.get<User>(endpoints.users.byId(id)),
+      api.get<ServerSettings>(endpoints.adminSettings.root).catch(() => null),
+      api.get<User>(endpoints.adminUsers.byId(id)),
     ])
       .then(([serverSettings, loaded]) => {
         if (cancelled) return
@@ -46,7 +46,7 @@ export default function UserEdit() {
   }, [id, t])
 
   async function save(payload: Record<string, unknown>) {
-    await api.patch<User>(endpoints.users.byId(id), payload)
+    await api.patch<User>(endpoints.adminUsers.byId(id), payload)
     toast.success(t('users.toastUpdated'))
     await navigate(routes.admin.users.list)
   }

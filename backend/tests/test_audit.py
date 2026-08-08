@@ -83,7 +83,7 @@ async def test_impersonation_round_trip_is_audited(
     target = await make_user(email="bob@example.com")
     client = await auth_client(admin)
 
-    start = await client.post(f"/api/v1/users/{target.id}/impersonate")
+    start = await client.post(f"/api/v1/admin/users/{target.id}/impersonate")
     assert start.status_code == 200
     starts = await _events(db_session, AuditAction.impersonate_start)
     assert len(starts) == 1
@@ -106,7 +106,7 @@ async def test_user_created_and_deactivated_are_audited(
     client = await auth_client(admin)
 
     created = await client.post(
-        "/api/v1/users",
+        "/api/v1/admin/users",
         json={
             "email": "new@example.com",
             "first_name": "New",
@@ -124,7 +124,7 @@ async def test_user_created_and_deactivated_are_audited(
     assert create_events[0].target_user_id == new_id
     assert create_events[0].impersonator_user_id is None
 
-    deleted = await client.delete(f"/api/v1/users/{new_id}")
+    deleted = await client.delete(f"/api/v1/admin/users/{new_id}")
     assert deleted.status_code == 204
 
     deactivate_events = await _events(db_session, AuditAction.user_deactivated)
@@ -143,8 +143,10 @@ async def test_update_while_impersonating_records_real_operator(
     victim = await make_user(email="bob@example.com")
     client = await auth_client(admin)
 
-    assert (await client.post(f"/api/v1/users/{other_admin.id}/impersonate")).status_code == 200
-    resp = await client.patch(f"/api/v1/users/{victim.id}", json={"first_name": "Bobby"})
+    assert (
+        await client.post(f"/api/v1/admin/users/{other_admin.id}/impersonate")
+    ).status_code == 200
+    resp = await client.patch(f"/api/v1/admin/users/{victim.id}", json={"first_name": "Bobby"})
     assert resp.status_code == 200
 
     events = await _events(db_session, AuditAction.user_updated)
@@ -164,7 +166,7 @@ async def test_update_both_names_records_both_in_detail(
     client = await auth_client(admin)
 
     resp = await client.patch(
-        f"/api/v1/users/{member.id}", json={"first_name": "Bobby", "last_name": "New"}
+        f"/api/v1/admin/users/{member.id}", json={"first_name": "Bobby", "last_name": "New"}
     )
     assert resp.status_code == 200
 
@@ -181,18 +183,18 @@ async def test_failed_mutation_is_not_audited(
     client = await auth_client(admin)
 
     # Self-demote is blocked (400) before any audit event is recorded.
-    resp = await client.patch(f"/api/v1/users/{admin.id}", json={"is_admin": False})
+    resp = await client.patch(f"/api/v1/admin/users/{admin.id}", json={"is_admin": False})
     assert resp.status_code == 400
     assert await _events(db_session, AuditAction.user_updated) == []
 
     # 404 target: no user_updated row.
-    resp = await client.patch("/api/v1/users/999999", json={"first_name": "Ghost"})
+    resp = await client.patch("/api/v1/admin/users/999999", json={"first_name": "Ghost"})
     assert resp.status_code == 404
     assert await _events(db_session, AuditAction.user_updated) == []
 
     # 409 duplicate email on create: no user_created row.
     resp = await client.post(
-        "/api/v1/users",
+        "/api/v1/admin/users",
         json={
             "email": other.email,
             "first_name": "Dup",
@@ -213,7 +215,7 @@ async def test_password_update_is_audited_without_leaking_value(
     client = await auth_client(admin)
 
     resp = await client.patch(
-        f"/api/v1/users/{target.id}", json={"password": "a-brand-new-password"}
+        f"/api/v1/admin/users/{target.id}", json={"password": "a-brand-new-password"}
     )
     assert resp.status_code == 200
 
@@ -230,7 +232,7 @@ async def test_logout_while_impersonating_records_operator(
     target = await make_user(email="bob@example.com")
     client = await auth_client(admin)
 
-    assert (await client.post(f"/api/v1/users/{target.id}/impersonate")).status_code == 200
+    assert (await client.post(f"/api/v1/admin/users/{target.id}/impersonate")).status_code == 200
     assert (await client.post("/api/v1/auth/logout")).status_code == 204
 
     events = await _events(db_session, AuditAction.logout)
@@ -246,10 +248,10 @@ async def test_create_and_deactivate_while_impersonating_record_operator(
     eve = await make_user(email="eve@example.com", is_admin=True)
     client = await auth_client(admin)
 
-    assert (await client.post(f"/api/v1/users/{eve.id}/impersonate")).status_code == 200
+    assert (await client.post(f"/api/v1/admin/users/{eve.id}/impersonate")).status_code == 200
 
     created = await client.post(
-        "/api/v1/users",
+        "/api/v1/admin/users",
         json={
             "email": "new@example.com",
             "first_name": "New",
@@ -260,7 +262,7 @@ async def test_create_and_deactivate_while_impersonating_record_operator(
     )
     assert created.status_code == 201
     new_id = created.json()["id"]
-    assert (await client.delete(f"/api/v1/users/{new_id}")).status_code == 204
+    assert (await client.delete(f"/api/v1/admin/users/{new_id}")).status_code == 204
 
     create_events = await _events(db_session, AuditAction.user_created)
     assert len(create_events) == 1

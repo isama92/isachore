@@ -59,6 +59,7 @@ from app.core.security import (
 )
 from app.core.tokens import purge_expired_oidc_states
 from app.models import AuditAction, ConfirmationToken, OidcLoginState, User, UserStatus
+from app.schemas import ErrorDetail
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,34 @@ ERROR_ACCOUNT_DISABLED = "account_disabled"
 ERROR_ALREADY_LINKED = "already_linked"
 ERROR_STATE = "state"
 ERROR_PROVIDER = "provider"
+
+
+# Every answer these two can give, none of it derivable from the handler: a
+# `-> RedirectResponse` annotation carries no schema, and a raised HTTPException is
+# invisible to the generator. The Location header matters as much as the 302 itself,
+# since a client that knows it was redirected but cannot read the destination still
+# cannot follow the flow. The 429 is listed first here because it is reached first:
+# both handlers take their rate limit before testing `oidc_configured()`, so it is
+# strictly more reachable than the 404 below it.
+_LOCATION_HEADER = {
+    "Location": {
+        "description": "Where the browser is sent next.",
+        "schema": {"type": "string", "format": "uri"},
+    }
+}
+_REFUSALS = {
+    status.HTTP_429_TOO_MANY_REQUESTS: {
+        "model": ErrorDetail,
+        "description": "Too many sign-on attempts from this address.",
+        "headers": {
+            "Retry-After": {
+                "description": "Seconds until the throttle window clears.",
+                "schema": {"type": "integer"},
+            }
+        },
+    },
+    status.HTTP_404_NOT_FOUND: {"model": ErrorDetail, "description": NO_OIDC_DETAIL},
+}
 
 
 def _login_redirect(code: str) -> RedirectResponse:
@@ -129,7 +158,18 @@ async def _refuse(
     return response
 
 
-@router.get("/start")
+@router.get(
+    "/start",
+    status_code=status.HTTP_302_FOUND,
+    response_class=RedirectResponse,
+    responses={
+        status.HTTP_302_FOUND: {
+            "description": "Redirect to the provider's authorisation endpoint",
+            "headers": _LOCATION_HEADER,
+        },
+        **_REFUSALS,
+    },
+)
 async def start(
     session: SessionDep, redis: RedisDep, request: Request, return_to: str | None = None
 ) -> RedirectResponse:
@@ -246,7 +286,18 @@ async def _find_linked_user(session: SessionDep, identity: OidcIdentity) -> User
     return result.scalar_one_or_none()
 
 
-@router.get("/callback")
+@router.get(
+    "/callback",
+    status_code=status.HTTP_302_FOUND,
+    response_class=RedirectResponse,
+    responses={
+        status.HTTP_302_FOUND: {
+            "description": "Redirect back to the SPA: signed in, or ?sso_error=<code>",
+            "headers": _LOCATION_HEADER,
+        },
+        **_REFUSALS,
+    },
+)
 async def callback(
     session: SessionDep,
     redis: RedisDep,

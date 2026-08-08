@@ -29,7 +29,7 @@ function stubFetch(opts: {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).split('?')[0]
     const method = (init?.method ?? 'GET').toUpperCase()
-    if (method === 'GET' && path.endsWith('/api/v1/settings')) return jsonBody(settings)
+    if (method === 'GET' && path.endsWith('/api/v1/admin/settings')) return jsonBody(settings)
     if (method !== 'GET' && opts.mutate) return opts.mutate(method, String(input))
     return jsonBody(undefined, 204)
   })
@@ -71,7 +71,7 @@ describe('UserCreate', () => {
     await user.click(screen.getByRole('button', { name: 'Add user' }))
 
     expect(await screen.findByText('admin-users-list')).toBeInTheDocument()
-    expect(bodyOf(fetchMock, 'POST', '/api/v1/users')).toMatchObject({
+    expect(bodyOf(fetchMock, 'POST', '/api/v1/admin/users')).toMatchObject({
       email: 'new@example.com',
       first_name: 'New',
       last_name: 'Person',
@@ -99,7 +99,7 @@ describe('UserCreate', () => {
     await user.click(screen.getByRole('button', { name: 'Add user' }))
 
     expect(await screen.findByText('admin-users-list')).toBeInTheDocument()
-    expect(bodyOf(fetchMock, 'POST', '/api/v1/users')).not.toHaveProperty('password')
+    expect(bodyOf(fetchMock, 'POST', '/api/v1/admin/users')).not.toHaveProperty('password')
   })
 
   it('surfaces a create error and stays on the form', async () => {

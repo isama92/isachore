@@ -150,6 +150,7 @@ Then open http://localhost:5173 and log in.
 | Frontend (SPA)       | http://localhost:5173                 |
 | Backend API          | http://localhost:8000/api/v1          |
 | API docs (Swagger)   | http://localhost:8000/docs            |
+| API docs (ReDoc)     | http://localhost:8000/redoc           |
 | Health check         | http://localhost:8000/api/v1/health   |
 | Postgres             | localhost:5432                        |
 | Mailpit (dev email)  | http://localhost:8025                 |
@@ -445,6 +446,17 @@ you migrate by hand.
 so a field disappearing from a response is a breaking change even though the
 path did not move. Anything of that kind is listed here.
 
+- **Every admin-only endpoint has moved under `/api/v1/admin`.** `/api/v1/users*`
+  is now `/api/v1/admin/users*` and `/api/v1/settings*` is now
+  `/api/v1/admin/settings*`; the old paths are gone rather than deprecated.
+  `/api/v1/admin/households*` is unchanged, having always been there. The rule is
+  now exact: a route gated on `AdminUser` answers under `/admin`, all 20 of them.
+  Two that look like they should have moved and deliberately did not:
+  `POST /api/v1/auth/stop-impersonating`, which authenticates off the parked admin
+  cookie rather than the caller's session (during impersonation that session
+  belongs to the impersonated user, who is usually not an admin), and
+  `GET /api/v1/logs`, which is scoped by household ownership rather than by
+  `is_admin`. Response bodies are untouched; only the paths moved.
 - **`GET /api/v1/chores` no longer returns `description` on a list row.** It sends
   `has_description: bool` instead; fetch `GET /api/v1/chores/{id}` for the markup.
   `POST /chores`, `GET /chores/{id}` and `PATCH /chores/{id}` are unchanged and
@@ -459,7 +471,7 @@ path did not move. Anything of that kind is listed here.
   the household embedded in a chore, due, unscheduled, history or filter-options
   response; `completed_timezone` on a history entry, which is the zone that closure's
   lateness was judged in (`null` for closures predating it - fall back to the
-  household's `timezone`); the `oidc_*` group on `GET /api/v1/settings`.
+  household's `timezone`); the `oidc_*` group on `GET /api/v1/admin/settings`.
 - **New single sign-on endpoints.** `GET /api/v1/auth/methods` is public and reports
   which ways in exist (`password_enabled`, `oidc_enabled`, `oidc_provider_name`).
   `GET /api/v1/auth/oidc/start` and `GET /api/v1/auth/oidc/callback` are the flow
@@ -784,6 +796,49 @@ docker compose exec backend uv run pytest --cov=app --cov-report=term-missing --
 cd frontend && npm run test:coverage
 ```
 
+### API documentation
+
+The API describes itself. FastAPI derives an OpenAPI 3.1 document from the routes
+and their pydantic models, and serves it three ways while the dev stack is up:
+
+| Endpoint                           | What it is                                    |
+| ---------------------------------- | --------------------------------------------- |
+| http://localhost:8000/docs         | Swagger UI: "Try it out" fires a real request  |
+| http://localhost:8000/redoc        | ReDoc: better for reading the whole surface    |
+| http://localhost:8000/openapi.json | the raw document                               |
+
+All three are **dev-only in practice**: FastAPI mounts them at the root, while the
+prod nginx proxies `/api` alone, so in a deployment they fall through to the SPA.
+Nothing serves the spec in production either (the frontend image contains only the
+built SPA), so `docs/api/openapi.yaml` is a reference read from the repository
+rather than a published url.
+
+Regenerate it whenever you add or change an endpoint, from the repository root with
+the dev stack running:
+
+```bash
+npx @redocly/cli@2 bundle http://localhost:8000/openapi.json -o docs/api/openapi.yaml
+npx @redocly/cli@2 build-docs docs/api/openapi.yaml -o docs/api/openapi.html   # offline reader
+```
+
+The major is pinned because a reformat from a future one would produce a
+4,000-line diff nobody can review. The YAML is committed; the HTML is a ~900 kB
+render of it and is gitignored, so build it when you want to read the reference
+without a server, or hand it to someone without a checkout.
+
+`docs/**` sits in both workflows' `paths-ignore`, so editing the spec runs no CI.
+What keeps it in step is `backend/tests/test_openapi_spec.py`, which parses the
+committed file and compares it to the live schema, and *does* run whenever a route
+changes. If it fails, the spec is behind the code: regenerate and commit it.
+
+The spec is also only as honest as the routes' annotations. A handler annotated
+`-> JSONResponse` or `-> RedirectResponse` tells the generator nothing, so it
+publishes an unconstrained 200 and silently drops the other branches: before they
+were declared, `/health` hid its 503 and both `/auth/oidc/*` endpoints claimed to
+return a JSON body when they answer 302 with a `Location` header. Anything not
+derivable from the return type needs `response_model` and `responses=` spelling it
+out, as those three now do.
+
 ### Continuous integration
 
 Two workflows in `.github/workflows/`:
@@ -826,4 +881,24 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
 ### Todo
 
 - [ ] Live updates when a housemate completes a chore (websocket)
-- [ ] Api to fetch today chores for paper display (api key should bypass oidc login form restriction)
+- [ ] Document authentication in the OpenAPI spec. There is no `securitySchemes` entry
+      and not one of the 72 operations declares a 401 or 403, so a client generated from
+      `docs/api/openapi.yaml` presents every gated route as anonymous. The two halves
+      travel differently: `securitySchemes` and per-operation `security` are derived from
+      a *security* dependency, so those ride on the shared `CurrentUser` / `AdminUser`,
+      but `Depends` has no `responses`, so the refusals (400/403/409/429) need
+      `responses=` on the router or the `include_router` call, or a custom `APIRoute`.
+- [ ] Run something on a spec-only pull request. `docs/**` sits in both workflows'
+      `paths-ignore`, so a PR touching *only* prose and `docs/api/openapi.yaml` runs no
+      checks at all - the one kind of PR that changes the spec is the one kind nothing
+      guards. A hand-edited or stale spec therefore merges green and then fails
+      `test_openapi_spec.py` on the *next* person's PR, blaming them. Either narrow the
+      ignore lists or add a `redocly lint` step.
+- [ ] Regenerate the spec automatically once a PR merges, so it cannot drift while the
+      one command that updates it stays manual (README's API documentation section).
+      Needs care: `publish.yml` builds `:latest` from `main`, so a commit pushed back by
+      an action must not retrigger it.
+- [ ] Serve the rendered API reference somewhere, e.g. `/docs`. FastAPI mounts Swagger
+      and ReDoc at the root while the prod nginx proxies `/api` alone, so both fall
+      through to the SPA in a deployment and the reference is repository-only today.
+      Decide deliberately whether it is public or behind auth.

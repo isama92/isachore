@@ -192,7 +192,7 @@ def smtp(monkeypatch: pytest.MonkeyPatch) -> list:
     """Configure SMTP and capture outgoing mail without hitting the network.
 
     Patches the single chokepoint (aiosmtplib.send) so the real send_email /
-    send_confirmation_email code runs and every path (users, server_settings,
+    send_confirmation_email code runs and every path (admin_users, admin_settings,
     resend) is captured. Returns the list of sent EmailMessage objects.
     """
     monkeypatch.setattr(settings, "smtp_host", "mailpit")

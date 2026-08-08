@@ -544,7 +544,7 @@ async def test_an_impersonated_change_records_the_operator(
     chore = await make_chore(household=household, title="Wash the dishes")
     client = await auth_client(admin)
 
-    assert (await client.post(f"/api/v1/users/{member.id}/impersonate")).status_code == 200
+    assert (await client.post(f"/api/v1/admin/users/{member.id}/impersonate")).status_code == 200
     assert (await client.delete(f"/api/v1/chores/{chore.id}")).status_code == 204
 
     entries = await _entries(db_session)

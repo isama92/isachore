@@ -21,9 +21,9 @@ describe('api wrapper', () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { id: 1 }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await api.post('/api/v1/users', { email: 'a@example.com' })
+    await api.post('/api/v1/thing', { email: 'a@example.com' })
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/v1/users', {
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/thing', {
       method: 'POST',
       headers: { 'X-CSRF-Token': '1', 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: 'a@example.com' }),
@@ -47,9 +47,9 @@ describe('api wrapper', () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { id: 1 }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await api.patch('/api/v1/users/1', { name: 'New' })
+    await api.patch('/api/v1/thing/1', { name: 'New' })
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/v1/users/1', {
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/thing/1', {
       method: 'PATCH',
       headers: { 'X-CSRF-Token': '1', 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: 'New' }),
@@ -58,7 +58,7 @@ describe('api wrapper', () => {
 
   it('resolves to undefined on 204', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(204, undefined)))
-    const result = await api.del('/api/v1/users/1')
+    const result = await api.del('/api/v1/thing/1')
     expect(result).toBeUndefined()
   })
 
@@ -101,7 +101,7 @@ describe('api wrapper', () => {
   it('throws ApiError with the detail from a JSON error body', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(409, { detail: 'Taken' })))
 
-    await expect(api.post('/api/v1/users', {})).rejects.toMatchObject({
+    await expect(api.post('/api/v1/thing', {})).rejects.toMatchObject({
       status: 409,
       message: 'Taken',
     })

@@ -25,6 +25,16 @@ services:
     volumes:
       - ./backend:/app
       - ./backend/storage:/app/storage
+      # Read-only, and only so `pytest` inside the container can reach the committed
+      # API spec, which lives outside the backend context. CI runs the suite on the
+      # runner from a full checkout and needs no equivalent.
+      #
+      # At /docs, NOT /app/docs: nested inside the ./backend bind above, Docker has to
+      # materialise the mountpoint, which leaves an untracked root-owned backend/docs/
+      # in the source tree - and deleting that empty directory silently breaks the mount
+      # in the running container, with the test then blaming a stale container. Nothing
+      # needs it under /app, since `_find_spec` walks parents all the way to /.
+      - ./docs:/docs:ro
     depends_on:
       db:
         condition: service_healthy

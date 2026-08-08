@@ -53,7 +53,7 @@ export default function Users() {
   const navigate = useNavigate()
 
   const table = useServerTable<User, UserFilters>({
-    endpoint: endpoints.users.root,
+    endpoint: endpoints.adminUsers.root,
     storageKey: 'admin-users',
     initial: {
       sortBy: 'created_at',
@@ -78,7 +78,7 @@ export default function Users() {
 
   useEffect(() => {
     void api
-      .get<ServerSettings>(endpoints.settings.root)
+      .get<ServerSettings>(endpoints.adminSettings.root)
       .then((data) => setSettings(data))
       .catch(() => setSettings(null))
   }, [])
@@ -104,7 +104,7 @@ export default function Users() {
   async function loginAs(u: User) {
     setError(null)
     try {
-      await api.post<User>(endpoints.users.impersonate(u.id))
+      await api.post<User>(endpoints.adminUsers.impersonate(u.id))
       toast.success(t('users.viewingAs', { name: fullName(u) }))
       await refresh()
       await navigate(routes.home)
@@ -121,9 +121,9 @@ export default function Users() {
         // sends them back to waiting_confirmation (the server resends the email)
         // rather than active.
         const status: UserStatus = u.confirmed_at ? 'active' : 'waiting_confirmation'
-        await api.patch<User>(endpoints.users.byId(u.id), { status })
+        await api.patch<User>(endpoints.adminUsers.byId(u.id), { status })
       } else {
-        await api.del(endpoints.users.byId(u.id))
+        await api.del(endpoints.adminUsers.byId(u.id))
       }
       toast.success(active ? t('users.reactivated') : t('users.deactivated'))
       table.reload()
@@ -135,7 +135,7 @@ export default function Users() {
   async function resendConfirmation(u: User) {
     setError(null)
     try {
-      await api.post(endpoints.users.resendConfirmation(u.id))
+      await api.post(endpoints.adminUsers.resendConfirmation(u.id))
       toast.success(t('users.resent', { name: fullName(u) }))
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t('users.resendError'))
