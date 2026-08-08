@@ -1498,9 +1498,14 @@ the negative paths (401/403/400/404/409), not just the happy one.
 
 ## Gotchas
 
-- After changing `frontend/package.json`: run `npm install` locally (pre-commit
-  hooks use local node_modules) AND `docker compose exec frontend npm install` (a
-  named volume shadows the container's node_modules).
+- After changing `frontend/package.json` **or `frontend/package-lock.json`**: sync both
+  node_modules, locally (pre-commit hooks use the local copy) AND with
+  `docker compose exec frontend npm install` (a named volume shadows the container's).
+  **A lockfile-only change counts**, which is easy to miss because the rule used to name
+  `package.json` alone: the shadowing is identical, so skipping the container half leaves
+  the dev stack running the old tree indefinitely with nothing on screen to say so. Use
+  `npm ci` on the host for a lockfile refresh rather than `npm install` - `ci` installs the
+  lockfile exactly, where `install` is free to rewrite the versions you just pinned.
 - After changing `backend/pyproject.toml` deps: the venv is baked into the image
   at `/opt/venv`, so update the lock and reinstall with
   `docker compose exec backend uv sync --no-install-project`, then rebuild
