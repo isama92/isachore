@@ -8,7 +8,25 @@ describe('endpoints', () => {
     expect(endpoints.profile.avatar).toBe('/api/v1/profile/avatar')
     expect(endpoints.completions.filters).toBe('/api/v1/completions/filters')
     expect(endpoints.logs).toBe('/api/v1/logs')
-    expect(endpoints.settings.testEmail).toBe('/api/v1/settings/test-email')
+    expect(endpoints.adminSettings.testEmail).toBe('/api/v1/admin/settings/test-email')
+  })
+
+  it('puts every admin-gated group under /api/v1/admin', () => {
+    // A closed-set assertion on the rule itself, not a second guard on today's paths:
+    // those are pinned exactly, both here and by the page tests, whose fetch stubs
+    // carry the full prefix and so stop matching if one slips back. What this adds is
+    // cover for a group that has no page test yet - a new admin surface declared on
+    // the wrong prefix would otherwise reach the API before anything complained.
+    for (const path of [
+      endpoints.adminUsers.root,
+      endpoints.adminSettings.root,
+      endpoints.adminHouseholds.root,
+    ]) {
+      expect(path.startsWith('/api/v1/admin/')).toBe(true)
+    }
+    // Not admin-gated despite its name: it authenticates off the parked admin cookie,
+    // and during impersonation the caller's own session is not an admin one.
+    expect(endpoints.auth.stopImpersonating).toBe('/api/v1/auth/stop-impersonating')
   })
 
   it('builds parameterised paths from their id', () => {
@@ -19,10 +37,13 @@ describe('endpoints', () => {
     expect(endpoints.households.byId('h4')).toBe('/api/v1/households/h4')
     expect(endpoints.households.members('h4')).toBe('/api/v1/households/h4/members')
     expect(endpoints.households.leave('h4')).toBe('/api/v1/households/h4/leave')
-    // These three share the /users/{id} stem, so pin them apart explicitly.
-    expect(endpoints.users.byId('u5')).toBe('/api/v1/users/u5')
-    expect(endpoints.users.impersonate('u5')).toBe('/api/v1/users/u5/impersonate')
-    expect(endpoints.users.resendConfirmation('u5')).toBe('/api/v1/users/u5/resend-confirmation')
+    // These share the /admin/users/{id} stem, so pin them apart explicitly.
+    expect(endpoints.adminUsers.byId('u5')).toBe('/api/v1/admin/users/u5')
+    expect(endpoints.adminUsers.impersonate('u5')).toBe('/api/v1/admin/users/u5/impersonate')
+    expect(endpoints.adminUsers.resendConfirmation('u5')).toBe(
+      '/api/v1/admin/users/u5/resend-confirmation',
+    )
+    expect(endpoints.adminUsers.resetTwoFactor('u5')).toBe('/api/v1/admin/users/u5/reset-2fa')
     expect(endpoints.invitations.accept('tok')).toBe('/api/v1/invitations/tok/accept')
     expect(endpoints.confirm.byToken('tok')).toBe('/api/v1/confirm/tok')
     expect(endpoints.adminHouseholds.byId('h6')).toBe('/api/v1/admin/households/h6')

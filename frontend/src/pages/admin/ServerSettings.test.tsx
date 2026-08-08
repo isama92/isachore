@@ -53,7 +53,7 @@ describe('ServerSettings', () => {
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        '/api/v1/settings',
+        '/api/v1/admin/settings',
         expect.objectContaining({ method: 'PATCH' }),
       ),
     )
@@ -99,7 +99,7 @@ describe('ServerSettings', () => {
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        '/api/v1/settings/test-email',
+        '/api/v1/admin/settings/test-email',
         expect.objectContaining({ method: 'POST' }),
       ),
     )
@@ -118,7 +118,7 @@ describe('ServerSettings', () => {
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        '/api/v1/settings/test-email',
+        '/api/v1/admin/settings/test-email',
         expect.objectContaining({ method: 'POST' }),
       ),
     )

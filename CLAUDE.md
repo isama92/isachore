@@ -97,6 +97,31 @@ pre-commit run --all-files                           # what the git hook runs
 
 - API lives under `/api/v1`, JSON only. Routers in `backend/app/api/v1/`,
   registered in `router.py`.
+- **A route gated on `AdminUser` answers under `/api/v1/admin`.** All 20 do, across
+  `admin_users.py`, `admin_settings.py` and `admin_households.py`, which is what lets the
+  path be read as a claim about *who* a route serves rather than only what it returns; the
+  three `include_router` calls are grouped at the bottom of `router.py` for the same reason.
+  A new admin surface goes under that prefix, in an `admin_*.py` module, with an
+  `admin-*` tag. Two near-misses stay outside it deliberately, and both look like
+  oversights:
+  - **`POST /auth/stop-impersonating`** takes no user dependency at all - not `AdminUser`,
+    not even `CurrentUser` - and authenticates off the parked `isachore_admin_token`
+    cookie, with the `is_admin` check done inline against *that* cookie's identity. It has
+    to: during impersonation the active session belongs to the impersonated user, who is
+    usually not an admin, so an `AdminUser` gate would turn away the only caller it exists
+    for. Its sole frontend caller, `TopBar.tsx`, renders for every authenticated user.
+  - **`/logs`** reads like an operator surface but is `CurrentUser`-gated and scoped by
+    household *ownership* (`owned_household_ids`), never by `is_admin`.
+
+  On the frontend the same split is in `lib/endpoints.ts`: `adminUsers`, `adminSettings`
+  and `adminHouseholds`, with `auth.stopImpersonating` left where it is. Today's paths are
+  pinned twice over - exact-string assertions in `lib/endpoints.test.ts`, and the admin
+  page tests, whose `endsWith` / regex stubs carry the whole `/api/v1/admin/...` prefix and
+  so stop matching if one slips back (measured: 28 failures). What
+  `puts every admin-gated group under /api/v1/admin` adds on top is the *rule*, for a group
+  that has no page test yet. Keep those stubs fully prefixed: shortened to `endsWith('/users')`
+  they would accept the old path and the new one alike, and that is the one edit that would
+  make the page tests stop guarding this.
 - **Docker layout / prod is pull-only**: `compose.yml` is the ONLY file with
   `build:` blocks; the prod mode files carry `image:` and nothing else, so a
   deployment is a compose file, a `.env` and a `docker compose pull` with no repo
@@ -196,7 +221,7 @@ pre-commit run --all-files                           # what the git hook runs
   `confirmed_at` timestamp. Only `active` users can log in or be impersonated;
   deactivation is a soft delete (`status=disabled`). Login and impersonation gate
   on `status == UserStatus.active`.
-- **NOTHING provisions a household.** Not `POST /users`, not `cli init`, not
+- **NOTHING provisions a household.** Not `POST /admin/users`, not `cli init`, not
   confirming an account: a new user, the bootstrap admin included, starts a member
   of none and creates their own through `POST /households` (open to any
   authenticated user) or accepts an invitation. Do not reintroduce an automatic one
@@ -422,7 +447,7 @@ pre-commit run --all-files                           # what the git hook runs
   (`app/core/config.py`, optional at boot; `smtp_configured()` in
   `app/core/email.py`); enabling confirmation or the test-email button needs it.
   Emails are English-only (the backend has no i18n). Server settings live under
-  `/api/v1/settings` (admin) and the **Admin > Server settings** page. Dev SMTP
+  `/api/v1/admin/settings` (admin) and the **Admin > Server settings** page. Dev SMTP
   goes to the mailpit compose service (http://localhost:8025).
 - **Single sign-on (OIDC)**: `core/oidc.py` owns the protocol (discovery, the PKCE code
   exchange, ID token verification), `api/v1/oidc.py` owns the policy, and the whole thing
@@ -539,7 +564,7 @@ pre-commit run --all-files                           # what the git hook runs
     `confirmed_at` is surfaced instead, on Profile, as a badge beside the address - shown only
     where the server asks for confirmation at all, since a null means nothing on a server that
     never asks. `MeRead.email_confirmation_required` is what tells a client which of those two
-    readings applies; it rides on the me payload rather than /settings because that endpoint
+    readings applies; it rides on the me payload rather than /admin/settings because that endpoint
     is admin-only and this is a fact every user's own page needs.
   - **`totp_enabled` is deliberately not consulted in the callback.** The provider owns
     authentication including its own MFA, so re-challenging for a local code asks the same
@@ -566,7 +591,7 @@ pre-commit run --all-files                           # what the git hook runs
     from `app_base_url` rather than configured, which is also why it is reported on
     **Admin > Server settings**: it is the value an operator has to register with the
     provider and there is nowhere else to read it.
-- **Impersonation**: `POST /users/{id}/impersonate` swaps the session cookie to
+- **Impersonation**: `POST /admin/users/{id}/impersonate` swaps the session cookie to
   the target user and parks the admin's own token in the `isachore_admin_token`
   cookie; `POST /auth/stop-impersonating` restores it. `/auth/me` reports
   `impersonating`; logout ends both sessions.
@@ -987,7 +1012,7 @@ pre-commit run --all-files                           # what the git hook runs
 
   **Open, and not settled by the above:** pydantic's stock handler echoes the rejected value
   back under `input`, so a password below `min_length=8` comes back in the response body in
-  plaintext (`POST /confirm/{token}`, `PATCH /users/{id}`, the profile password change).
+  plaintext (`POST /confirm/{token}`, `PATCH /admin/users/{id}`, the profile password change).
   `formatValidationDetail` never reads `input`, so nothing leaks in-app - it is a wire and
   log-capture exposure, and one worth an AVG/ISO 27001 look. Stripping that one key in a
   `RequestValidationError` handler would keep the array contract intact, so the rule above
@@ -1238,7 +1263,7 @@ the negative paths (401/403/400/404/409), not just the happy one.
 
   **The trap that hides this: asserting the consequence through a fixture proves nothing about
   the endpoint.** `test_history_is_empty_for_a_member_of_no_household` builds its user with
-  `make_user` and so would keep passing with provisioning reintroduced into `POST /users`; what
+  `make_user` and so would keep passing with provisioning reintroduced into `POST /admin/users`; what
   actually defends that is the pair named above, which go through the endpoint. When you audit
   an omission, mutate it and check that a test naming *that surface* fails.
 

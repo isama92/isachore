@@ -81,7 +81,7 @@ async def _restore_admin(session: AsyncSession, user: User, password: str) -> No
 
     It clears everything that would otherwise leave the operator still locked out
     or leave a stale way in, mirroring what the API does on the same changes
-    (`update_user` / `reset_two_factor` in api/v1/users.py): two-factor enrolment,
+    (`update_user` / `reset_two_factor` in api/v1/admin_users.py): two-factor enrolment,
     because a restored password still dead-ends at the TOTP challenge; live
     sessions, so one parked before the lockout cannot return as an admin session;
     and any pending confirmation link, which could otherwise set a password of its

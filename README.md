@@ -446,6 +446,17 @@ you migrate by hand.
 so a field disappearing from a response is a breaking change even though the
 path did not move. Anything of that kind is listed here.
 
+- **Every admin-only endpoint has moved under `/api/v1/admin`.** `/api/v1/users*`
+  is now `/api/v1/admin/users*` and `/api/v1/settings*` is now
+  `/api/v1/admin/settings*`; the old paths are gone rather than deprecated.
+  `/api/v1/admin/households*` is unchanged, having always been there. The rule is
+  now exact: a route gated on `AdminUser` answers under `/admin`, all 20 of them.
+  Two that look like they should have moved and deliberately did not:
+  `POST /api/v1/auth/stop-impersonating`, which authenticates off the parked admin
+  cookie rather than the caller's session (during impersonation that session
+  belongs to the impersonated user, who is usually not an admin), and
+  `GET /api/v1/logs`, which is scoped by household ownership rather than by
+  `is_admin`. Response bodies are untouched; only the paths moved.
 - **`GET /api/v1/chores` no longer returns `description` on a list row.** It sends
   `has_description: bool` instead; fetch `GET /api/v1/chores/{id}` for the markup.
   `POST /chores`, `GET /chores/{id}` and `PATCH /chores/{id}` are unchanged and
@@ -460,7 +471,7 @@ path did not move. Anything of that kind is listed here.
   the household embedded in a chore, due, unscheduled, history or filter-options
   response; `completed_timezone` on a history entry, which is the zone that closure's
   lateness was judged in (`null` for closures predating it - fall back to the
-  household's `timezone`); the `oidc_*` group on `GET /api/v1/settings`.
+  household's `timezone`); the `oidc_*` group on `GET /api/v1/admin/settings`.
 - **New single sign-on endpoints.** `GET /api/v1/auth/methods` is public and reports
   which ways in exist (`password_enabled`, `oidc_enabled`, `oidc_provider_name`).
   `GET /api/v1/auth/oidc/start` and `GET /api/v1/auth/oidc/callback` are the flow

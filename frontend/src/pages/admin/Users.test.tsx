@@ -50,8 +50,8 @@ function stubFetch(opts: {
     const url = String(input)
     const path = url.split('?')[0]
     const method = (init?.method ?? 'GET').toUpperCase()
-    if (method === 'GET' && path.endsWith('/api/v1/settings')) return jsonBody(settings)
-    if (method === 'GET' && path.endsWith('/api/v1/users')) {
+    if (method === 'GET' && path.endsWith('/api/v1/admin/settings')) return jsonBody(settings)
+    if (method === 'GET' && path.endsWith('/api/v1/admin/users')) {
       return jsonBody({
         items: opts.users,
         total: opts.total ?? opts.users.length,
@@ -73,12 +73,12 @@ function bodyOf(fetchMock: FetchMock, method: string, urlEnd: string): Record<st
   return JSON.parse((call?.[1] as RequestInit).body as string)
 }
 
-// The URL of the most recent GET /api/v1/users request (with its query string).
+// The URL of the most recent GET /api/v1/admin/users request (with its query string).
 function lastUsersGet(fetchMock: FetchMock): string {
   const calls = fetchMock.mock.calls.filter(
     ([url, init]) =>
       (init?.method ?? 'GET').toUpperCase() === 'GET' &&
-      String(url).split('?')[0].endsWith('/api/v1/users'),
+      String(url).split('?')[0].endsWith('/api/v1/admin/users'),
   )
   return String(calls.at(-1)?.[0] ?? '')
 }
@@ -256,7 +256,7 @@ describe('Users', () => {
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        '/api/v1/users/2/resend-confirmation',
+        '/api/v1/admin/users/2/resend-confirmation',
         expect.objectContaining({ method: 'POST' }),
       ),
     )
@@ -303,7 +303,7 @@ describe('Users', () => {
 
     await waitFor(() => expect(screen.getByText('home-marker')).toBeInTheDocument())
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/v1/users/2/impersonate',
+      '/api/v1/admin/users/2/impersonate',
       expect.objectContaining({ method: 'POST' }),
     )
     expect(value.refresh).toHaveBeenCalled()
@@ -335,7 +335,7 @@ describe('Users', () => {
     )
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        '/api/v1/users/2',
+        '/api/v1/admin/users/2',
         expect.objectContaining({ method: 'DELETE' }),
       ),
     )
@@ -367,11 +367,11 @@ describe('Users', () => {
     )
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        '/api/v1/users/2',
+        '/api/v1/admin/users/2',
         expect.objectContaining({ method: 'PATCH' }),
       ),
     )
-    expect(bodyOf(fetchMock, 'PATCH', '/api/v1/users/2')).toMatchObject({ status: 'active' })
+    expect(bodyOf(fetchMock, 'PATCH', '/api/v1/admin/users/2')).toMatchObject({ status: 'active' })
   })
 
   it('reactivates a never-confirmed user back to waiting_confirmation', async () => {
@@ -399,11 +399,11 @@ describe('Users', () => {
     )
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        '/api/v1/users/2',
+        '/api/v1/admin/users/2',
         expect.objectContaining({ method: 'PATCH' }),
       ),
     )
-    expect(bodyOf(fetchMock, 'PATCH', '/api/v1/users/2')).toMatchObject({
+    expect(bodyOf(fetchMock, 'PATCH', '/api/v1/admin/users/2')).toMatchObject({
       status: 'waiting_confirmation',
     })
   })

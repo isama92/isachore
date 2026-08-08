@@ -37,7 +37,7 @@ export default function ServerSettings() {
   const load = useCallback(
     () =>
       api
-        .get<ServerSettingsData>(endpoints.settings.root)
+        .get<ServerSettingsData>(endpoints.adminSettings.root)
         .then((s) => {
           setSettings(s)
           setRequireConfirmation(s.require_confirmation)
@@ -71,7 +71,7 @@ export default function ServerSettings() {
     setSaving(true)
     setRequireConfirmation(next)
     try {
-      const s = await api.patch<ServerSettingsData>(endpoints.settings.root, {
+      const s = await api.patch<ServerSettingsData>(endpoints.adminSettings.root, {
         require_confirmation: next,
       })
       setSettings(s)
@@ -89,7 +89,7 @@ export default function ServerSettings() {
     setTestError(null)
     setSendingTest(true)
     try {
-      await api.post(endpoints.settings.testEmail)
+      await api.post(endpoints.adminSettings.testEmail)
       toast.success(t('serverSettings.testEmailSent', { email: user?.email ?? '' }))
     } catch (err) {
       // A 429 means the server-side cooldown caught us (e.g. a second tab); show

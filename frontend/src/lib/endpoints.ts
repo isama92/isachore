@@ -96,17 +96,21 @@ export const endpoints = {
     byToken: (token: string) => `${V1}/confirm/${token}`,
   },
 
-  users: {
-    root: `${V1}/users`,
-    byId: (id: Id) => `${V1}/users/${id}`,
-    impersonate: (id: Id) => `${V1}/users/${id}/impersonate`,
-    resendConfirmation: (id: Id) => `${V1}/users/${id}/resend-confirmation`,
-    resetTwoFactor: (id: Id) => `${V1}/users/${id}/reset-2fa`,
+  // The three admin groups below answer under /api/v1/admin, because every route
+  // behind them is AdminUser-gated on the server. `auth.stopImpersonating` is the
+  // deliberate exception: it authenticates off the parked admin cookie rather than
+  // the active session, which during impersonation belongs to a non-admin.
+  adminUsers: {
+    root: `${V1}/admin/users`,
+    byId: (id: Id) => `${V1}/admin/users/${id}`,
+    impersonate: (id: Id) => `${V1}/admin/users/${id}/impersonate`,
+    resendConfirmation: (id: Id) => `${V1}/admin/users/${id}/resend-confirmation`,
+    resetTwoFactor: (id: Id) => `${V1}/admin/users/${id}/reset-2fa`,
   },
 
-  settings: {
-    root: `${V1}/settings`,
-    testEmail: `${V1}/settings/test-email`,
+  adminSettings: {
+    root: `${V1}/admin/settings`,
+    testEmail: `${V1}/admin/settings/test-email`,
   },
 
   adminHouseholds: {

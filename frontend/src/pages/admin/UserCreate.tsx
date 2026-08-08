@@ -19,7 +19,7 @@ export default function UserCreate() {
   useEffect(() => {
     let cancelled = false
     api
-      .get<ServerSettings>(endpoints.settings.root)
+      .get<ServerSettings>(endpoints.adminSettings.root)
       .then((data) => {
         if (!cancelled) setSettings(data)
       })
@@ -35,7 +35,7 @@ export default function UserCreate() {
   }, [])
 
   async function create(payload: Record<string, unknown>) {
-    await api.post<User>(endpoints.users.root, payload)
+    await api.post<User>(endpoints.adminUsers.root, payload)
     toast.success(t('users.toastCreated'))
     await navigate(routes.admin.users.list)
   }

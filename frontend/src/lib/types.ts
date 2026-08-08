@@ -95,7 +95,7 @@ export type Page<T> = {
   page_size: number
 }
 
-// Server-wide settings from GET /api/v1/settings (admin-only).
+// Server-wide settings from GET /api/v1/admin/settings (admin-only).
 export type ServerSettings = {
   require_confirmation: boolean
   smtp_configured: boolean

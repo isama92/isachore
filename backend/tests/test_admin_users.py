@@ -39,7 +39,7 @@ async def test_list_users_as_admin(make_user: Login, auth_client: AuthClient) ->
     await make_user(email="member@example.com")
     client = await auth_client(admin)
 
-    resp = await client.get("/api/v1/users")
+    resp = await client.get("/api/v1/admin/users")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -53,13 +53,13 @@ async def test_list_users_as_admin(make_user: Login, auth_client: AuthClient) ->
 async def test_list_users_as_member_forbidden(make_user: Login, auth_client: AuthClient) -> None:
     member = await make_user(email="member@example.com")
     client = await auth_client(member)
-    resp = await client.get("/api/v1/users")
+    resp = await client.get("/api/v1/admin/users")
     assert resp.status_code == 403
     assert resp.json()["detail"] == "Admin only"
 
 
 async def test_list_users_unauthenticated(client: AsyncClient) -> None:
-    resp = await client.get("/api/v1/users")
+    resp = await client.get("/api/v1/admin/users")
     assert resp.status_code == 401
 
 
@@ -69,7 +69,7 @@ async def test_list_users_pagination(make_user: Login, auth_client: AuthClient) 
         await make_user(email=f"user{i}@example.com")
     client = await auth_client(admin)
 
-    resp = await client.get("/api/v1/users?page=1&page_size=2&sort_by=id&sort_dir=asc")
+    resp = await client.get("/api/v1/admin/users?page=1&page_size=2&sort_by=id&sort_dir=asc")
     body = resp.json()
     assert body["total"] == 5
     assert body["page"] == 1
@@ -77,7 +77,7 @@ async def test_list_users_pagination(make_user: Login, auth_client: AuthClient) 
     assert len(body["items"]) == 2
     first_ids = [u["id"] for u in body["items"]]
 
-    resp = await client.get("/api/v1/users?page=2&page_size=2&sort_by=id&sort_dir=asc")
+    resp = await client.get("/api/v1/admin/users?page=2&page_size=2&sort_by=id&sort_dir=asc")
     body = resp.json()
     assert len(body["items"]) == 2
     second_ids = [u["id"] for u in body["items"]]
@@ -85,7 +85,7 @@ async def test_list_users_pagination(make_user: Login, auth_client: AuthClient) 
     assert set(first_ids).isdisjoint(second_ids)
     assert max(first_ids) < min(second_ids)
 
-    resp = await client.get("/api/v1/users?page=3&page_size=2&sort_by=id&sort_dir=asc")
+    resp = await client.get("/api/v1/admin/users?page=3&page_size=2&sort_by=id&sort_dir=asc")
     assert len(resp.json()["items"]) == 1  # remainder
 
 
@@ -95,10 +95,10 @@ async def test_list_users_sort_by_name_and_email(make_user: Login, auth_client: 
     await make_user(email="z@example.com", first_name="Zoe", last_name="Zzz")
     client = await auth_client(admin)
 
-    resp = await client.get("/api/v1/users?sort_by=name&sort_dir=asc")
+    resp = await client.get("/api/v1/admin/users?sort_by=name&sort_dir=asc")
     assert [u["first_name"] for u in resp.json()["items"]] == ["Anna", "Mid", "Zoe"]
 
-    resp = await client.get("/api/v1/users?sort_by=email&sort_dir=desc")
+    resp = await client.get("/api/v1/admin/users?sort_by=email&sort_dir=desc")
     assert [u["email"] for u in resp.json()["items"]] == [
         "z@example.com",
         "m@example.com",
@@ -120,14 +120,14 @@ async def test_list_users_sort_by_created_at(
     await db_session.commit()
     client = await auth_client(admin)
 
-    resp = await client.get("/api/v1/users?sort_by=created_at&sort_dir=desc")
+    resp = await client.get("/api/v1/admin/users?sort_by=created_at&sort_dir=desc")
     assert [u["email"] for u in resp.json()["items"]] == [
         "new@example.com",
         "admin@example.com",
         "old@example.com",
     ]
 
-    resp = await client.get("/api/v1/users?sort_by=created_at&sort_dir=asc")
+    resp = await client.get("/api/v1/admin/users?sort_by=created_at&sort_dir=asc")
     assert [u["email"] for u in resp.json()["items"]] == [
         "old@example.com",
         "admin@example.com",
@@ -146,7 +146,7 @@ async def test_list_users_filter_by_name_searches_both_fields(
     client = await auth_client(admin)
 
     # "ali" matches Alice (first name) and Alicorn (last name), case-insensitively
-    resp = await client.get("/api/v1/users?name=ALI")
+    resp = await client.get("/api/v1/admin/users?name=ALI")
     assert {u["email"] for u in resp.json()["items"]} == {
         "alice@example.com",
         "bob@example.com",
@@ -158,7 +158,7 @@ async def test_list_users_filter_by_email(make_user: Login, auth_client: AuthCli
     await make_user(email="alice@example.com")
     client = await auth_client(admin)
 
-    resp = await client.get("/api/v1/users?email=ALICE")  # case-insensitive substring
+    resp = await client.get("/api/v1/admin/users?email=ALICE")  # case-insensitive substring
     assert {u["email"] for u in resp.json()["items"]} == {"alice@example.com"}
 
 
@@ -172,7 +172,7 @@ async def test_list_users_name_filter_escapes_wildcards(
     client = await auth_client(admin)
 
     # A literal '%' must not act as a wildcard (which would match everyone).
-    resp = await client.get("/api/v1/users", params={"name": "%"})
+    resp = await client.get("/api/v1/admin/users", params={"name": "%"})
     assert {u["email"] for u in resp.json()["items"]} == {"pct@example.com"}
 
 
@@ -182,15 +182,15 @@ async def test_list_users_filter_by_status(make_user: Login, auth_client: AuthCl
     await make_user(email="disabled@example.com", status=UserStatus.disabled)
     client = await auth_client(admin)
 
-    assert (await client.get("/api/v1/users")).json()["total"] == 3  # no filter
+    assert (await client.get("/api/v1/admin/users")).json()["total"] == 3  # no filter
 
-    resp = await client.get("/api/v1/users?status=active")
+    resp = await client.get("/api/v1/admin/users?status=active")
     assert {u["email"] for u in resp.json()["items"]} == {"admin@example.com"}
 
-    resp = await client.get("/api/v1/users?status=waiting_confirmation")
+    resp = await client.get("/api/v1/admin/users?status=waiting_confirmation")
     assert {u["email"] for u in resp.json()["items"]} == {"waiting@example.com"}
 
-    resp = await client.get("/api/v1/users?status=disabled")
+    resp = await client.get("/api/v1/admin/users?status=disabled")
     assert {u["email"] for u in resp.json()["items"]} == {"disabled@example.com"}
 
 
@@ -199,10 +199,10 @@ async def test_list_users_filter_by_role(make_user: Login, auth_client: AuthClie
     await make_user(email="member@example.com")
     client = await auth_client(admin)
 
-    resp = await client.get("/api/v1/users?role=admins")
+    resp = await client.get("/api/v1/admin/users?role=admins")
     assert {u["email"] for u in resp.json()["items"]} == {"admin@example.com"}
 
-    resp = await client.get("/api/v1/users?role=members")
+    resp = await client.get("/api/v1/admin/users?role=members")
     assert {u["email"] for u in resp.json()["items"]} == {"member@example.com"}
 
 
@@ -219,7 +219,7 @@ async def test_list_users_invalid_params_rejected(
         "status=bogus",
         "role=superuser",
     ):
-        resp = await client.get(f"/api/v1/users?{query}")
+        resp = await client.get(f"/api/v1/admin/users?{query}")
         assert resp.status_code == 422, query
 
 
@@ -231,7 +231,7 @@ async def test_get_user(make_user: Login, auth_client: AuthClient) -> None:
     target = await make_user(email="member@example.com", first_name="Jo", last_name="Ng")
     client = await auth_client(admin)
 
-    resp = await client.get(f"/api/v1/users/{target.id}")
+    resp = await client.get(f"/api/v1/admin/users/{target.id}")
     assert resp.status_code == 200
     body = resp.json()
     assert body["id"] == target.id
@@ -244,7 +244,7 @@ async def test_get_user_not_found(make_user: Login, auth_client: AuthClient) -> 
     admin = await make_user(email="admin@example.com", is_admin=True)
     client = await auth_client(admin)
 
-    resp = await client.get("/api/v1/users/999")
+    resp = await client.get("/api/v1/admin/users/999")
     assert resp.status_code == 404
     assert resp.json()["detail"] == "User not found"
 
@@ -254,13 +254,13 @@ async def test_get_user_as_member_forbidden(make_user: Login, auth_client: AuthC
     other = await make_user(email="other@example.com")
     client = await auth_client(member)
 
-    resp = await client.get(f"/api/v1/users/{other.id}")
+    resp = await client.get(f"/api/v1/admin/users/{other.id}")
     assert resp.status_code == 403
     assert resp.json()["detail"] == "Admin only"
 
 
 async def test_get_user_unauthenticated(client: AsyncClient) -> None:
-    resp = await client.get("/api/v1/users/1")
+    resp = await client.get("/api/v1/admin/users/1")
     assert resp.status_code == 401
 
 
@@ -272,7 +272,7 @@ async def test_create_user(make_user: Login, auth_client: AuthClient) -> None:
     client = await auth_client(admin)
 
     resp = await client.post(
-        "/api/v1/users",
+        "/api/v1/admin/users",
         json={
             "email": "newbie@example.com",
             "first_name": "New",
@@ -320,7 +320,7 @@ async def test_create_user_creates_no_household(
     client = await auth_client(admin)
 
     resp = await client.post(
-        "/api/v1/users",
+        "/api/v1/admin/users",
         json={
             "email": "newbie@example.com",
             "first_name": "New",
@@ -347,7 +347,7 @@ async def test_create_user_waiting_confirmation_creates_no_household_either(
     client = await auth_client(admin)
 
     resp = await client.post(
-        "/api/v1/users",
+        "/api/v1/admin/users",
         json={"email": "newbie@example.com", "first_name": "New", "last_name": "Member"},
     )
 
@@ -365,7 +365,7 @@ async def test_create_user_with_a_very_long_first_name(
     client = await auth_client(admin)
 
     resp = await client.post(
-        "/api/v1/users",
+        "/api/v1/admin/users",
         json={
             "email": "long@example.com",
             "first_name": "N" * 255,
@@ -384,7 +384,7 @@ async def test_create_user_duplicate_email(make_user: Login, auth_client: AuthCl
     client = await auth_client(admin)
 
     resp = await client.post(
-        "/api/v1/users",
+        "/api/v1/admin/users",
         json={
             "email": "taken@example.com",
             "first_name": "Dup",
@@ -401,7 +401,7 @@ async def test_create_user_normalises_email_case(make_user: Login, auth_client: 
     client = await auth_client(admin)
 
     resp = await client.post(
-        "/api/v1/users",
+        "/api/v1/admin/users",
         json={
             "email": "Mixed@Example.com",
             "first_name": "Mixed",
@@ -421,7 +421,7 @@ async def test_create_user_duplicate_email_case_insensitive(
     client = await auth_client(admin)
 
     resp = await client.post(
-        "/api/v1/users",
+        "/api/v1/admin/users",
         json={
             "email": "Taken@Example.com",
             "first_name": "Dup",
@@ -437,7 +437,7 @@ async def test_create_user_invalid_payload(make_user: Login, auth_client: AuthCl
     client = await auth_client(admin)
 
     resp = await client.post(
-        "/api/v1/users",
+        "/api/v1/admin/users",
         json={"email": "not-an-email", "first_name": "", "last_name": "", "password": "short"},
     )
     assert resp.status_code == 422
@@ -451,7 +451,7 @@ async def test_create_user_blank_first_name_rejected(
     client = await auth_client(admin)
 
     resp = await client.post(
-        "/api/v1/users",
+        "/api/v1/admin/users",
         json={
             "email": "blank@example.com",
             "first_name": "",
@@ -466,7 +466,7 @@ async def test_create_user_as_member_forbidden(make_user: Login, auth_client: Au
     member = await make_user(email="member@example.com")
     client = await auth_client(member)
     resp = await client.post(
-        "/api/v1/users",
+        "/api/v1/admin/users",
         json={
             "email": "x@example.com",
             "first_name": "Ex",
@@ -486,7 +486,7 @@ async def test_update_user_name_and_email(make_user: Login, auth_client: AuthCli
     client = await auth_client(admin)
 
     resp = await client.patch(
-        f"/api/v1/users/{member.id}",
+        f"/api/v1/admin/users/{member.id}",
         json={"first_name": "New", "last_name": "Name", "email": "renamed@example.com"},
     )
     assert resp.status_code == 200
@@ -501,7 +501,7 @@ async def test_update_user_email_conflict(make_user: Login, auth_client: AuthCli
     other = await make_user(email="other@example.com")
     client = await auth_client(admin)
 
-    resp = await client.patch(f"/api/v1/users/{member.id}", json={"email": other.email})
+    resp = await client.patch(f"/api/v1/admin/users/{member.id}", json={"email": other.email})
     assert resp.status_code == 409
 
 
@@ -512,7 +512,7 @@ async def test_update_own_unchanged_email_allowed(
     client = await auth_client(admin)
 
     resp = await client.patch(
-        f"/api/v1/users/{admin.id}",
+        f"/api/v1/admin/users/{admin.id}",
         json={"email": "admin@example.com", "first_name": "Renamed", "last_name": "Admin"},
     )
     assert resp.status_code == 200
@@ -523,7 +523,7 @@ async def test_update_own_unchanged_email_allowed(
 async def test_update_self_demote_forbidden(make_user: Login, auth_client: AuthClient) -> None:
     admin = await make_user(email="admin@example.com", is_admin=True)
     client = await auth_client(admin)
-    resp = await client.patch(f"/api/v1/users/{admin.id}", json={"is_admin": False})
+    resp = await client.patch(f"/api/v1/admin/users/{admin.id}", json={"is_admin": False})
     assert resp.status_code == 400
     assert resp.json()["detail"] == "You cannot demote or deactivate yourself"
 
@@ -531,7 +531,7 @@ async def test_update_self_demote_forbidden(make_user: Login, auth_client: AuthC
 async def test_update_self_deactivate_forbidden(make_user: Login, auth_client: AuthClient) -> None:
     admin = await make_user(email="admin@example.com", is_admin=True)
     client = await auth_client(admin)
-    resp = await client.patch(f"/api/v1/users/{admin.id}", json={"status": "disabled"})
+    resp = await client.patch(f"/api/v1/admin/users/{admin.id}", json={"status": "disabled"})
     assert resp.status_code == 400
 
 
@@ -544,7 +544,9 @@ async def test_update_password_revokes_tokens(
     assert await _token_count(db_session, member.id) == 1
     client = await auth_client(admin)
 
-    resp = await client.patch(f"/api/v1/users/{member.id}", json={"password": "newpassword123"})
+    resp = await client.patch(
+        f"/api/v1/admin/users/{member.id}", json={"password": "newpassword123"}
+    )
 
     assert resp.status_code == 200
     assert await _token_count(db_session, member.id) == 0
@@ -558,7 +560,7 @@ async def test_update_deactivate_revokes_tokens(
     await _issue_token(db_session, member)
     client = await auth_client(admin)
 
-    resp = await client.patch(f"/api/v1/users/{member.id}", json={"status": "disabled"})
+    resp = await client.patch(f"/api/v1/admin/users/{member.id}", json={"status": "disabled"})
 
     assert resp.status_code == 200
     assert resp.json()["status"] == "disabled"
@@ -568,7 +570,7 @@ async def test_update_deactivate_revokes_tokens(
 async def test_update_missing_user(make_user: Login, auth_client: AuthClient) -> None:
     admin = await make_user(email="admin@example.com", is_admin=True)
     client = await auth_client(admin)
-    resp = await client.patch("/api/v1/users/999999", json={"first_name": "Nope"})
+    resp = await client.patch("/api/v1/admin/users/999999", json={"first_name": "Nope"})
     assert resp.status_code == 404
 
 
@@ -586,7 +588,7 @@ async def test_impersonation_round_trip(client: AsyncClient, make_user: Login) -
         json={"email": "admin@example.com", "password": "password12345"},
     )
 
-    imp = await client.post(f"/api/v1/users/{member.id}/impersonate")
+    imp = await client.post(f"/api/v1/admin/users/{member.id}/impersonate")
     assert imp.status_code == 200
     assert imp.json()["email"] == "member@example.com"
 
@@ -606,7 +608,7 @@ async def test_impersonation_round_trip(client: AsyncClient, make_user: Login) -
 async def test_impersonate_self_forbidden(make_user: Login, auth_client: AuthClient) -> None:
     admin = await make_user(email="admin@example.com", is_admin=True)
     client = await auth_client(admin)
-    resp = await client.post(f"/api/v1/users/{admin.id}/impersonate")
+    resp = await client.post(f"/api/v1/admin/users/{admin.id}/impersonate")
     assert resp.status_code == 400
     assert resp.json()["detail"] == "You are already this user"
 
@@ -615,7 +617,7 @@ async def test_impersonate_inactive_forbidden(make_user: Login, auth_client: Aut
     admin = await make_user(email="admin@example.com", is_admin=True)
     member = await make_user(email="member@example.com", status=UserStatus.disabled)
     client = await auth_client(admin)
-    resp = await client.post(f"/api/v1/users/{member.id}/impersonate")
+    resp = await client.post(f"/api/v1/admin/users/{member.id}/impersonate")
     assert resp.status_code == 400
     assert resp.json()["detail"] == "Cannot log in as an inactive user"
 
@@ -624,7 +626,7 @@ async def test_impersonate_as_member_forbidden(make_user: Login, auth_client: Au
     member = await make_user(email="member@example.com")
     target = await make_user(email="target@example.com")
     client = await auth_client(member)
-    resp = await client.post(f"/api/v1/users/{target.id}/impersonate")
+    resp = await client.post(f"/api/v1/admin/users/{target.id}/impersonate")
     assert resp.status_code == 403
 
 
@@ -642,11 +644,11 @@ async def test_nested_impersonation_revokes_intermediate_token(
         "/api/v1/auth/login",
         json={"email": "admin@example.com", "password": "password12345"},
     )
-    await client.post(f"/api/v1/users/{bob.id}/impersonate")
+    await client.post(f"/api/v1/admin/users/{bob.id}/impersonate")
     bob_token = client.cookies.get("isachore_token")
     assert bob_token is not None
 
-    resp = await client.post(f"/api/v1/users/{member.id}/impersonate")
+    resp = await client.post(f"/api/v1/admin/users/{member.id}/impersonate")
     assert resp.status_code == 200
 
     orphaned = await db_session.scalar(
@@ -677,10 +679,10 @@ async def test_impersonating_admin_cannot_demote_real_operator(
         "/api/v1/auth/login",
         json={"email": "admin@example.com", "password": "password12345"},
     )
-    await client.post(f"/api/v1/users/{eve.id}/impersonate")
+    await client.post(f"/api/v1/admin/users/{eve.id}/impersonate")
 
     # Acting as Eve, demoting the operator's own real account must be refused
-    resp = await client.patch(f"/api/v1/users/{admin.id}", json={"is_admin": False})
+    resp = await client.patch(f"/api/v1/admin/users/{admin.id}", json={"is_admin": False})
 
     assert resp.status_code == 400
     assert resp.json()["detail"] == "You cannot demote or deactivate yourself"
@@ -698,9 +700,9 @@ async def test_impersonating_admin_cannot_deactivate_real_operator(
         "/api/v1/auth/login",
         json={"email": "admin@example.com", "password": "password12345"},
     )
-    await client.post(f"/api/v1/users/{eve.id}/impersonate")
+    await client.post(f"/api/v1/admin/users/{eve.id}/impersonate")
 
-    resp = await client.delete(f"/api/v1/users/{admin.id}")
+    resp = await client.delete(f"/api/v1/admin/users/{admin.id}")
 
     assert resp.status_code == 400
     assert resp.json()["detail"] == "You cannot deactivate yourself"
@@ -718,11 +720,11 @@ async def test_impersonating_admin_cannot_demote_current_session(
         "/api/v1/auth/login",
         json={"email": "admin@example.com", "password": "password12345"},
     )
-    await client.post(f"/api/v1/users/{eve.id}/impersonate")
+    await client.post(f"/api/v1/admin/users/{eve.id}/impersonate")
 
     # The impersonated session identity is still guarded (the "as well as the
     # current one" half of the fix)
-    resp = await client.patch(f"/api/v1/users/{eve.id}", json={"is_admin": False})
+    resp = await client.patch(f"/api/v1/admin/users/{eve.id}", json={"is_admin": False})
 
     assert resp.status_code == 400
     assert resp.json()["detail"] == "You cannot demote or deactivate yourself"
@@ -741,11 +743,11 @@ async def test_impersonating_admin_can_demote_other_admin(
         "/api/v1/auth/login",
         json={"email": "admin@example.com", "password": "password12345"},
     )
-    await client.post(f"/api/v1/users/{eve.id}/impersonate")
+    await client.post(f"/api/v1/admin/users/{eve.id}/impersonate")
 
     # A third admin who is neither the operator nor the impersonated session can
     # still be managed: the guard is scoped to the self-ids, not all admins
-    resp = await client.patch(f"/api/v1/users/{carol.id}", json={"is_admin": False})
+    resp = await client.patch(f"/api/v1/admin/users/{carol.id}", json={"is_admin": False})
 
     assert resp.status_code == 200
     assert resp.json()["is_admin"] is False
@@ -764,7 +766,7 @@ async def test_delete_user_soft(
     await _issue_token(db_session, member)
     client = await auth_client(admin)
 
-    resp = await client.delete(f"/api/v1/users/{member.id}")
+    resp = await client.delete(f"/api/v1/admin/users/{member.id}")
 
     assert resp.status_code == 204
     assert await _token_count(db_session, member.id) == 0
@@ -778,7 +780,7 @@ async def test_delete_user_soft(
 async def test_delete_self_forbidden(make_user: Login, auth_client: AuthClient) -> None:
     admin = await make_user(email="admin@example.com", is_admin=True)
     client = await auth_client(admin)
-    resp = await client.delete(f"/api/v1/users/{admin.id}")
+    resp = await client.delete(f"/api/v1/admin/users/{admin.id}")
     assert resp.status_code == 400
     assert resp.json()["detail"] == "You cannot deactivate yourself"
 
@@ -786,7 +788,7 @@ async def test_delete_self_forbidden(make_user: Login, auth_client: AuthClient) 
 async def test_delete_missing_user(make_user: Login, auth_client: AuthClient) -> None:
     admin = await make_user(email="admin@example.com", is_admin=True)
     client = await auth_client(admin)
-    resp = await client.delete("/api/v1/users/999999")
+    resp = await client.delete("/api/v1/admin/users/999999")
     assert resp.status_code == 404
 
 
@@ -794,7 +796,7 @@ async def test_delete_as_member_forbidden(make_user: Login, auth_client: AuthCli
     member = await make_user(email="member@example.com")
     target = await make_user(email="target@example.com")
     client = await auth_client(member)
-    resp = await client.delete(f"/api/v1/users/{target.id}")
+    resp = await client.delete(f"/api/v1/admin/users/{target.id}")
     assert resp.status_code == 403
 
 
@@ -828,7 +830,7 @@ async def test_create_user_confirmation_on_starts_waiting_and_emails(
     client = await auth_client(admin)
 
     resp = await client.post(
-        "/api/v1/users",
+        "/api/v1/admin/users",
         json={"email": "newbie@example.com", "first_name": "New", "last_name": "Member"},
     )
 
@@ -850,7 +852,7 @@ async def test_create_user_confirmation_on_ignores_password(
     client = await auth_client(admin)
 
     await client.post(
-        "/api/v1/users",
+        "/api/v1/admin/users",
         json={
             "email": "newbie@example.com",
             "first_name": "New",
@@ -874,7 +876,7 @@ async def test_create_user_confirmation_on_without_smtp_rejected(
     client = await auth_client(admin)
 
     resp = await client.post(
-        "/api/v1/users",
+        "/api/v1/admin/users",
         json={"email": "newbie@example.com", "first_name": "New", "last_name": "Member"},
     )
     assert resp.status_code == 400
@@ -887,7 +889,7 @@ async def test_create_user_no_password_when_confirmation_off_rejected(
     client = await auth_client(admin)
 
     resp = await client.post(
-        "/api/v1/users",
+        "/api/v1/admin/users",
         json={"email": "newbie@example.com", "first_name": "New", "last_name": "Member"},
     )
     assert resp.status_code == 400
@@ -902,7 +904,7 @@ async def test_force_active_unconfirmed_allowed(
     member = await make_user(email="member@example.com", status=UserStatus.waiting_confirmation)
     client = await auth_client(admin)
 
-    resp = await client.patch(f"/api/v1/users/{member.id}", json={"status": "active"})
+    resp = await client.patch(f"/api/v1/admin/users/{member.id}", json={"status": "active"})
 
     assert resp.status_code == 200
     assert resp.json()["status"] == "active"
@@ -916,7 +918,9 @@ async def test_update_to_waiting_resends_confirmation(
     member = await make_user(email="member@example.com")
     client = await auth_client(admin)
 
-    resp = await client.patch(f"/api/v1/users/{member.id}", json={"status": "waiting_confirmation"})
+    resp = await client.patch(
+        f"/api/v1/admin/users/{member.id}", json={"status": "waiting_confirmation"}
+    )
 
     assert resp.status_code == 200
     assert resp.json()["status"] == "waiting_confirmation"
@@ -931,7 +935,7 @@ async def test_resend_confirmation(
     member = await make_user(email="member@example.com", status=UserStatus.waiting_confirmation)
     client = await auth_client(admin)
 
-    resp = await client.post(f"/api/v1/users/{member.id}/resend-confirmation")
+    resp = await client.post(f"/api/v1/admin/users/{member.id}/resend-confirmation")
 
     assert resp.status_code == 204
     assert await _confirmation_count(db_session, member.id) == 1
@@ -946,7 +950,7 @@ async def test_resend_confirmation_not_waiting_rejected(
     member = await make_user(email="member@example.com")  # active
     client = await auth_client(admin)
 
-    resp = await client.post(f"/api/v1/users/{member.id}/resend-confirmation")
+    resp = await client.post(f"/api/v1/admin/users/{member.id}/resend-confirmation")
     assert resp.status_code == 400
 
 
@@ -957,7 +961,7 @@ async def test_resend_confirmation_without_smtp_rejected(
     member = await make_user(email="member@example.com", status=UserStatus.waiting_confirmation)
     client = await auth_client(admin)
 
-    resp = await client.post(f"/api/v1/users/{member.id}/resend-confirmation")
+    resp = await client.post(f"/api/v1/admin/users/{member.id}/resend-confirmation")
     assert resp.status_code == 400
 
 
@@ -967,7 +971,7 @@ async def test_resend_confirmation_as_member_forbidden(
     member = await make_user(email="member@example.com")
     target = await make_user(email="target@example.com", status=UserStatus.waiting_confirmation)
     client = await auth_client(member)
-    resp = await client.post(f"/api/v1/users/{target.id}/resend-confirmation")
+    resp = await client.post(f"/api/v1/admin/users/{target.id}/resend-confirmation")
     assert resp.status_code == 403
 
 
@@ -979,10 +983,10 @@ async def test_deactivate_revokes_confirmation_tokens(
     admin = await make_user(email="admin@example.com", is_admin=True)
     member = await make_user(email="member@example.com", status=UserStatus.waiting_confirmation)
     client = await auth_client(admin)
-    await client.post(f"/api/v1/users/{member.id}/resend-confirmation")
+    await client.post(f"/api/v1/admin/users/{member.id}/resend-confirmation")
     assert await _confirmation_count(db_session, member.id) == 1
 
-    resp = await client.delete(f"/api/v1/users/{member.id}")
+    resp = await client.delete(f"/api/v1/admin/users/{member.id}")
 
     assert resp.status_code == 204
     assert await _confirmation_count(db_session, member.id) == 0
@@ -994,10 +998,10 @@ async def test_update_to_disabled_revokes_confirmation_tokens(
     admin = await make_user(email="admin@example.com", is_admin=True)
     member = await make_user(email="member@example.com", status=UserStatus.waiting_confirmation)
     client = await auth_client(admin)
-    await client.post(f"/api/v1/users/{member.id}/resend-confirmation")
+    await client.post(f"/api/v1/admin/users/{member.id}/resend-confirmation")
     assert await _confirmation_count(db_session, member.id) == 1
 
-    resp = await client.patch(f"/api/v1/users/{member.id}", json={"status": "disabled"})
+    resp = await client.patch(f"/api/v1/admin/users/{member.id}", json={"status": "disabled"})
 
     assert resp.status_code == 200
     assert await _confirmation_count(db_session, member.id) == 0
@@ -1012,5 +1016,7 @@ async def test_update_to_waiting_without_smtp_rejected(
     member = await make_user(email="member@example.com")
     client = await auth_client(admin)
 
-    resp = await client.patch(f"/api/v1/users/{member.id}", json={"status": "waiting_confirmation"})
+    resp = await client.patch(
+        f"/api/v1/admin/users/{member.id}", json={"status": "waiting_confirmation"}
+    )
     assert resp.status_code == 400

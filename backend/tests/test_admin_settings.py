@@ -19,7 +19,7 @@ async def test_read_settings_defaults(make_user: Login, auth_client: AuthClient)
     admin = await make_user(email="admin@example.com", is_admin=True)
     client = await auth_client(admin)
 
-    resp = await client.get("/api/v1/settings")
+    resp = await client.get("/api/v1/admin/settings")
 
     assert resp.status_code == 200
     assert resp.json() == {
@@ -45,7 +45,7 @@ async def test_read_settings_reports_smtp_configured(
     admin = await make_user(email="admin@example.com", is_admin=True)
     client = await auth_client(admin)
 
-    resp = await client.get("/api/v1/settings")
+    resp = await client.get("/api/v1/admin/settings")
     body = resp.json()
     assert body["smtp_configured"] is True
     assert body["smtp_host"] == "mailpit"
@@ -56,12 +56,12 @@ async def test_read_settings_reports_smtp_configured(
 async def test_read_settings_member_forbidden(make_user: Login, auth_client: AuthClient) -> None:
     member = await make_user(email="member@example.com")
     client = await auth_client(member)
-    resp = await client.get("/api/v1/settings")
+    resp = await client.get("/api/v1/admin/settings")
     assert resp.status_code == 403
 
 
 async def test_read_settings_unauthenticated(client: AsyncClient) -> None:
-    resp = await client.get("/api/v1/settings")
+    resp = await client.get("/api/v1/admin/settings")
     assert resp.status_code == 401
 
 
@@ -74,7 +74,7 @@ async def test_enable_confirmation_without_smtp_rejected(
     admin = await make_user(email="admin@example.com", is_admin=True)
     client = await auth_client(admin)
 
-    resp = await client.patch("/api/v1/settings", json={"require_confirmation": True})
+    resp = await client.patch("/api/v1/admin/settings", json={"require_confirmation": True})
     assert resp.status_code == 400
     assert "SMTP" in resp.json()["detail"]
 
@@ -85,12 +85,12 @@ async def test_enable_confirmation_with_smtp(
     admin = await make_user(email="admin@example.com", is_admin=True)
     client = await auth_client(admin)
 
-    resp = await client.patch("/api/v1/settings", json={"require_confirmation": True})
+    resp = await client.patch("/api/v1/admin/settings", json={"require_confirmation": True})
     assert resp.status_code == 200
     assert resp.json()["require_confirmation"] is True
 
     # Persisted across requests.
-    again = await client.get("/api/v1/settings")
+    again = await client.get("/api/v1/admin/settings")
     assert again.json()["require_confirmation"] is True
 
 
@@ -100,7 +100,7 @@ async def test_disable_confirmation_allowed_without_smtp(
     admin = await make_user(email="admin@example.com", is_admin=True)
     client = await auth_client(admin)
 
-    resp = await client.patch("/api/v1/settings", json={"require_confirmation": False})
+    resp = await client.patch("/api/v1/admin/settings", json={"require_confirmation": False})
     assert resp.status_code == 200
     assert resp.json()["require_confirmation"] is False
 
@@ -108,7 +108,7 @@ async def test_disable_confirmation_allowed_without_smtp(
 async def test_update_settings_member_forbidden(make_user: Login, auth_client: AuthClient) -> None:
     member = await make_user(email="member@example.com")
     client = await auth_client(member)
-    resp = await client.patch("/api/v1/settings", json={"require_confirmation": True})
+    resp = await client.patch("/api/v1/admin/settings", json={"require_confirmation": True})
     assert resp.status_code == 403
 
 
@@ -118,7 +118,7 @@ async def test_update_settings_member_forbidden(make_user: Login, auth_client: A
 async def test_test_email_without_smtp_rejected(make_user: Login, auth_client: AuthClient) -> None:
     admin = await make_user(email="admin@example.com", is_admin=True)
     client = await auth_client(admin)
-    resp = await client.post("/api/v1/settings/test-email")
+    resp = await client.post("/api/v1/admin/settings/test-email")
     assert resp.status_code == 400
 
 
@@ -128,7 +128,7 @@ async def test_test_email_sends_to_admin(
     admin = await make_user(email="admin@example.com", is_admin=True)
     client = await auth_client(admin)
 
-    resp = await client.post("/api/v1/settings/test-email")
+    resp = await client.post("/api/v1/admin/settings/test-email")
 
     assert resp.status_code == 204
     assert len(smtp) == 1
@@ -147,14 +147,14 @@ async def test_test_email_send_failure_returns_502(
     # Override the recorder the smtp fixture installed.
     monkeypatch.setattr("aiosmtplib.send", _boom)
 
-    resp = await client.post("/api/v1/settings/test-email")
+    resp = await client.post("/api/v1/admin/settings/test-email")
     assert resp.status_code == 502
 
 
 async def test_test_email_member_forbidden(make_user: Login, auth_client: AuthClient) -> None:
     member = await make_user(email="member@example.com")
     client = await auth_client(member)
-    resp = await client.post("/api/v1/settings/test-email")
+    resp = await client.post("/api/v1/admin/settings/test-email")
     assert resp.status_code == 403
 
 
@@ -167,11 +167,11 @@ async def test_test_email_cooldown_blocks_second_send(
     admin = await make_user(email="admin@example.com", is_admin=True)
     client = await auth_client(admin)
 
-    first = await client.post("/api/v1/settings/test-email")
+    first = await client.post("/api/v1/admin/settings/test-email")
     assert first.status_code == 204
 
     # A second send inside the window is refused before another mail goes out.
-    second = await client.post("/api/v1/settings/test-email")
+    second = await client.post("/api/v1/admin/settings/test-email")
     assert second.status_code == 429
     assert 0 < int(second.headers["Retry-After"]) <= settings.test_email_cooldown
     assert len(smtp) == 1
@@ -184,11 +184,11 @@ async def test_test_email_cooldown_is_per_admin(
     admin_b = await make_user(email="admin-b@example.com", is_admin=True)
 
     client = await auth_client(admin_a)
-    assert (await client.post("/api/v1/settings/test-email")).status_code == 204
+    assert (await client.post("/api/v1/admin/settings/test-email")).status_code == 204
 
     # A different admin has their own cooldown, so their first send still works.
     client = await auth_client(admin_b)
-    assert (await client.post("/api/v1/settings/test-email")).status_code == 204
+    assert (await client.post("/api/v1/admin/settings/test-email")).status_code == 204
     assert len(smtp) == 2
 
 
@@ -209,8 +209,8 @@ async def test_test_email_cooldown_fails_open_when_redis_unavailable(
 
     monkeypatch.setattr(fake_redis, "set", boom)
 
-    assert (await client.post("/api/v1/settings/test-email")).status_code == 204
-    assert (await client.post("/api/v1/settings/test-email")).status_code == 204
+    assert (await client.post("/api/v1/admin/settings/test-email")).status_code == 204
+    assert (await client.post("/api/v1/admin/settings/test-email")).status_code == 204
     assert len(smtp) == 2
 
 
@@ -230,7 +230,7 @@ async def test_read_settings_normalises_a_blank_provider_name(
     admin = await make_user(email="admin@example.com", is_admin=True)
     client = await auth_client(admin)
 
-    resp = await client.get("/api/v1/settings")
+    resp = await client.get("/api/v1/admin/settings")
 
     assert resp.json()["oidc_configured"] is True
     assert resp.json()["oidc_provider_name"] == "SSO"
@@ -245,7 +245,7 @@ async def test_read_settings_never_exposes_the_client_secret(
     admin = await make_user(email="admin@example.com", is_admin=True)
     client = await auth_client(admin)
 
-    resp = await client.get("/api/v1/settings")
+    resp = await client.get("/api/v1/admin/settings")
 
     assert "shh-client-secret" not in resp.text
     assert "client_secret" not in resp.text

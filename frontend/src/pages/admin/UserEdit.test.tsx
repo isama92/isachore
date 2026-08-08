@@ -41,8 +41,8 @@ function stubFetch(opts: {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).split('?')[0]
     const method = (init?.method ?? 'GET').toUpperCase()
-    if (method === 'GET' && path.endsWith('/api/v1/settings')) return jsonBody(settings)
-    if (method === 'GET' && /\/api\/v1\/users\/\d+$/.test(path)) return jsonBody(opts.user)
+    if (method === 'GET' && path.endsWith('/api/v1/admin/settings')) return jsonBody(settings)
+    if (method === 'GET' && /\/api\/v1\/admin\/users\/\d+$/.test(path)) return jsonBody(opts.user)
     if (method !== 'GET' && opts.mutate) return opts.mutate(method, String(input))
     return jsonBody(undefined, 204)
   })
@@ -89,7 +89,9 @@ describe('UserEdit', () => {
     await user.click(screen.getByRole('button', { name: 'Save' }))
 
     expect(await screen.findByText('admin-users-list')).toBeInTheDocument()
-    expect(bodyOf(fetchMock, 'PATCH', '/api/v1/users/2')).toMatchObject({ status: 'disabled' })
+    expect(bodyOf(fetchMock, 'PATCH', '/api/v1/admin/users/2')).toMatchObject({
+      status: 'disabled',
+    })
   })
 
   it('warns when the loaded user is active but never confirmed and confirmation is on', async () => {
@@ -119,7 +121,7 @@ describe('UserEdit', () => {
   it('shows a not-found message when the user is missing', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input).split('?')[0]
-      if (path.endsWith('/api/v1/settings')) return jsonBody(makeServerSettings())
+      if (path.endsWith('/api/v1/admin/settings')) return jsonBody(makeServerSettings())
       return jsonBody({ detail: 'User not found' }, 404)
     })
     renderEdit(fetchMock)
