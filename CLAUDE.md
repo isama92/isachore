@@ -1498,9 +1498,14 @@ the negative paths (401/403/400/404/409), not just the happy one.
 
 ## Gotchas
 
-- After changing `frontend/package.json`: run `npm install` locally (pre-commit
-  hooks use local node_modules) AND `docker compose exec frontend npm install` (a
-  named volume shadows the container's node_modules).
+- After changing `frontend/package.json` **or `frontend/package-lock.json`**: sync both
+  node_modules, locally (pre-commit hooks use the local copy) AND with
+  `docker compose exec frontend npm install` (a named volume shadows the container's).
+  **A lockfile-only change counts**, which is easy to miss because the rule used to name
+  `package.json` alone: the shadowing is identical, so skipping the container half leaves
+  the dev stack running the old tree indefinitely with nothing on screen to say so. Use
+  `npm ci` on the host for a lockfile refresh rather than `npm install` - `ci` installs the
+  lockfile exactly, where `install` is free to rewrite the versions you just pinned.
 - After changing `backend/pyproject.toml` deps: the venv is baked into the image
   at `/opt/venv`, so update the lock and reinstall with
   `docker compose exec backend uv sync --no-install-project`, then rebuild
@@ -1546,9 +1551,26 @@ the negative paths (401/403/400/404/409), not just the happy one.
   components above). `ui/chart.test.tsx` and `tsc` both fail if either is dropped,
   so it cannot merge, but the failure reads nothing like "you accepted an overwrite":
   reflexively hitting `y` here costs an afternoon. The radix-nova style ships
-  `@import 'shadcn/tailwind.css'` (the `shadcn` runtime dep supplies the
-  `data-open`/`data-checked`/... variants), plus the unified `radix-ui` package
-  and `tw-animate-css`: don't remove them.
+  `@import 'shadcn/tailwind.css'` (the `shadcn` package supplies the
+  `data-open`/`data-checked`/... variants, resolved through its `exports` map to
+  `dist/tailwind.css`), plus the unified `radix-ui` package and `tw-animate-css`:
+  don't remove them.
+- **`shadcn` is a `devDependency`, and that is deliberate even though the app's CSS
+  imports it.** It is needed to *build*, never to run: nothing in `src/` imports its
+  JavaScript, and the prod image is `nginx:stable-alpine` serving static assets, so no
+  `node_modules` ships at all. Classifying it as a runtime dependency put **312 of 492**
+  packages into the production graph that only it reaches - `express`, `hono`,
+  `@modelcontextprotocol/sdk`, `cors`, `jose`, `undici`, `eventsource`, a whole MCP server
+  stack behind a stylesheet - and every transitive CVE in that tree then read as a
+  production advisory. Moving it changed no build output whatsoever (the emitted CSS is
+  byte-identical, same content hash), because both `npm ci` sites install dev dependencies:
+  `docker/frontend.Dockerfile`'s base stage and `ci.yml`'s frontend job.
+
+  **The one thing that would break it: adding `--omit=dev` or `--production` to that base
+  stage** as an image-size optimisation. The build needs the package, so the import would
+  fail to resolve - loudly, at build time, not silently at runtime. If image size ever
+  matters there, split the install rather than pruning dev dependencies out of the stage
+  that compiles the SPA.
 - The shadcn radius scale (`--radius-sm/md/lg/...`) is deliberately NOT redefined
   in `index.css`; brand roundness comes from `rounded-input` (13px) /
   `rounded-button` (15px). tailwind-merge does not dedupe those custom radius
