@@ -886,23 +886,27 @@ pre-commit run --all-files                           # what the git hook runs
   which is why the bug survived two tie tests that both happened to tie on the second name.
 
   **The exclusion anchors on the assignee (`occ.assignee_id`), NOT on whoever was credited with
-  the completion.** The two diverge whenever anybody other than the person on the hook does the
-  chore, which is an everyday event rather than a corner: `complete_chore` defaults the credit
-  to the *caller* (`completed_by_id = user.id`), any member may complete any chore, and
-  `Home.tsx`'s `requestCredit` skips the credit dialog entirely when the caller is one of the
-  chore's assignees - **any** of them, not the one who is up. So in a two-person household
-  where both are assignees, Anna tapping Done on Bob's turn credits Anna with no dialog in
-  sight, and the successor is derived by dropping *Bob*. Where that bites is a level tally:
-  the chore can pass to somebody who has just done it.
+  the completion.** Somebody other than the person on the hook completing a chore is an
+  everyday event - `complete_chore` defaults the credit to the *caller*, any member may
+  complete any chore, and `Home.tsx`'s `requestCredit` skips the credit dialog entirely when
+  the caller is one of the chore's assignees, **any** of them rather than the one who is up.
+  But that alone never reaches the tie rule. **With the default `turn_length` of 1 and two
+  assignees the two anchors cannot disagree**: the chore sits with whoever is behind, so a
+  completion by anyone else only pushes that person further ahead, leaving the one behind
+  strictly least and holding it - no tie forms. A tie needs the person who is up to do it
+  themselves, and then both anchors name them. Taking turns, a manual override, or a third
+  assignee is what it takes to make them different people at a tie.
 
-  Kept deliberately, for three reasons - and this is the paragraph to read before re-opening
-  it, because the case is commoner than it looks: the ask was to force the *assignment* to
-  move; `alphabetical` steps from `current` and `random` excludes it, so any other anchor
-  makes `least_done` the one strategy whose rotation reads a different column; and
-  `complete_chore` lets any caller credit *themselves* whether or not they are in the pool, so
-  excluding the completer would silently do nothing for a non-assignee. `_completion_tally`
-  keying on `completed_by_user_id` is what carries the completer's work instead, so nobody's
-  effort goes unrecorded either way - what is at stake is only who is up next.
+  Where they do differ, **the turn is the unit to reason in**, and that is the product call
+  (raised and settled with the reporter): with `turn_length` 2, Anna holds the turn and Bob
+  does one of the two, so the turn that just ended was *Anna's* and the next belongs to
+  somebody else, whoever happened to do the work inside it. Three mechanical reasons agree:
+  the ask was to force the *assignment* to move; `alphabetical` steps from `current` and
+  `random` excludes it, so any other anchor makes `least_done` the one strategy whose rotation
+  reads a different column; and `complete_chore` lets any caller credit *themselves* whether or
+  not they are in the pool, so excluding the completer would silently do nothing for a
+  non-assignee. `_completion_tally` keying on `completed_by_user_id` carries the completer's
+  work either way, so nobody's effort goes unrecorded - only who is up next is at stake.
 
   Five further consequences worth keeping straight:
   - **`initial_assignee` takes the tally too, and breaks its ties by name alone**, there being

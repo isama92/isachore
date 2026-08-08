@@ -547,6 +547,46 @@ async def test_complete_least_done_ranks_on_the_counts_with_nobody_on_the_hook(
     assert await _current_assignee_id(client, chore.id) == bob.id
 
 
+async def test_complete_ends_a_turn_on_the_person_who_held_it_not_the_one_who_helped(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    """The one shape where "drop whoever is on the hook" and "drop whoever just did it" give
+    different answers, so this is what pins which rule the app follows. Anna holds a turn of
+    two and Bob does the second of them, which levels the tally with the two rules naming
+    different people. The turn that ended was Anna's, so the next one is somebody else's
+    whoever happened to do the work inside it - the assignee is the anchor, not the completer.
+
+    Everywhere else the two agree. At the default turn length of one the chore sits with
+    whoever is behind, so a completion by anybody else only pushes them further ahead and no
+    tie forms at all; a tie needs the person who is up to do it themselves, and then the two
+    rules are naming the same person."""
+    chore, anna, bob = await _daily_rotating_chore(
+        make_user,
+        make_household,
+        make_chore,
+        assignment_type=AssignmentType.least_done,
+        turn_length=2,
+    )
+    client = await auth_client(anna)
+
+    async def complete_as(assignee_id: int) -> None:
+        resp = await client.post(
+            f"/api/v1/chores/{chore.id}/complete", json={"completed_by_user_id": assignee_id}
+        )
+        assert resp.status_code == 201
+
+    assert await _current_assignee_id(client, chore.id) == anna.id
+    await complete_as(anna.id)
+    assert await _current_assignee_id(client, chore.id) == anna.id  # one of two, still hers
+    await complete_as(bob.id)
+    # Level at one each, and Anna's turn is up. Dropping the completer instead would leave it
+    # on Anna, who has done only half a turn of two.
+    assert await _current_assignee_id(client, chore.id) == bob.id
+
+
 async def test_complete_mid_turn_re_derives_an_assignee_who_left_the_pool(
     make_user: MakeUser,
     make_household: MakeHousehold,

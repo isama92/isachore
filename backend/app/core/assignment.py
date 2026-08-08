@@ -118,18 +118,27 @@ def next_assignee(
             # stayed where it was (issue #58).
             #
             # **The exclusion anchors on `current` - who is on the hook - and NOT on whoever
-            # was credited with the completion.** The two diverge whenever anybody but the
-            # person up does the chore, which is everyday rather than rare: the credit
-            # defaults to the caller, and Home shows no credit dialog at all to a caller who
-            # is one of the assignees. On a level tally that means the chore can pass to
-            # somebody who has just done it. Kept deliberately, for three reasons: the ask
-            # was to force the *assignment* to move; `alphabetical` steps from `current` and
-            # `random` excludes it, so any other anchor makes this the one strategy whose
-            # rotation reads a different column; and a completion can be credited to somebody
-            # outside the pool (`complete_chore` always lets a caller credit themselves),
-            # where excluding them would silently do nothing. The tally is what carries the
-            # completer's work, so only who is up next is at stake. See CLAUDE.md before
-            # re-opening it.
+            # was credited with the completion.** Anybody but the person up completing a
+            # chore is an everyday event (the credit defaults to the caller, and Home shows
+            # no credit dialog at all to a caller who is already an assignee), but it reaches
+            # this line far less often than that suggests. With the default `turn_length` of
+            # 1 and two assignees it cannot: the chore sits with whoever is behind, so
+            # somebody else completing it only pushes that person further ahead, leaving the
+            # one behind still strictly least and holding it. A tie needs the person who is
+            # up to do it themselves - and then the two anchors name the same person. It
+            # takes taking turns, a manual override, or a third assignee for them to differ.
+            #
+            # Where they do, the turn is the right unit to reason in, and that is the product
+            # call (confirmed with the reporter, who raised it): with `turn_length` 2, Anna
+            # holds the turn and Bob does one of the two, so the turn that just ended was
+            # *Anna's* and the next belongs to somebody else, whoever happened to do the work
+            # inside it. Three mechanical reasons agree: the ask was to force the
+            # *assignment* to move; `alphabetical` steps from `current` and `random` excludes
+            # it, so any other anchor makes this the one strategy whose rotation reads a
+            # different column; and a completion can be credited to somebody outside the pool
+            # (`complete_chore` always lets a caller credit themselves), where excluding the
+            # completer would silently do nothing. The tally carries their work either way,
+            # so only who is up next is ever at stake.
             #
             # `scored` is built once so the counts behind `fewest` are, structurally, the
             # counts behind `tied` - not two comprehensions that happen to agree.
