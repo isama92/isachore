@@ -32,6 +32,29 @@ def test_initial_alphabetical_and_least_done_pick_first_by_name() -> None:
     assert initial_assignee(AssignmentType.least_done, pool) is ALICE
 
 
+def test_initial_least_done_ranks_on_the_counts_when_it_is_given_them() -> None:
+    # Bob and Cara are both on zero, so the tie falls to Bob by name - Alice is out of it
+    # despite sorting first, which is the whole point of passing a tally.
+    pool = [CARA, ALICE, BOB]
+    assert initial_assignee(AssignmentType.least_done, pool, counts={ALICE.id: 3}) is BOB
+
+
+def test_initial_least_done_without_counts_gives_the_old_alphabetical_answer() -> None:
+    # The identity `create_chore`, `db/seed.py` and the `make_chore` fixture all lean on:
+    # every key reads 0, so `min` returns the first of `_ordered`. If this ever stops
+    # holding, those three call sites need a tally they currently have nothing to build.
+    pool = [CARA, ALICE, BOB]
+    assert initial_assignee(AssignmentType.least_done, pool) is ALICE
+    assert initial_assignee(AssignmentType.least_done, pool, counts={}) is ALICE
+
+
+def test_initial_alphabetical_ignores_the_counts() -> None:
+    # Pins the arm split: only least_done reads the tally, so a chore that says
+    # "alphabetical" still starts with Alice however much she has already done.
+    pool = [CARA, ALICE, BOB]
+    assert initial_assignee(AssignmentType.alphabetical, pool, counts={ALICE.id: 9}) is ALICE
+
+
 def test_initial_manual_multiple_is_none() -> None:
     assert initial_assignee(AssignmentType.manual, [ALICE, BOB]) is None
 
@@ -75,18 +98,49 @@ def test_next_least_done_picks_the_fewest_completions() -> None:
     assert next_assignee(AssignmentType.least_done, pool, ALICE, counts) is BOB
 
 
-def test_next_least_done_breaks_ties_alphabetically() -> None:
+def test_next_least_done_breaks_ties_by_name_among_the_others() -> None:
+    # All zero, so everyone is tied: Cara is on the hook and therefore dropped, and the
+    # remaining tie falls to Alice by name. Note this case passes under the pre-#58 rule
+    # too, because Cara sorts last and a plain `min` was already skipping her.
     pool = [CARA, BOB, ALICE]
-    assert next_assignee(AssignmentType.least_done, pool, CARA, {}) is ALICE  # all zero
+    assert next_assignee(AssignmentType.least_done, pool, CARA, {}) is ALICE
 
 
 def test_next_least_done_rotates_with_post_completion_counts() -> None:
     # counts include the just-recorded completion: Alice just finished, so she is no
-    # longer least-done and the turn moves to Bob; once Bob catches up the tie breaks
-    # back to Alice alphabetically.
+    # longer least-done and the turn moves to Bob; once Bob draws level the tie hands
+    # back to Alice, the only other member of it.
     pool = [ALICE, BOB]
     assert next_assignee(AssignmentType.least_done, pool, ALICE, {ALICE.id: 1, BOB.id: 0}) is BOB
     assert next_assignee(AssignmentType.least_done, pool, BOB, {ALICE.id: 1, BOB.id: 1}) is ALICE
+
+
+def test_next_least_done_hands_over_when_the_person_on_the_hook_ties() -> None:
+    # Issue #58, and the case the two above cannot catch: the current assignee has to be the
+    # alphabetically FIRST member for the old rule to bite. With Alice up and Bob drawing
+    # level, `min(_ordered(pool), ...)` handed the chore straight back to her - the reported
+    # "it kept being assigned to the same person". A tie is a handover.
+    pool = [ALICE, BOB]
+    assert next_assignee(AssignmentType.least_done, pool, ALICE, {ALICE.id: 1, BOB.id: 1}) is BOB
+
+
+def test_next_least_done_keeps_whoever_is_genuinely_behind() -> None:
+    # Only a TIE hands over. Somebody still short of the others keeps the chore while they
+    # catch up, which is what stops the fix collapsing into `random`'s blanket exclusion of
+    # the current assignee - that would make least_done just alphabetical with extra steps.
+    pool = [ALICE, BOB]
+    assert next_assignee(AssignmentType.least_done, pool, ALICE, {ALICE.id: 1, BOB.id: 5}) is ALICE
+
+
+def test_next_least_done_drops_only_the_person_on_the_hook_from_the_tie() -> None:
+    pool = [CARA, BOB, ALICE]
+    # All three level with Alice up: she is dropped and it moves on by name, not back to her.
+    level = {ALICE.id: 2, BOB.id: 2, CARA.id: 2}
+    assert next_assignee(AssignmentType.least_done, pool, ALICE, level) is BOB
+    # The tie is taken at the minimum, not across the pool: Alice is well ahead, so she is not
+    # in it at all and cannot win it by name. Bob is up, which leaves Cara.
+    ahead = {ALICE.id: 5, BOB.id: 2, CARA.id: 2}
+    assert next_assignee(AssignmentType.least_done, pool, BOB, ahead) is CARA
 
 
 def test_next_random_excludes_the_current_assignee() -> None:
@@ -110,6 +164,13 @@ def test_next_current_not_in_pool_falls_back_to_initial() -> None:
 
 def test_next_current_none_falls_back_to_initial() -> None:
     assert next_assignee(AssignmentType.alphabetical, [BOB, ALICE], None, {}) is ALICE
+
+
+def test_next_least_done_fallback_still_ranks_on_the_counts() -> None:
+    # The fallback hands `counts` on rather than dropping them. An unassigned chore ("nobody
+    # in particular") lands here on every turn boundary, so without that it would quietly
+    # answer alphabetically - Alice, who has already done it - for as long as nobody is up.
+    assert next_assignee(AssignmentType.least_done, [ALICE, BOB], None, {ALICE.id: 1}) is BOB
 
 
 def test_next_single_member_pool_keeps_member() -> None:

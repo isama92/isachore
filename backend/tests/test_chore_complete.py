@@ -465,7 +465,273 @@ async def test_complete_least_done_gives_it_to_whoever_did_least(
     await complete_as(anna.id)
     assert await _current_assignee_id(client, chore.id) == bob.id  # Anna now ahead
     await complete_as(bob.id)
-    assert await _current_assignee_id(client, chore.id) == anna.id  # level -> alphabetical
+    # Level again, and Bob is the one up. He is dropped from the tie, which leaves Anna - the
+    # same answer the old plain `min` gave, since Bob sorted second and it was already
+    # skipping him. That is exactly why this test never caught #58; the one below does.
+    assert await _current_assignee_id(client, chore.id) == anna.id
+
+
+async def test_complete_least_done_hands_over_the_moment_the_pair_are_level(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    """Issue #58 end to end: the tie has to fall with the ALPHABETICALLY FIRST member on the
+    hook. That is the household's report - one person a completion ahead, the other levels up,
+    and the chore stayed put instead of moving across."""
+    chore, anna, bob = await _daily_rotating_chore(
+        make_user, make_household, make_chore, assignment_type=AssignmentType.least_done
+    )
+    client = await auth_client(anna)
+
+    async def complete_as(assignee_id: int) -> None:
+        resp = await client.post(
+            f"/api/v1/chores/{chore.id}/complete", json={"completed_by_user_id": assignee_id}
+        )
+        assert resp.status_code == 201
+
+    assert await _current_assignee_id(client, chore.id) == anna.id
+    # Bob one ahead, Anna on zero: she is the strict minimum, so she keeps it while she
+    # catches up. This half fails if the fix over-reaches into excluding whoever is up.
+    await complete_as(bob.id)
+    assert await _current_assignee_id(client, chore.id) == anna.id
+    # One each now, with Anna still on the hook. This is the assertion that used to fail: a
+    # tie handed the chore straight back to her because she sorts first.
+    await complete_as(anna.id)
+    assert await _current_assignee_id(client, chore.id) == bob.id
+
+
+async def test_complete_least_done_ranks_on_the_counts_with_nobody_on_the_hook(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    """An unassigned chore ("nobody in particular") re-derives from scratch at every turn
+    boundary, because there is no current assignee to hand over from. That fallback used to
+    drop the tally on the floor and answer alphabetically, so the person who had done all the
+    work kept being handed it back."""
+    now = datetime.now(UTC)
+    today_start = datetime(now.year, now.month, now.day, tzinfo=UTC)
+    anna = await make_user(email="anna@example.com", first_name="Anna")
+    bob = await make_user(email="bob@example.com", first_name="Bob")
+    household = await make_household(members=[anna, bob])
+    chore = await make_chore(
+        household=household,
+        start_date=today_start.date() - timedelta(days=1),
+        repeats=RepeatPeriod.daily,
+        assignment_type=AssignmentType.least_done,
+        assignees=[anna, bob],
+        with_occurrence=False,
+    )
+    # Anna has done it once; the open row is the state `clear_current_assignee` leaves behind.
+    # Done row first, open row last - see `make_occurrence` on why the chain order matters.
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=today_start - timedelta(days=1),
+        status=OccurrenceStatus.done,
+        completed_by=anna,
+        completed_at=today_start - timedelta(hours=16),
+    )
+    await make_occurrence(chore=chore, scheduled_for=today_start, status=OccurrenceStatus.open)
+    client = await auth_client(anna)
+
+    resp = await client.post(
+        f"/api/v1/chores/{chore.id}/complete", json={"completed_by_user_id": anna.id}
+    )
+    assert resp.status_code == 201
+    # Anna is now two ahead of Bob, so the chore has to land on Bob. Alphabetically it would
+    # be Anna, which is what made this worth pinning: nothing else exercises that fallback.
+    assert await _current_assignee_id(client, chore.id) == bob.id
+
+
+async def test_complete_ends_a_turn_on_the_person_who_held_it_not_the_one_who_helped(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    """The one shape where "drop whoever is on the hook" and "drop whoever just did it" give
+    different answers, so this is what pins which rule the app follows. Anna holds a turn of
+    two and Bob does the second of them, which levels the tally with the two rules naming
+    different people. The turn that ended was Anna's, so the next one is somebody else's
+    whoever happened to do the work inside it - the assignee is the anchor, not the completer.
+
+    Everywhere else the two agree. At the default turn length of one the chore sits with
+    whoever is behind, so a completion by anybody else only pushes them further ahead and no
+    tie forms at all; a tie needs the person who is up to do it themselves, and then the two
+    rules are naming the same person."""
+    chore, anna, bob = await _daily_rotating_chore(
+        make_user,
+        make_household,
+        make_chore,
+        assignment_type=AssignmentType.least_done,
+        turn_length=2,
+    )
+    client = await auth_client(anna)
+
+    async def complete_as(assignee_id: int) -> None:
+        resp = await client.post(
+            f"/api/v1/chores/{chore.id}/complete", json={"completed_by_user_id": assignee_id}
+        )
+        assert resp.status_code == 201
+
+    assert await _current_assignee_id(client, chore.id) == anna.id
+    await complete_as(anna.id)
+    assert await _current_assignee_id(client, chore.id) == anna.id  # one of two, still hers
+    await complete_as(bob.id)
+    # Level at one each, and Anna's turn is up. Dropping the completer instead would leave it
+    # on Anna, who has done only half a turn of two.
+    assert await _current_assignee_id(client, chore.id) == bob.id
+
+
+async def test_complete_mid_turn_re_derives_an_assignee_who_left_the_pool(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    """Mid-turn a completion holds the current assignee - but "nobody" and "somebody who has
+    gone" are two different states, and holding the second leaves the chore unassigned until
+    the next turn boundary, which for a long turn is a chore nobody is on with no edit to
+    blame. Skipping already re-derived here; completing used to answer NULL."""
+    ava = await make_user(email="ava@example.com", first_name="Ava")
+    ben = await make_user(email="ben@example.com", first_name="Ben")
+    cara = await make_user(email="cara@example.com", first_name="Cara")
+    household = await make_household(members=[ava, ben, cara])
+    today = datetime.now(UTC).date()
+    chore = await make_chore(
+        household=household,
+        start_date=today,
+        repeats=RepeatPeriod.daily,
+        assignment_type=AssignmentType.least_done,
+        turn_length=5,
+        assignees=[ava, ben, cara],
+        current_assignee=cara,
+    )
+    client = await auth_client(ava)
+
+    async def complete_for(user: User) -> int:
+        resp = await client.post(
+            f"/api/v1/chores/{chore.id}/complete", json={"completed_by_user_id": user.id}
+        )
+        assert resp.status_code == 201
+        return int(resp.json()["id"])
+
+    await complete_for(ava)
+    second = await complete_for(cara)
+    # Drop Cara, then undo her closure: that reopens her done row with her still on it, which
+    # is the only way a departed assignee lands back on an open occurrence.
+    patched = await client.patch(
+        f"/api/v1/chores/{chore.id}",
+        json={
+            "title": chore.title,
+            "start_date": today.isoformat(),
+            "repeats": "daily",
+            "assignment_type": "least_done",
+            "turn_length": 5,
+            "assignee_ids": [ava.id, ben.id],
+        },
+    )
+    assert patched.status_code == 200
+    assert (await client.delete(f"/api/v1/completions/{second}")).status_code == 204
+    assert await _current_assignee_id(client, chore.id) == cara.id
+
+    # Two completions against a turn of five, so this is mid-turn and no handoff is due. Ava
+    # holds both, so the re-derivation lands on Ben rather than leaving the chore on nobody.
+    await complete_for(ava)
+    assert await _current_assignee_id(client, chore.id) == ben.id
+
+
+async def test_complete_mid_turn_leaves_a_deliberately_cleared_chore_unassigned(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    """The sibling of the test above, and the reason its guard is two clauses rather than one.
+    NULL is an answer, not a gap: handing a chore back to the household is meant to outlive
+    completions up to the next turn *boundary*, so a completion mid-turn must not quietly put
+    somebody back on it. Only a row naming a member the pool no longer holds is re-derived."""
+    anna = await make_user(email="anna@example.com", first_name="Anna")
+    bob = await make_user(email="bob@example.com", first_name="Bob")
+    household = await make_household(members=[anna, bob])
+    today = datetime.now(UTC).date()
+    chore = await make_chore(
+        household=household,
+        start_date=today,
+        repeats=RepeatPeriod.daily,
+        assignment_type=AssignmentType.least_done,
+        turn_length=3,
+        assignees=[anna, bob],
+    )
+    client = await auth_client(anna)
+
+    cleared = await client.patch(
+        f"/api/v1/chores/{chore.id}",
+        json={
+            "title": chore.title,
+            "start_date": today.isoformat(),
+            "repeats": "daily",
+            "assignment_type": "least_done",
+            "turn_length": 3,
+            "assignee_ids": [anna.id, bob.id],
+            "clear_current_assignee": True,
+        },
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["current_assignee"] is None
+
+    # Completion one of a turn of three, so no handoff is due and the hand-back stands. The
+    # pool is intact and non-empty, so nothing but the null assignee decides this.
+    assert (await client.post(f"/api/v1/chores/{chore.id}/complete")).status_code == 201
+    assert await _current_assignee_id(client, chore.id) is None
+
+
+async def test_complete_counts_a_closure_crediting_nobody_towards_the_turn(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    """`completed_by_user_id` is ON DELETE SET NULL, so a hard-deleted user leaves done rows
+    crediting nobody. They still spent a turn, so the turn total keeps them even though the
+    per-member split cannot. This is what stops the total being derived as the sum of the
+    split, which reads like an obvious tidy-up and would shorten every turn behind such a row.
+    """
+    anna = await make_user(email="anna@example.com", first_name="Anna")
+    bob = await make_user(email="bob@example.com", first_name="Bob")
+    household = await make_household(members=[anna, bob])
+    now = datetime.now(UTC)
+    today_start = datetime(now.year, now.month, now.day, tzinfo=UTC)
+    chore = await make_chore(
+        household=household,
+        start_date=today_start.date(),
+        repeats=RepeatPeriod.daily,
+        assignment_type=AssignmentType.alphabetical,
+        turn_length=2,
+        assignees=[anna, bob],
+        with_occurrence=False,
+    )
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=today_start - timedelta(days=1),
+        status=OccurrenceStatus.done,
+        completed_by=None,
+        completed_at=today_start - timedelta(hours=16),
+    )
+    await make_occurrence(
+        chore=chore, scheduled_for=today_start, status=OccurrenceStatus.open, assignee=anna
+    )
+    client = await auth_client(anna)
+
+    assert (await client.post(f"/api/v1/chores/{chore.id}/complete")).status_code == 201
+    # Completion two of a two-long turn, so the turn is up and it hands over. Drop the
+    # uncredited row from the total and this reads as completion one, and Anna keeps it.
+    assert await _current_assignee_id(client, chore.id) == bob.id
 
 
 # --- recurrence interval and pinned weekdays -------------------------------

@@ -7,7 +7,9 @@ who comes next:
 
 - manual:       never auto-rotates; the caller sets the assignee by hand.
 - alphabetical: the pool ordered by (first_name, last_name, id); the next one, wrapping.
-- least_done:   the pool member with the fewest completions of this chore (ties by name).
+- least_done:   the pool member with the fewest completions of this chore. Ties break by
+                name, except that `next_assignee` drops the person on the hook first: two
+                people level is a handover, not another turn for whoever sorts earlier.
 - random:       a random pool member, avoiding an immediate repeat when possible.
 
 `random` takes an injectable `rng` (a random.Random) so tests are deterministic.
@@ -33,11 +35,23 @@ def _in_pool(user: User | None, pool: list[User]) -> bool:
 
 
 def initial_assignee(
-    strategy: AssignmentType, pool: list[User], *, rng: random.Random | None = None
+    strategy: AssignmentType,
+    pool: list[User],
+    *,
+    counts: Mapping[int, int] | None = None,
+    rng: random.Random | None = None,
 ) -> User | None:
-    """Who is on the hook for a chore's first occurrence. A single-member pool is
-    always that member; an empty pool is unassigned (shared). `manual` with more than
-    one member returns None so the caller can set the current assignee by hand."""
+    """Who is on the hook for a chore's first occurrence, and the fallback whenever there is
+    no current assignee to hand over from. A single-member pool is always that member; an
+    empty pool is unassigned (shared). `manual` with more than one member returns None so the
+    caller can set the current assignee by hand.
+
+    `counts` (user id -> completions of this chore) is used by `least_done` alone, and is
+    optional because three of its callers have nothing to tally: `create_chore` and the
+    `make_chore` fixture both run before the chore's first occurrence exists, and `db/seed.py`
+    calls this before writing any. Omitting it is behaviour-identical to the alphabetical
+    answer this arm used to give unconditionally - every key reads 0, so `min` returns the
+    first of `_ordered` - which is what lets those three keep calling it untallied."""
     if not pool:
         return None
     if len(pool) == 1:
@@ -49,7 +63,12 @@ def initial_assignee(
             # Draw from the ordered pool so a seeded pick is independent of the
             # arbitrary DB row order (the assignees relationship has no order_by).
             return (rng or random).choice(_ordered(pool))
-        case _:  # alphabetical / least_done: first alphabetically
+        case AssignmentType.least_done:
+            # No current assignee to hand over from, so unlike `next_assignee` below a tie
+            # here is broken by name alone: there is nobody it would be a repeat for.
+            tally = counts or {}
+            return min(_ordered(pool), key=lambda u: tally.get(u.id, 0))
+        case _:  # alphabetical: first alphabetically
             return _ordered(pool)[0]
 
 
@@ -65,15 +84,19 @@ def next_assignee(
     `counts` maps user id -> completions of this chore (only used by `least_done`).
 
     `counts` MUST already include the completion that triggered this handoff
-    (post-completion snapshot); otherwise the person who just finished still ties as
-    least-done and gets re-picked, so a `least_done` chore would never rotate."""
+    (post-completion snapshot). A stale tally leaves the person who just finished a
+    completion short, so what is really a tie reads as a strict minimum below and they keep
+    the chore for another turn instead of handing it on."""
     if strategy == AssignmentType.manual:
         return current  # never auto-rotates; update_chore keeps it valid
     if not pool:
         return None
     if not _in_pool(current, pool):
-        # No current yet, or the pool was edited to drop them: start fresh.
-        return initial_assignee(strategy, pool, rng=rng)
+        # No current yet, or the pool was edited to drop them: start fresh. `counts` rides
+        # along so `least_done` still ranks on work done here - an unassigned chore ("nobody
+        # in particular") reaches this on every turn boundary, so without it the strategy
+        # would quietly degrade to alphabetical for as long as nobody is on the hook.
+        return initial_assignee(strategy, pool, counts=counts, rng=rng)
     if len(pool) == 1:
         return pool[0]
     match strategy:
@@ -86,8 +109,43 @@ def next_assignee(
             others = [u for u in _ordered(pool) if u.id != current.id]
             return (rng or random).choice(others)
         case AssignmentType.least_done:
-            # Fewest completions of this chore; ties broken by alphabetical order.
-            return min(_ordered(pool), key=lambda u: counts.get(u.id, 0))
+            # Fewest completions of this chore. A tie that includes the person on the hook is
+            # a handover: they are dropped and it goes to the alphabetically first of the
+            # others. Only a tie, though - somebody genuinely behind keeps the chore while
+            # they catch up, which is why this is not `random`'s blanket exclusion of
+            # `current` above. A plain `min` over the ordered pool is what this used to be,
+            # and it re-picked whoever sorted first, so two people level meant the chore
+            # stayed where it was (issue #58).
+            #
+            # **The exclusion anchors on `current` - who is on the hook - and NOT on whoever
+            # was credited with the completion.** Anybody but the person up completing a
+            # chore is an everyday event (the credit defaults to the caller, and Home shows
+            # no credit dialog at all to a caller who is already an assignee), but it reaches
+            # this line far less often than that suggests. With the default `turn_length` of
+            # 1 and two assignees it cannot: the chore sits with whoever is behind, so
+            # somebody else completing it only pushes that person further ahead, leaving the
+            # one behind still strictly least and holding it. A tie needs the person who is
+            # up to do it themselves - and then the two anchors name the same person. It
+            # takes taking turns, a manual override, or a third assignee for them to differ.
+            #
+            # Where they do, the turn is the right unit to reason in, and that is the product
+            # call (confirmed with the reporter, who raised it): with `turn_length` 2, Anna
+            # holds the turn and Bob does one of the two, so the turn that just ended was
+            # *Anna's* and the next belongs to somebody else, whoever happened to do the work
+            # inside it. Three mechanical reasons agree: the ask was to force the
+            # *assignment* to move; `alphabetical` steps from `current` and `random` excludes
+            # it, so any other anchor makes this the one strategy whose rotation reads a
+            # different column; and a completion can be credited to somebody outside the pool
+            # (`complete_chore` always lets a caller credit themselves), where excluding the
+            # completer would silently do nothing. The tally carries their work either way,
+            # so only who is up next is ever at stake.
+            #
+            # `scored` is built once so the counts behind `fewest` are, structurally, the
+            # counts behind `tied` - not two comprehensions that happen to agree.
+            scored = [(u, counts.get(u.id, 0)) for u in _ordered(pool)]
+            fewest = min(count for _, count in scored)
+            tied = [u for u, count in scored if count == fewest]
+            return next((u for u in tied if u.id != current.id), tied[0])
         case _:  # pragma: no cover - all non-manual strategies handled above
             return current
 

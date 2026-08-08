@@ -873,6 +873,102 @@ pre-commit run --all-files                           # what the git hook runs
   is what the `currentAssigneeTurnHint` copy promises the user, so keep them in
   step. Every live chore has exactly one open occurrence whatever its period, so
   `current_assignee: null` means unassigned/shared and never "nothing left to do".
+
+  **`least_done` reads a tie as a handover, and that is the one rule in this module that is
+  not obvious from the name.** `next_assignee` takes the minimum, then drops whoever is on the
+  hook from the tied set: two people level means the chore moves across, never another turn
+  for whoever sorts earlier. It used to be a plain `min` over the alphabetically ordered pool,
+  which re-picked whoever sorted first, so a chore that was already theirs stayed theirs -
+  reported as "1 and 1, and it stayed put" (#58). **Only a tie, though.** Somebody genuinely behind keeps
+  the chore while they catch up, so this is deliberately NOT `random`'s blanket exclusion of
+  `current`; make it one and `least_done` becomes `alphabetical` with extra steps. A test for
+  it has to put the person on the hook **first** alphabetically, or it passes either way -
+  which is why the bug survived two tie tests that both happened to tie on the second name.
+
+  **The exclusion anchors on the assignee (`occ.assignee_id`), NOT on whoever was credited with
+  the completion.** Somebody other than the person on the hook completing a chore is an
+  everyday event - `complete_chore` defaults the credit to the *caller*, any member may
+  complete any chore, and `Home.tsx`'s `requestCredit` skips the credit dialog entirely when
+  the caller is one of the chore's assignees, **any** of them rather than the one who is up.
+  But that alone never reaches the tie rule. **With the default `turn_length` of 1 and two
+  assignees the two anchors cannot disagree**: the chore sits with whoever is behind, so a
+  completion by anyone else only pushes that person further ahead, leaving the one behind
+  strictly least and holding it - no tie forms. A tie needs the person who is up to do it
+  themselves, and then both anchors name them. Taking turns, a manual override, or a third
+  assignee is what it takes to make them different people at a tie.
+
+  Where they do differ, **the turn is the unit to reason in**, and that is the product call
+  (raised and settled with the reporter): with `turn_length` 2, Anna holds the turn and Bob
+  does one of the two, so the turn that just ended was *Anna's* and the next belongs to
+  somebody else, whoever happened to do the work inside it. Three mechanical reasons agree:
+  the ask was to force the *assignment* to move; `alphabetical` steps from `current` and
+  `random` excludes it, so any other anchor makes `least_done` the one strategy whose rotation
+  reads a different column; and `complete_chore` lets any caller credit *themselves* whether or
+  not they are in the pool, so excluding the completer would silently do nothing for a
+  non-assignee. `_completion_tally` keying on `completed_by_user_id` carries the completer's
+  work either way, so nobody's effort goes unrecorded - only who is up next is at stake.
+
+  Five further consequences worth keeping straight:
+  - **`initial_assignee` takes the tally too, and breaks its ties by name alone**, there being
+    no current assignee for a repeat to be a repeat *of*. It is the fallback wherever there is
+    nobody to hand over from, and it is reached two ways. **`_strategy_pick` (`api/v1/chores.py`)
+    is the funnel for every handler-side derivation**: `create_chore`, both branches of
+    `_reconcile_open_occurrence`, and the stale-assignee case of both `_retained_assignee` and
+    `_successor_assignee`. Keep it that way - a handler calling `initial_assignee` directly is a
+    path that ranks alphabetically on a chore with history, which is what all of these did
+    before and what quietly undid the strategy. **The second way is inside `next_assignee`
+    itself** (`assignment.py`, the "current is not in the pool" branch), which is not routed
+    through `_strategy_pick` and cannot be, being pure. It hands its own `counts` down, and
+    that one argument is load-bearing in the same way: drop it and an unassigned `least_done`
+    chore degrades to alphabetical at every turn boundary. Pinned by
+    `test_next_least_done_fallback_still_ranks_on_the_counts`.
+    `create_chore` and a revive with no closure behind it genuinely have nothing to tally, and
+    are funnelled anyway rather than special-cased: the query returns `{}` and the answer is the
+    alphabetical one either way, so the alternative is an unwritten "this chore cannot have
+    history yet" invariant carried by a comment. The gate inside it (`least_done`, pool of two
+    or more) is about *cost* rather than the answer - nothing else reads `counts`, and
+    `initial_assignee` returns before consulting them for a smaller pool. `counts` is therefore
+    optional, and omitting it is *identical* to the old alphabetical arm (every key reads 0, so
+    `min` returns the first) - which is what lets `db/seed.py` and the `make_chore` fixture keep
+    calling it untallied.
+  - **One tally read serves the turn and the ranking** (`_completion_tally`): the total decides
+    whether `should_reassign` fires, the per-member split feeds `least_done`, and they come off
+    one GROUP BY rather than a COUNT plus a GROUP BY over identical rows. **The total is not
+    `sum(counts.values())`** and must not be "tidied" into it: `completed_by_user_id` is
+    `ON DELETE SET NULL`, so a hard-deleted user leaves done rows crediting nobody, which spent
+    a turn but can be credited to no one. Deriving the total from the split would shorten every
+    turn sitting behind such a row, and
+    `test_complete_counts_a_closure_crediting_nobody_towards_the_turn` is what catches it.
+  - **The post-completion snapshot requirement survives, but its reason changed.** A stale tally
+    no longer means "never rotates"; it leaves the finisher a completion short, so a real tie
+    reads as a strict minimum and they hold one extra turn. `_close_occurrence` flushes before
+    `_successor_assignee`, which is what makes it honest.
+  - **A stale assignee is re-derived on every way out of a closure; an unassigned row survives
+    a skip always, and a completion up to the next turn boundary.** Those two are different
+    states and the code has to keep asking which it is holding: NULL means the chore was handed
+    back to the household deliberately, while a row naming somebody the pool no longer holds is
+    a gap. **Only the two mid-turn paths make the distinction** - `_retained_assignee` and
+    `_successor_assignee`'s `not should_reassign` branch - each testing `current_assignee_id is
+    not None` alongside the missing pool member. At a turn boundary there is no distinction to
+    make: `next_assignee` re-derives *both*, because `_in_pool` is `user is not None and
+    any(...)` and so answers False for a NULL assignee and a departed one alike. That is why a
+    clear dies on the boundary rather than lasting forever, which is the documented promise.
+    Completing used to answer NULL for the stale case mid-turn, so one state re-derived on a
+    skip and silently unassigned on a completion. Both clauses of the new guard are pinned
+    separately - deleting only the `current_assignee_id is not None` half left the whole suite
+    green until `test_complete_mid_turn_leaves_a_deliberately_cleared_chore_unassigned` existed.
+  - **`_retained_assignee`'s stale-assignee fallback is reachable, and only through undo.** An
+    edit cannot leave somebody it just dropped from the chore's *assignee pool* on an open row -
+    `_reconcile_open_occurrence` is exactly what moves them off - but `undo_completion` reopens a
+    *done* row with the assignee it closed on, and done rows are never reconciled. So complete,
+    drop that person in an edit, undo, skip. That path is what stops the fallback being
+    defensive code, and it is pinned by
+    `test_skipping_after_an_undo_resurrects_a_departed_assignee_uses_the_tally`. Note "dropped
+    from the pool" is narrower than "left the household", and deliberately so here: `remove_member`
+    deletes the `household_members` row alone and prunes no `chore_assignees`, so somebody who
+    leaves stays in `chore.assignees` and keeps being picked. Pre-existing, out of scope for the
+    above, and not what this fallback is about.
+
   **Handing a chore back to the household is its own field, `clear_current_assignee`,
   and cannot be folded into `current_assignee_id: null`.** Null already means "no
   explicit choice", and `_reconcile_open_occurrence` then *keeps* an assignee who is

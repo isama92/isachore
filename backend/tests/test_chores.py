@@ -839,6 +839,99 @@ async def test_update_chore_recomputes_current_assignee_when_dropped_from_pool(
     assert body["current_assignee"]["id"] == bob.id
 
 
+async def test_update_chore_recomputes_least_done_from_the_tally_not_the_alphabet(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    """Dropping the current assignee re-derives from the strategy, and for least_done that has
+    to mean fewest completions. This fallback used to reach `initial_assignee` with no tally at
+    all, so it answered alphabetically - handing the chore to whoever sorts first even when
+    they are the one who has already done all of it."""
+    anna = await make_user(email="anna@example.com", first_name="Anna")
+    bob = await make_user(email="bob@example.com", first_name="Bob")
+    cara = await make_user(email="cara@example.com", first_name="Cara")
+    household = await make_household(members=[anna, bob, cara])
+    # turn_length 5, so neither completion below reaches a handoff and Cara stays on the hook
+    # throughout - which is what leaves a stale assignee for the edit to find.
+    chore = await make_chore(
+        household=household,
+        assignment_type=AssignmentType.least_done,
+        turn_length=5,
+        assignees=[anna, bob, cara],
+        repeats=RepeatPeriod.daily,
+        current_assignee=cara,
+    )
+    client = await auth_client(anna)
+
+    for _ in range(2):
+        resp = await client.post(
+            f"/api/v1/chores/{chore.id}/complete", json={"completed_by_user_id": anna.id}
+        )
+        assert resp.status_code == 201
+    still = await client.get(f"/api/v1/chores/{chore.id}")
+    assert still.json()["current_assignee"]["id"] == cara.id
+
+    # Drop Cara. Anna is two ahead, so it has to land on Bob; the alphabetical answer is Anna.
+    resp = await client.patch(
+        f"/api/v1/chores/{chore.id}",
+        json=_payload(
+            assignment_type="least_done",
+            repeats="daily",
+            turn_length=5,
+            assignee_ids=[anna.id, bob.id],
+        ),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["current_assignee"]["id"] == bob.id
+
+
+async def test_update_chore_refills_a_cleared_least_done_slot_from_the_tally(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    """The other half of the same `elif`: an unassigned row. A later edit treats "nobody is on
+    it" as a gap to fill (unlike a skip, which respects it), and filling it must rank on the
+    tally too, or handing a chore back to the household quietly resets least_done."""
+    anna = await make_user(email="anna@example.com", first_name="Anna")
+    bob = await make_user(email="bob@example.com", first_name="Bob")
+    household = await make_household(members=[anna, bob])
+    chore = await make_chore(
+        household=household,
+        assignment_type=AssignmentType.least_done,
+        assignees=[anna, bob],
+        repeats=RepeatPeriod.daily,
+    )
+    client = await auth_client(anna)
+
+    for _ in range(2):
+        resp = await client.post(
+            f"/api/v1/chores/{chore.id}/complete", json={"completed_by_user_id": anna.id}
+        )
+        assert resp.status_code == 201
+
+    base = {
+        "assignment_type": "least_done",
+        "repeats": "daily",
+        "assignee_ids": [anna.id, bob.id],
+    }
+    cleared = await client.patch(
+        f"/api/v1/chores/{chore.id}", json=_payload(**base, clear_current_assignee=True)
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["current_assignee"] is None
+
+    # Any later edit fills the gap. Anna has both completions, so it is Bob's, not Anna's by name.
+    refilled = await client.patch(
+        f"/api/v1/chores/{chore.id}", json=_payload(**base, title="Clean the bathroom again")
+    )
+    assert refilled.status_code == 200
+    assert refilled.json()["current_assignee"]["id"] == bob.id
+
+
 async def test_update_chore_honours_explicit_current_assignee_for_an_auto_strategy(
     make_user: MakeUser,
     make_household: MakeHousehold,
@@ -1042,6 +1135,53 @@ async def test_update_chore_revives_a_chore_with_no_open_occurrence(
     assert resp.status_code == 200
     # Revived: completable again.
     assert (await client.post(f"/api/v1/chores/{chore.id}/complete")).status_code == 201
+
+
+async def test_update_chore_revives_a_least_done_chore_onto_the_tally(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    """The revive branch above, for least_done. It picks the assignee from scratch, so it needs
+    the tally for the same reason the reconcile branch does - and this is the only test that
+    reaches it with that strategy, the existing one being `manual` (which returns nobody
+    whatever the counts say, so it would pin nothing here)."""
+    anna = await make_user(email="anna@example.com", first_name="Anna")
+    bob = await make_user(email="bob@example.com", first_name="Bob")
+    household = await make_household(members=[anna, bob])
+    today = datetime.now(UTC).date()
+    chore = await make_chore(
+        household=household,
+        repeats=RepeatPeriod.manual,
+        assignment_type=AssignmentType.least_done,
+        assignees=[anna, bob],
+        with_occurrence=False,
+    )
+    # Anna has done it twice, and there is no open occurrence for the edit to reconcile.
+    for day in (14, 15):
+        await make_occurrence(
+            chore=chore,
+            scheduled_for=datetime(2026, 7, day, tzinfo=UTC),
+            status=OccurrenceStatus.done,
+            completed_by=anna,
+            completed_at=datetime(2026, 7, day, 9, 0, tzinfo=UTC),
+        )
+    client = await auth_client(anna)
+
+    resp = await client.patch(
+        f"/api/v1/chores/{chore.id}",
+        json=_payload(
+            repeats="daily",
+            start_date=today.isoformat(),
+            assignment_type="least_done",
+            assignee_ids=[anna.id, bob.id],
+        ),
+    )
+    assert resp.status_code == 200
+    # The fresh occurrence goes to Bob, who has done none of it. By name it would be Anna.
+    assert resp.json()["current_assignee"]["id"] == bob.id
 
 
 async def test_update_chore_clear_assignees(
