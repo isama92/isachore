@@ -436,6 +436,13 @@ def make_occurrence(db_session: AsyncSession) -> Callable[..., Awaitable[ChoreOc
         # A done occurrence snapshots its title; an open one reads the live chore title.
         # `skipped=True` builds the other kind of closure, for tests that need one in place
         # rather than going through the endpoint (history, stats, "last done").
+        #
+        # **Build a chore's occurrences in chain order: done rows first, the open one last.**
+        # Production cannot do otherwise - a done row is only ever produced by flipping the
+        # single open row, so the open row always holds the chain's highest id - and
+        # `undo_completion` relies on that, deciding which closure is the latest by `max(id)`.
+        # Insert an open row and then a done one and the state is unreachable by any real code
+        # path, so a test built on it asserts against a chore that could not exist.
         occurrence = ChoreOccurrence(
             chore_id=chore.id,
             scheduled_for=scheduled_for,

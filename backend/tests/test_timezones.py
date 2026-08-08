@@ -36,6 +36,7 @@ from app.core.chores import (
     days_late,
     days_since,
     days_until_due,
+    end_of_local_day,
     first_occurrence,
     local_day_bounds,
     next_slot_after,
@@ -204,6 +205,41 @@ def test_local_day_bounds_stretch_across_a_dst_transition() -> None:
     # `test_the_transition_day_really_is_short` for why a same-zone subtraction cannot see it.
     start, end = local_day_bounds(datetime(2026, 10, 25, 12, 0, tzinfo=UTC), AMSTERDAM)
     assert end.astimezone(UTC) - start.astimezone(UTC) == timedelta(hours=25)
+
+
+def test_end_of_local_day_is_the_households_midnight_not_utcs() -> None:
+    # What a completion recorded on its due day is dated with. Both extremes in one case, so
+    # a dropped zone cannot pass: they straddle UTC, and the UTC answers (23:59:59.999999 on
+    # the 5th and the 6th respectively) match neither.
+    kiritimati_slot = first_occurrence(date(2026, 8, 6), DAILY, KIRITIMATI)
+    assert end_of_local_day(kiritimati_slot, KIRITIMATI) == datetime(
+        2026, 8, 6, 9, 59, 59, 999999, tzinfo=UTC
+    )
+    niue_slot = first_occurrence(date(2026, 8, 6), DAILY, NIUE)
+    assert end_of_local_day(niue_slot, NIUE) == datetime(2026, 8, 7, 10, 59, 59, 999999, tzinfo=UTC)
+    # Still the day the chore was due, in both, which is the property the whole thing rests on.
+    assert end_of_local_day(kiritimati_slot, KIRITIMATI).astimezone(KIRITIMATI).date() == date(
+        2026, 8, 6
+    )
+    assert end_of_local_day(niue_slot, NIUE).astimezone(NIUE).date() == date(2026, 8, 6)
+
+
+def test_end_of_local_day_survives_a_zone_whose_midnight_does_not_exist() -> None:
+    # Santiago springs forward at 24:00, so 6 September 2026 has no local midnight and the
+    # 5th ends at 04:00Z on the 6th. Deriving from `local_day_bounds` is what gets this right
+    # for free; hand-building 23:59:59 would land an hour out, on the wrong side of the gap.
+    slot = first_occurrence(date(2026, 9, 5), DAILY, SANTIAGO)
+    assert end_of_local_day(slot, SANTIAGO) == datetime(2026, 9, 6, 3, 59, 59, 999999, tzinfo=UTC)
+    assert end_of_local_day(slot, SANTIAGO).astimezone(SANTIAGO).date() == date(2026, 9, 5)
+
+
+def test_the_end_of_a_fall_back_day_is_25_hours_on() -> None:
+    # The mirror of test_local_day_bounds_stretch_across_a_dst_transition, for the instant
+    # actually used. `.astimezone(UTC)` on both sides is not decoration: two aware datetimes
+    # sharing a tzinfo subtract wall-clock fields, so this reads a flat 24 hours without it.
+    slot = first_occurrence(date(2026, 10, 25), DAILY, AMSTERDAM)
+    elapsed = end_of_local_day(slot, AMSTERDAM).astimezone(UTC) - slot.astimezone(UTC)
+    assert elapsed == timedelta(hours=25) - timedelta(microseconds=1)
 
 
 async def test_free_slot_from_sees_a_taken_slot_at_a_nonexistent_local_midnight(
@@ -1238,7 +1274,13 @@ async def test_a_closure_reads_the_zone_after_the_lock_not_from_the_loaded_chore
     assert loaded.household.timezone == "Europe/Amsterdam"
 
     await _close_occurrence(
-        db_session, loaded, occ, closed_by_id=user.id, skipped=False, conflict_detail="conflict"
+        db_session,
+        loaded,
+        occ,
+        closed_by_id=user.id,
+        skipped=False,
+        backdate=False,
+        conflict_detail="conflict",
     )
 
     assert occ.completed_timezone == "Pacific/Niue"
@@ -1277,11 +1319,257 @@ async def test_a_closure_reads_the_slot_after_the_lock_not_from_the_loaded_occur
     assert occ.scheduled_for != moved
 
     result = await _close_occurrence(
-        db_session, loaded, occ, closed_by_id=user.id, skipped=False, conflict_detail="conflict"
+        db_session,
+        loaded,
+        occ,
+        closed_by_id=user.id,
+        skipped=False,
+        backdate=False,
+        conflict_detail="conflict",
     )
 
     # One day on from the slot as it is *now*, not from the 5 August the handler loaded.
     assert result.next_due == moved + timedelta(days=1)
+
+
+# --- recording a completion on its due day ----------------------------------
+#
+# `backdate` dates a closure at the end of the occurrence's own local day instead of at the
+# moment the button was pressed, so the chore somebody did and forgot to tick reads as on time
+# and its successor advances one slot rather than jumping past everything that was missed. Which
+# day that is, and when it ends, is the household's question - so every case here would answer
+# differently with the zone dropped.
+
+
+async def test_a_backdated_closure_lands_on_the_households_midnight_not_utcs(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user], timezone="Pacific/Kiritimati")
+    chore = await make_chore(
+        household=household,
+        start_date=date(2026, 8, 6),
+        repeats=RepeatPeriod.daily,
+        assignees=[user],
+    )
+    # 23:00 on the 8th in Kiritimati, so the 6 August slot is two days overdue there.
+    pin_clock(monkeypatch, datetime(2026, 8, 8, 9, 0, tzinfo=UTC))
+    client = await auth_client(user)
+
+    resp = await client.post(f"/api/v1/chores/{chore.id}/complete", json={"backdate": True})
+
+    assert resp.status_code == 201
+    closed = await db_session.scalar(
+        select(ChoreOccurrence).where(ChoreOccurrence.id == resp.json()["id"])
+    )
+    assert closed is not None
+    # The end of 6 August in Kiritimati (+14). This is the assertion that discriminates: with
+    # the zone dropped it would be 2026-08-05T23:59:59.999999Z, ten hours out and on the
+    # wrong local date. The successor below is the same instant either way, since a daily
+    # step is 24 hours in any zone without a transition - so it pins the derivation, not the
+    # zone, and is here for that.
+    assert closed.completed_at == datetime(2026, 8, 6, 9, 59, 59, 999999, tzinfo=UTC)
+    assert closed.completed_at.astimezone(KIRITIMATI).date() == date(2026, 8, 6)
+    upcoming = await db_session.scalar(
+        select(ChoreOccurrence).where(
+            ChoreOccurrence.chore_id == chore.id,
+            ChoreOccurrence.status == OccurrenceStatus.open,
+        )
+    )
+    assert upcoming is not None
+    # 7 August local: one slot on, still overdue. Not the 9th, which is where completing
+    # without the flag lands it (see test_chore_complete.py's control pair).
+    assert upcoming.scheduled_for == datetime(2026, 8, 6, 10, 0, tzinfo=UTC)
+    assert upcoming.scheduled_for.astimezone(KIRITIMATI).date() == date(2026, 8, 7)
+
+
+async def test_a_backdated_closure_clamps_to_now_while_the_local_day_is_still_running(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The one-operand-crosses-midnight case, which is the only shape that catches a dropped
+    zone here (see `test_days_until_due_is_the_reported_bug` for the same trap).
+
+    Niue is -11, and the clock is set to 19:00 on 5 August there - so the slot is due *today*
+    in the household while its UTC day ended six hours ago. The end of the local day is
+    therefore still ahead, the clamp fires, and the closure is dated now. Read against a UTC
+    day the end of the 5th is already in the past, the clamp does not fire, and the closure is
+    dated seven hours before the work: a completion the household never made.
+
+    It is also why nothing on the server re-checks overdue-ness. A caller that asks to backdate
+    a chore that is not late gets `now`, which is on time anyway."""
+    user = await make_user()
+    household = await make_household(members=[user], timezone="Pacific/Niue")
+    chore = await make_chore(
+        household=household,
+        start_date=date(2026, 8, 5),
+        repeats=RepeatPeriod.daily,
+        assignees=[user],
+    )
+    now = datetime(2026, 8, 6, 6, 0, tzinfo=UTC)
+    pin_clock(monkeypatch, now)
+    client = await auth_client(user)
+
+    resp = await client.post(f"/api/v1/chores/{chore.id}/complete", json={"backdate": True})
+
+    assert resp.status_code == 201
+    closed = await db_session.scalar(
+        select(ChoreOccurrence).where(ChoreOccurrence.id == resp.json()["id"])
+    )
+    assert closed is not None
+    assert closed.completed_at == now
+    # The UTC-dropped answer, spelled out so the assertion above cannot be read as trivial.
+    assert closed.completed_at != datetime(2026, 8, 5, 23, 59, 59, 999999, tzinfo=UTC)
+    upcoming = await db_session.scalar(
+        select(ChoreOccurrence).where(
+            ChoreOccurrence.chore_id == chore.id,
+            ChoreOccurrence.status == OccurrenceStatus.open,
+        )
+    )
+    assert upcoming is not None
+    assert upcoming.scheduled_for.astimezone(NIUE).date() == date(2026, 8, 6)
+
+
+async def test_a_backdated_closure_stays_on_time_after_the_household_moves(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`completed_timezone` is the same zone the backdate was built from, so both operands of
+    `days_late` move together and a household relocating cannot re-score a closure that was
+    recorded as on time. Without the snapshot this reads 1 day late afterwards."""
+    user = await make_user()
+    household = await make_household(members=[user], admin=user, timezone="Pacific/Kiritimati")
+    chore = await make_chore(
+        household=household,
+        start_date=date(2026, 8, 6),
+        repeats=RepeatPeriod.daily,
+        assignees=[user],
+    )
+    pin_clock(monkeypatch, datetime(2026, 8, 8, 9, 0, tzinfo=UTC))
+    client = await auth_client(user)
+    await client.post(f"/api/v1/chores/{chore.id}/complete", json={"backdate": True})
+
+    entry = (await client.get("/api/v1/completions")).json()["items"][0]
+    assert entry["days_late"] == 0
+    assert entry["completed_timezone"] == "Pacific/Kiritimati"
+
+    await apply_timezone_change(db_session, household, "Pacific/Niue")
+    await db_session.commit()
+
+    assert (await client.get("/api/v1/completions")).json()["items"][0]["days_late"] == 0
+
+
+async def test_a_backdated_closure_reads_the_slot_after_the_lock(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The twin of `test_a_closure_reads_the_slot_after_the_lock_not_from_the_loaded_occurrence`,
+    for the operand the backdate adds. The date a closure is recorded against comes from the slot
+    as it is under the lock, never from the one the handler preloaded - otherwise a zone change
+    committing in between dates the completion to a day the occurrence is no longer on."""
+    user = await make_user()
+    household = await make_household(members=[user], timezone="UTC")
+    chore = await make_chore(
+        household=household,
+        start_date=date(2026, 8, 5),
+        repeats=RepeatPeriod.daily,
+        assignees=[user],
+    )
+    # Pinned past the slot the update below moves it to, or the clamp fires and dates the
+    # closure now - which would pass on the stale read as well and pin nothing.
+    pin_clock(monkeypatch, datetime(2026, 8, 25, 9, 0, tzinfo=UTC))
+    loaded = await _get_user_chore_or_404(db_session, user, chore.id)
+    occ = await _open_occurrence(db_session, chore.id)
+    assert occ is not None
+    moved = datetime(2026, 8, 20, tzinfo=UTC)
+    # `synchronize_session=False` for the same reason as its neighbours: without it the loaded
+    # occurrence picks the new slot up by itself and the refresh proves nothing.
+    await db_session.execute(
+        update(ChoreOccurrence)
+        .where(ChoreOccurrence.id == occ.id)
+        .values(scheduled_for=moved)
+        .execution_options(synchronize_session=False)
+    )
+    assert occ.scheduled_for != moved
+
+    await _close_occurrence(
+        db_session,
+        loaded,
+        occ,
+        closed_by_id=user.id,
+        skipped=False,
+        backdate=True,
+        conflict_detail="conflict",
+    )
+
+    # The end of 20 August, not of the 5th the handler loaded.
+    assert occ.completed_at == datetime(2026, 8, 20, 23, 59, 59, 999999, tzinfo=UTC)
+
+
+async def test_a_backdated_closure_reads_the_zone_after_the_lock(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other operand. A day ends at a different instant in every zone, so the backdate has
+    to be built from the zone read under the lock - the same one `completed_timezone` is stamped
+    with, which is what keeps `days_late` reading both halves of one calendar."""
+    user = await make_user()
+    household = await make_household(members=[user], timezone="Europe/Amsterdam")
+    chore = await make_chore(
+        household=household,
+        start_date=date(2026, 8, 5),
+        repeats=RepeatPeriod.daily,
+        assignees=[user],
+    )
+    # Pinned so the case does not depend on the real date sitting after 5 August 2026: before
+    # it the clamp would fire and the closure would be dated now whatever zone was read.
+    pin_clock(monkeypatch, datetime(2026, 8, 25, 9, 0, tzinfo=UTC))
+    loaded = await _get_user_chore_or_404(db_session, user, chore.id)
+    occ = await _open_occurrence(db_session, chore.id)
+    assert occ is not None
+    await db_session.execute(
+        update(Household)
+        .where(Household.id == household.id)
+        .values(timezone="Pacific/Niue")
+        .execution_options(synchronize_session=False)
+    )
+    assert loaded.household.timezone == "Europe/Amsterdam"
+
+    await _close_occurrence(
+        db_session,
+        loaded,
+        occ,
+        closed_by_id=user.id,
+        skipped=False,
+        backdate=True,
+        conflict_detail="conflict",
+    )
+
+    assert occ.completed_timezone == "Pacific/Niue"
+    # The stored slot is 5 August in Amsterdam (22:00Z on the 4th), which in Niue is still the
+    # 4th - so the day it ends is the 4th's, at 10:59:59.999999Z on the 5th. Read against the
+    # stale Amsterdam zone it would be 21:59:59.999999Z on the 5th, eleven hours out and paired
+    # with a `completed_timezone` saying Niue: the mismatched operands `days_late` must never see.
+    assert occ.completed_at == datetime(2026, 8, 5, 10, 59, 59, 999999, tzinfo=UTC)
 
 
 # --- chore_occurrences.updated_at -------------------------------------------

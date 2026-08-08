@@ -942,3 +942,153 @@ async def test_undoing_a_skip_clears_the_flag(
     assert again.status_code == 201
     items = (await client.get("/api/v1/completions")).json()["items"]
     assert [i["skipped"] for i in items] == [False]
+
+
+# --- completions recorded on their due day ----------------------------------
+
+
+async def test_history_shows_a_backdated_completion_as_on_time(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    """Through the endpoint rather than a fixture, so it is the completion path being read.
+    Two days overdue and ticked today, but recorded against its own due day - the point of the
+    whole feature, and what `punctuality` and `on_time_rate` then count it as."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    due = datetime.now(UTC).date() - timedelta(days=2)
+    chore = await make_chore(household=household, start_date=due, repeats=RepeatPeriod.daily)
+    client = await auth_client(user)
+
+    await client.post(f"/api/v1/chores/{chore.id}/complete", json={"backdate": True})
+
+    entry = (await client.get("/api/v1/completions")).json()["items"][0]
+    assert entry["days_late"] == 0
+    assert entry["completed_at"].startswith(due.isoformat())
+
+
+async def test_undo_reopens_a_backdated_closure(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    """A backdated closure undoes like any other: original slot back, successor gone, and every
+    closure column cleared - including `completed_timezone`, which would otherwise hand the next
+    completion of this slot a zone from whenever the previous one happened."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    due = datetime.now(UTC).date() - timedelta(days=2)
+    chore = await make_chore(household=household, start_date=due, repeats=RepeatPeriod.daily)
+    client = await auth_client(user)
+    completion = (
+        await client.post(f"/api/v1/chores/{chore.id}/complete", json={"backdate": True})
+    ).json()
+
+    assert (await client.delete(f"/api/v1/completions/{completion['id']}")).status_code == 204
+
+    reopened = await db_session.scalar(
+        select(ChoreOccurrence).where(ChoreOccurrence.id == completion["id"])
+    )
+    assert reopened is not None
+    assert reopened.status == OccurrenceStatus.open
+    assert reopened.completed_at is None
+    assert reopened.completed_timezone is None
+    assert reopened.skipped is False
+    assert await _slots(db_session, chore.id) == [
+        (datetime(due.year, due.month, due.day, tzinfo=UTC), OccurrenceStatus.open)
+    ]
+
+
+async def test_undo_reopens_the_latest_closure_even_when_it_is_dated_earliest(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    """Why "latest" is decided by row id rather than by `completed_at`.
+
+    A chore whose open slot sits *behind* its own history - what the unscheduled -> scheduled
+    round trip produces, re-seeding the slot into the past while recent done rows remain -
+    gets a backdated closure dated earlier than the closure before it. Ordered by
+    `completed_at` the older row then looks latest, and the consequence is silent and
+    permanent: this undo would take the delete branch, erasing the history row while leaving
+    the successor open, and undoing the *older* one would delete the live open occurrence
+    instead.
+
+    Only the starting state is fixtured; the inverted closure is written by the real
+    completion endpoint, and the undo is the real one. Revert the ordering to
+    `max(completed_at)` and the final assertion fails."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, repeats=RepeatPeriod.daily, with_occurrence=False)
+    earlier = await make_occurrence(
+        chore=chore,
+        scheduled_for=datetime(2026, 8, 3, tzinfo=UTC),
+        status=OccurrenceStatus.done,
+        completed_by=user,
+        completed_at=datetime(2026, 8, 3, 9, 0, tzinfo=UTC),
+    )
+    # The open slot, behind the closure above. Created after it, as the real re-seed is.
+    await make_occurrence(chore=chore, scheduled_for=datetime(2026, 8, 1, tzinfo=UTC))
+    client = await auth_client(user)
+
+    latest = (
+        await client.post(f"/api/v1/chores/{chore.id}/complete", json={"backdate": True})
+    ).json()
+
+    inverted = await db_session.scalar(
+        select(ChoreOccurrence.completed_at).where(ChoreOccurrence.id == latest["id"])
+    )
+    assert inverted is not None
+    # The inversion itself, spelled out: this closure really is dated before the one it follows.
+    assert inverted == datetime(2026, 8, 1, 23, 59, 59, 999999, tzinfo=UTC)
+    assert inverted < earlier.completed_at
+
+    assert (await client.delete(f"/api/v1/completions/{latest['id']}")).status_code == 204
+
+    # Reopened at its own slot, with the successor gone and the older closure left as history.
+    # Ordered by `completed_at` this would instead read [(1 Aug, done), (2 Aug, open), ...]
+    # minus the deleted row - the chore left a day ahead of where it belongs, permanently.
+    assert await _slots(db_session, chore.id) == [
+        (datetime(2026, 8, 1, tzinfo=UTC), OccurrenceStatus.open),
+        (datetime(2026, 8, 3, tzinfo=UTC), OccurrenceStatus.done),
+    ]
+
+
+async def test_undo_after_a_backdated_then_a_just_now_completion_picks_the_second(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    """The ordinary grid chain, where nothing is inverted: walking a backlog and then finishing
+    it off leaves the two closures in the order they happened. Pinned so a later change to the
+    clamp cannot quietly reorder them."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    due = datetime.now(UTC).date() - timedelta(days=2)
+    chore = await make_chore(household=household, start_date=due, repeats=RepeatPeriod.daily)
+    client = await auth_client(user)
+
+    await client.post(f"/api/v1/chores/{chore.id}/complete", json={"backdate": True})
+    second = (await client.post(f"/api/v1/chores/{chore.id}/complete")).json()
+
+    assert (await client.delete(f"/api/v1/completions/{second['id']}")).status_code == 204
+
+    reopened = await db_session.scalar(
+        select(ChoreOccurrence).where(ChoreOccurrence.id == second["id"])
+    )
+    assert reopened is not None
+    assert reopened.status == OccurrenceStatus.open
+    # The first closure stands, and the chore is back on the slot the second one cleared.
+    assert [status for _, status in await _slots(db_session, chore.id)] == [
+        OccurrenceStatus.done,
+        OccurrenceStatus.open,
+    ]

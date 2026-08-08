@@ -1,10 +1,12 @@
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
+import pytest
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import clock
 from app.models import (
     AssignmentType,
     Chore,
@@ -174,33 +176,50 @@ async def test_complete_unscheduled_reports_no_deadline_in_history(
     assert [e["days_late"] for e in entries] == [None]
 
 
-async def test_complete_duplicate_occurrence_conflicts(
+async def test_complete_walks_the_successor_past_a_slot_already_completed(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
     make_occurrence: MakeOccurrence,
+    db_session: AsyncSession,
     auth_client: AuthClient,
 ) -> None:
-    # Simulates a concurrent double-submit: an occurrence already exists at the slot the
-    # completion is about to materialise as the successor (same chore_id +
-    # scheduled_for), so the unique guard yields a 409 rather than a 500.
+    # A done row already sits on the slot the completion is about to materialise as the
+    # successor. `free_slot_from` walks past it, so the chore lands on the next free slot
+    # instead of colliding on uq_occurrence_chore_scheduled.
+    #
+    # This used to assert a 409, described as a concurrent double-submit - but it is not one:
+    # a real double-submit races to insert an *open* row, and there can only ever be one of
+    # those per chore. What it actually built was a chore whose open slot sits behind its own
+    # history, which the unscheduled -> scheduled round trip reaches for real, and the 409 it
+    # got was unclearable because retrying recomputed the same occupied slot. The genuine
+    # concurrent race still maps to a 409 through the IntegrityError catch; that path is not
+    # reachable under fixtures giving each test one connection.
     user = await make_user()
     household = await make_household(members=[user])
     today = datetime.now(UTC).date()
     chore = await make_chore(household=household, start_date=today, repeats=RepeatPeriod.daily)
-    tomorrow = datetime(today.year, today.month, today.day, tzinfo=UTC) + timedelta(days=1)
-    # A row already sits on tomorrow's slot (the successor the endpoint will insert).
+    midnight = datetime(today.year, today.month, today.day, tzinfo=UTC)
     await make_occurrence(
         chore=chore,
-        scheduled_for=tomorrow,
+        scheduled_for=midnight + timedelta(days=1),
         status=OccurrenceStatus.done,
         completed_by=user,
-        completed_at=tomorrow,
+        completed_at=midnight + timedelta(days=1),
     )
     client = await auth_client(user)
 
     resp = await client.post(f"/api/v1/chores/{chore.id}/complete")
-    assert resp.status_code == 409
+    assert resp.status_code == 201
+    assert resp.json()["next_due"][:10] == (midnight + timedelta(days=2)).date().isoformat()
+    upcoming = await db_session.scalar(
+        select(ChoreOccurrence).where(
+            ChoreOccurrence.chore_id == chore.id,
+            ChoreOccurrence.status == OccurrenceStatus.open,
+        )
+    )
+    assert upcoming is not None
+    assert upcoming.scheduled_for == midnight + timedelta(days=2)
 
 
 async def test_complete_another_members_chore_allowed(
@@ -613,3 +632,357 @@ async def test_complete_unscheduled_created_with_a_schedule_ignores_it(
     assert first.status_code == 201
     assert first.json()["days_until_due"] == 0
     assert (await client.post(f"/api/v1/chores/{chore_id}/complete")).status_code == 201
+
+
+# --- recording a completion on its due day ----------------------------------
+#
+# `backdate` answers "when was it done" rather than "when was it ticked": the closure is dated
+# at the end of the occurrence's own local day, so it reads as on time AND `advance_anchor`
+# stops rolling past the occurrences that were missed. The zone-sensitive half lives in
+# test_timezones.py; everything here is structural and reads the same in UTC.
+#
+# The clock is pinned throughout, since "which day was it due" and "which day is it now" are
+# the entire subject. Same seam and same reasoning as test_timezones.py's twin, kept local
+# because moving that one would churn a file this change has no other business in.
+
+DUE_DAY = date(2026, 8, 6)
+DUE_SLOT = datetime(2026, 8, 6, tzinfo=UTC)
+NOW = datetime(2026, 8, 8, 9, 0, tzinfo=UTC)  # two days after DUE_DAY
+END_OF_DUE_DAY = datetime(2026, 8, 6, 23, 59, 59, 999999, tzinfo=UTC)
+
+
+def pin_clock(monkeypatch: pytest.MonkeyPatch, moment: datetime = NOW) -> None:
+    monkeypatch.setattr(clock, "now", lambda: moment)
+
+
+async def open_slot(session: AsyncSession, chore: Chore) -> datetime:
+    slot = await session.scalar(
+        select(ChoreOccurrence.scheduled_for).where(
+            ChoreOccurrence.chore_id == chore.id,
+            ChoreOccurrence.status == OccurrenceStatus.open,
+        )
+    )
+    assert slot is not None
+    return slot
+
+
+async def closure(session: AsyncSession, completion_id: int) -> ChoreOccurrence:
+    row = await session.scalar(select(ChoreOccurrence).where(ChoreOccurrence.id == completion_id))
+    assert row is not None
+    return row
+
+
+async def test_complete_backdated_records_the_end_of_the_due_day_and_advances_one_interval(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, start_date=DUE_DAY, repeats=RepeatPeriod.daily)
+    pin_clock(monkeypatch)
+    client = await auth_client(user)
+
+    resp = await client.post(f"/api/v1/chores/{chore.id}/complete", json={"backdate": True})
+
+    assert resp.status_code == 201
+    body = resp.json()
+    assert (await closure(db_session, body["id"])).completed_at == END_OF_DUE_DAY
+    # The successor is one interval on from the slot, NOT from today: 7 August, which is still
+    # a day overdue. That is the whole point - the missed day is offered rather than swallowed.
+    assert await open_slot(db_session, chore) == DUE_SLOT + timedelta(days=1)
+    assert body["days_until_due"] == -1
+    assert body["status"] == "overdue"
+    # `created_at` on a closure means the completion timestamp (COMPLETION_SORT_COLUMNS maps
+    # it to `completed_at`), so the 201 and the History row must agree about the same event.
+    assert datetime.fromisoformat(body["created_at"]) == END_OF_DUE_DAY
+
+
+async def test_complete_without_the_flag_still_skips_the_missed_days(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The control pair for the test above: without the flag nothing moved, so the assertions
+    there describe the flag rather than the endpoint. Both ways of declining it are covered -
+    `{"backdate": false}` and no body at all - which is what pins the schema default."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    explicit = await make_chore(
+        household=household, title="Explicit", start_date=DUE_DAY, repeats=RepeatPeriod.daily
+    )
+    omitted = await make_chore(
+        household=household, title="Omitted", start_date=DUE_DAY, repeats=RepeatPeriod.daily
+    )
+    pin_clock(monkeypatch)
+    client = await auth_client(user)
+
+    first = await client.post(f"/api/v1/chores/{explicit.id}/complete", json={"backdate": False})
+    second = await client.post(f"/api/v1/chores/{omitted.id}/complete")
+
+    assert (await closure(db_session, first.json()["id"])).completed_at == NOW
+    assert (await closure(db_session, second.json()["id"])).completed_at == NOW
+    # Straight past the 7th and the 8th to tomorrow, which is what the flag exists to avoid.
+    assert await open_slot(db_session, explicit) == DUE_SLOT + timedelta(days=3)
+    assert await open_slot(db_session, omitted) == DUE_SLOT + timedelta(days=3)
+
+
+async def test_complete_backdated_twice_walks_the_chain_one_day_at_a_time(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A two-day backlog takes two backdated completions to clear, each recording its own day.
+    The second lands the chore on today, at which point it is no longer overdue and the client
+    stops asking the question."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, start_date=DUE_DAY, repeats=RepeatPeriod.daily)
+    pin_clock(monkeypatch)
+    client = await auth_client(user)
+
+    await client.post(f"/api/v1/chores/{chore.id}/complete", json={"backdate": True})
+    second = await client.post(f"/api/v1/chores/{chore.id}/complete", json={"backdate": True})
+
+    assert second.status_code == 201
+    assert (await closure(db_session, second.json()["id"])).completed_at == END_OF_DUE_DAY + (
+        timedelta(days=1)
+    )
+    assert await open_slot(db_session, chore) == DUE_SLOT + timedelta(days=2)
+    assert second.json()["days_until_due"] == 0
+    assert second.json()["status"] == "today"
+
+
+async def test_complete_backdated_clamps_to_now_for_a_chore_due_today(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The flag is set and the chore is NOT overdue - deliberately the one clause left
+    unsatisfied, since that is the branch the clamp exists for. The end of today is still
+    ahead, so the closure is dated now rather than in the future, and now is on time anyway.
+    This is why the server needs no overdue check of its own."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, start_date=NOW.date(), repeats=RepeatPeriod.daily)
+    pin_clock(monkeypatch)
+    client = await auth_client(user)
+
+    resp = await client.post(f"/api/v1/chores/{chore.id}/complete", json={"backdate": True})
+
+    assert resp.status_code == 201
+    assert (await closure(db_session, resp.json()["id"])).completed_at == NOW
+    assert await open_slot(db_session, chore) == datetime(2026, 8, 9, tzinfo=UTC)
+    assert resp.json()["days_until_due"] == 1
+
+
+async def test_complete_backdated_clamps_to_now_for_an_early_completion(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The far side of the same clamp: a chore done a fortnight early must not be stamped with
+    a completion time a fortnight in the future."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(
+        household=household, start_date=date(2026, 8, 20), repeats=RepeatPeriod.daily
+    )
+    pin_clock(monkeypatch)
+    client = await auth_client(user)
+
+    resp = await client.post(f"/api/v1/chores/{chore.id}/complete", json={"backdate": True})
+
+    assert (await closure(db_session, resp.json()["id"])).completed_at == NOW
+    assert await open_slot(db_session, chore) == datetime(2026, 8, 21, tzinfo=UTC)
+
+
+async def test_complete_backdate_refused_for_an_unscheduled_chore(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unscheduled chore is never due, so it has no due day to be recorded against - and it
+    reopens AT its completion moment, so a backdated one would reopen at the end of a day and
+    collide with itself the second time it was done in that day."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, repeats=RepeatPeriod.manual)
+    pin_clock(monkeypatch)
+    client = await auth_client(user)
+
+    resp = await client.post(f"/api/v1/chores/{chore.id}/complete", json={"backdate": True})
+
+    assert resp.status_code == 400
+    assert "nothing to backdate" in resp.json()["detail"]
+    # Refused, not "done and then errored": the slot is untouched and no history row exists.
+    assert await open_slot(db_session, chore) is not None
+    assert (
+        await db_session.scalar(
+            select(func.count())
+            .select_from(ChoreOccurrence)
+            .where(
+                ChoreOccurrence.chore_id == chore.id,
+                ChoreOccurrence.status == OccurrenceStatus.done,
+            )
+        )
+    ) == 0
+
+
+async def test_complete_an_unscheduled_chore_without_the_flag_still_works(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The negative half of the refusal above: it keys off the flag, not off `repeats`.
+    Without this, deleting the `payload.backdate` clause from that guard would break nothing."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, repeats=RepeatPeriod.manual)
+    pin_clock(monkeypatch)
+    client = await auth_client(user)
+
+    resp = await client.post(f"/api/v1/chores/{chore.id}/complete", json={"backdate": False})
+
+    assert resp.status_code == 201
+    # Reopened at the completion moment, as an unscheduled chore always does.
+    assert await open_slot(db_session, chore) == NOW
+
+
+async def test_complete_backdate_refusal_precedes_the_credit_check(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both 400 clauses are violated at once, so which message comes back pins the ordering.
+    The backdate refusal is a property of the *target* chore, so every caller gets the same
+    actionable answer rather than one about their own request - the same reasoning that puts
+    skip_chore's twin ahead of its occurrence lookup."""
+    user = await make_user()
+    stranger = await make_user(email="stranger@example.com")
+    household = await make_household(members=[user, stranger])
+    chore = await make_chore(household=household, repeats=RepeatPeriod.manual)
+    pin_clock(monkeypatch)
+    client = await auth_client(user)
+
+    resp = await client.post(
+        f"/api/v1/chores/{chore.id}/complete",
+        json={"backdate": True, "completed_by_user_id": stranger.id},
+    )
+
+    assert resp.status_code == 400
+    assert "nothing to backdate" in resp.json()["detail"]
+
+
+async def test_complete_backdated_with_a_credit_records_both(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The chained-dialog contract on the wire: "I did it on Friday, and it was Anna's chore
+    but I'm the one who did it" is one request carrying both facts."""
+    me = await make_user(email="me@example.com")
+    other = await make_user(email="other@example.com")
+    household = await make_household(members=[me, other])
+    chore = await make_chore(
+        household=household, start_date=DUE_DAY, repeats=RepeatPeriod.daily, assignees=[other]
+    )
+    pin_clock(monkeypatch)
+    client = await auth_client(me)
+
+    resp = await client.post(
+        f"/api/v1/chores/{chore.id}/complete",
+        json={"backdate": True, "completed_by_user_id": other.id},
+    )
+
+    assert resp.status_code == 201
+    closed = await closure(db_session, resp.json()["id"])
+    assert closed.completed_by_user_id == other.id
+    assert closed.completed_at == END_OF_DUE_DAY
+    assert await open_slot(db_session, chore) == DUE_SLOT + timedelta(days=1)
+
+
+async def test_complete_backdated_advances_the_rotation_once_per_tap(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Clearing a two-day backlog by recording each day passes three turns, where declining the
+    flag clears the same gap in one completion and passes one. Deliberate rather than
+    incidental: three occurrences really did happen. `_successor_assignee` counts done rows and
+    knows nothing about backdating, so nothing else here would notice this changing.
+
+    The un-flagged control is what makes the assertion mean anything. Rotations always equal
+    completions, so "three backdated completions rotate three times" is true of any three
+    completions; what backdating changes is how many completions the gap costs.
+    """
+    a = await make_user(email="anna@example.com", first_name="Anna")
+    b = await make_user(email="bob@example.com", first_name="Bob")
+    c = await make_user(email="cleo@example.com", first_name="Cleo")
+    household = await make_household(members=[a, b, c])
+
+    def rotating(title: str) -> Awaitable[Chore]:
+        return make_chore(
+            household=household,
+            title=title,
+            start_date=DUE_DAY,
+            repeats=RepeatPeriod.daily,
+            assignment_type=AssignmentType.alphabetical,
+            turn_length=1,
+            assignees=[a, b, c],
+            current_assignee=a,
+        )
+
+    walked_chore = await rotating("Walked")
+    control = await rotating("Cleared in one")
+    pin_clock(monkeypatch)
+    client = await auth_client(a)
+
+    async def on_the_hook(chore: Chore) -> int | None:
+        return await db_session.scalar(
+            select(ChoreOccurrence.assignee_id).where(
+                ChoreOccurrence.chore_id == chore.id,
+                ChoreOccurrence.status == OccurrenceStatus.open,
+            )
+        )
+
+    walked = []
+    for _ in range(3):
+        await client.post(f"/api/v1/chores/{walked_chore.id}/complete", json={"backdate": True})
+        walked.append(await on_the_hook(walked_chore))
+    assert walked == [b.id, c.id, a.id]
+
+    # The same two-day gap, declined: one completion jumps the chore past both missed days, so
+    # the turn moves once and Cleo never comes up.
+    await client.post(f"/api/v1/chores/{control.id}/complete")
+    assert await on_the_hook(control) == b.id
+    assert await open_slot(db_session, control) == DUE_SLOT + timedelta(days=3)

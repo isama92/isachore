@@ -1448,6 +1448,11 @@ paths:
         `completed_by_user_id` credits it to another member so the History shows it under
         their name (used by the Home due view's credit dialog), but only if that member is
         one of the chore's assignees; the assignee pool is never modified.
+
+        An optional `backdate` records the completion against the occurrence's own due day
+        instead of now, for the chore that was done and not ticked: it reads as on time, and the
+        successor advances one slot rather than jumping past everything that was missed, so a
+        backlog is walked one completion at a time. Refused for an unscheduled chore, below.
       operationId: complete_chore_api_v1_chores__chore_id__complete_post
       parameters:
         - name: chore_id
@@ -2910,6 +2915,10 @@ components:
             - type: integer
             - type: 'null'
           title: Completed By User Id
+        backdate:
+          type: boolean
+          title: Backdate
+          default: false
       type: object
       title: CompleteChoreRequest
       description: |-
@@ -2917,6 +2926,23 @@ components:
         the completion to another member so the History shows it under their name;
         it must be one of the chore's current assignees (the chore itself is never
         modified). Omitted or None credits the current user (the default).
+
+        `backdate` answers "when was it done" rather than "when was it ticked": it records the
+        completion against the occurrence's own due day, for the chore somebody did and forgot
+        to tick. Two things follow, and the second is the point - it reads as on time rather
+        than late, and the successor advances exactly one slot instead of jumping past every
+        occurrence that was missed, so a backlog is worked through one at a time rather than
+        silently swallowed.
+
+        A **flag, never a client-supplied datetime**: the server derives the instant as
+        `min(end of the scheduled local day, now)`, which leaves no room for clock skew, a
+        timestamp in the future, or a caller dating a completion to an arbitrary day. The clamp
+        also makes the flag self-limiting rather than needing an overdue check - for a chore due
+        today or early, the end of its due day is still ahead, so the answer is `now`, which is
+        on time anyway.
+
+        Refused with a 400 for an unscheduled (`manual`) chore, which is never due and so has no
+        due day to be recorded against.
     CompletionBucket:
       properties:
         bucket:

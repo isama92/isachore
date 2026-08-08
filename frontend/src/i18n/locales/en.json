@@ -178,6 +178,14 @@
       "body": "This chore is assigned to {{names}}. Who should the History credit for this completion?",
       "doneAsMe": "Done as me",
       "doneAs": "Done as {{name}}"
+    },
+    "completed": "Chore marked done",
+    "backdate": {
+      "title": "When did you do “{{title}}”?",
+      "body": "It was due on {{date}}. Recording it then keeps the chore on its schedule, so the next one lands the day after rather than skipping the days you missed.",
+      "justNow": "Just now",
+      "onDate": "On {{date}}",
+      "recorded": "Recorded as done on {{date}}"
     }
   },
   "unscheduled": {

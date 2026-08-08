@@ -72,9 +72,27 @@ class CompleteChoreRequest(BaseModel):
     """Optional body for POST /chores/{id}/complete. `completed_by_user_id` credits
     the completion to another member so the History shows it under their name;
     it must be one of the chore's current assignees (the chore itself is never
-    modified). Omitted or None credits the current user (the default)."""
+    modified). Omitted or None credits the current user (the default).
+
+    `backdate` answers "when was it done" rather than "when was it ticked": it records the
+    completion against the occurrence's own due day, for the chore somebody did and forgot
+    to tick. Two things follow, and the second is the point - it reads as on time rather
+    than late, and the successor advances exactly one slot instead of jumping past every
+    occurrence that was missed, so a backlog is worked through one at a time rather than
+    silently swallowed.
+
+    A **flag, never a client-supplied datetime**: the server derives the instant as
+    `min(end of the scheduled local day, now)`, which leaves no room for clock skew, a
+    timestamp in the future, or a caller dating a completion to an arbitrary day. The clamp
+    also makes the flag self-limiting rather than needing an overdue check - for a chore due
+    today or early, the end of its due day is still ahead, so the answer is `now`, which is
+    on time anyway.
+
+    Refused with a 400 for an unscheduled (`manual`) chore, which is never due and so has no
+    due day to be recorded against."""
 
     completed_by_user_id: int | None = None
+    backdate: bool = False
 
 
 class CompletionRead(BaseModel):

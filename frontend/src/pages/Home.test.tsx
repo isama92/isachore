@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { toast } from 'sonner'
 import Home from './Home'
 import { mockFetch, renderWithProviders } from '../test/utils'
 import { makeChore, makeDueChore, makeHouseholdMember, makeUser } from '../test/fixtures'
@@ -812,5 +813,275 @@ describe('description dialog', () => {
       expect(amsterdam).toHaveTextContent('5 Aug 2026')
       expect(niue).toHaveTextContent('4 Aug 2026')
     })
+  })
+})
+
+// The "when did you do it?" dialog, shown before completing an overdue chore so the one
+// somebody did and forgot to tick can be recorded against its own due day. Every case here
+// keeps the chore overdue *and* controls whether it is assigned to somebody else, because
+// those are the two independent clauses deciding which dialogs open.
+describe('backdate dialog', () => {
+  function overdueBody(chore: Partial<DueChore> = {}) {
+    return homeBody(0, 1, [
+      makeDueChore({
+        id: 10,
+        title: 'Take out the trash',
+        status: 'overdue',
+        days_until_due: -2,
+        next_due: '2026-08-06T00:00:00Z',
+        ...chore,
+      }),
+    ])
+  }
+
+  function completeCall(fetchMock: ReturnType<typeof mockFetch>, id: number) {
+    return fetchMock.mock.calls.find(
+      ([url, init]) =>
+        String(url).includes(`/api/v1/chores/${id}/complete`) && init?.method === 'POST',
+    )
+  }
+
+  it('asks when an overdue chore was done, then records it against its due day', async () => {
+    const fetchMock = mockFetch([
+      { path: FILTERS, method: 'GET', body: SOLO_OPTIONS },
+      // Assigned to me, so the credit dialog cannot fire: without that this would be a test
+      // about two dialogs and would pass with the overdue check gone.
+      {
+        path: HOME,
+        method: 'GET',
+        body: overdueBody({ assignees: [makeHouseholdMember({ id: 1 })] }),
+      },
+      { path: COMPLETE, method: 'POST', status: 201, body: {} },
+    ])
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+    await user.click(await screen.findByRole('button', { name: /^Done: .*trash/ }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(within(dialog).getByText('When did you do “Take out the trash”?')).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole('button', { name: 'On 6 Aug 2026' }))
+
+    expect(JSON.parse(String(completeCall(fetchMock, 10)![1]?.body))).toEqual({ backdate: true })
+  })
+
+  it('sends no body when an overdue chore was done just now', async () => {
+    const fetchMock = mockFetch([
+      { path: FILTERS, method: 'GET', body: SOLO_OPTIONS },
+      {
+        path: HOME,
+        method: 'GET',
+        body: overdueBody({ assignees: [makeHouseholdMember({ id: 1 })] }),
+      },
+      { path: COMPLETE, method: 'POST', status: 201, body: {} },
+    ])
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+    await user.click(await screen.findByRole('button', { name: /^Done: .*trash/ }))
+    const dialog = await screen.findByRole('alertdialog')
+    await user.click(within(dialog).getByRole('button', { name: 'Just now' }))
+
+    // The two buttons have to be a real fork, not two labels for one action.
+    expect(completeCall(fetchMock, 10)![1]?.body).toBeUndefined()
+  })
+
+  it('chains into the credit dialog for another member’s overdue chore', async () => {
+    const fetchMock = mockFetch([
+      { path: FILTERS, method: 'GET', body: SOLO_OPTIONS },
+      {
+        path: HOME,
+        method: 'GET',
+        body: overdueBody({
+          assignees: [makeHouseholdMember({ id: 2, first_name: 'Anna', last_name: 'Aardvark' })],
+        }),
+      },
+      { path: COMPLETE, method: 'POST', status: 201, body: {} },
+    ])
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+    // The reported scenario end to end: it was Anna's chore, I did it on Friday and forgot.
+    await user.click(await screen.findByRole('button', { name: /^Done: .*trash/ }))
+    const when = await screen.findByRole('alertdialog')
+    await user.click(within(when).getByRole('button', { name: 'On 6 Aug 2026' }))
+
+    const who = await screen.findByRole('alertdialog')
+    await waitFor(() =>
+      expect(within(who).getByText('Complete “Take out the trash”?')).toBeInTheDocument(),
+    )
+    await user.click(within(who).getByRole('button', { name: 'Done as me' }))
+
+    expect(JSON.parse(String(completeCall(fetchMock, 10)![1]?.body))).toEqual({ backdate: true })
+  })
+
+  it('does not ask when for a chore due today, and goes straight to the credit dialog', async () => {
+    const fetchMock = mockFetch([
+      { path: FILTERS, method: 'GET', body: SOLO_OPTIONS },
+      // Due today AND assigned to somebody else, so the credit dialog does open. A chore
+      // assigned to me would open nothing at all and this would assert a fall-through.
+      {
+        path: HOME,
+        method: 'GET',
+        body: overdueBody({
+          status: 'today',
+          days_until_due: 0,
+          assignees: [makeHouseholdMember({ id: 2, first_name: 'Anna', last_name: 'Aardvark' })],
+        }),
+      },
+      { path: COMPLETE, method: 'POST', status: 201, body: {} },
+    ])
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+    await user.click(await screen.findByRole('button', { name: /^Done: .*trash/ }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(within(dialog).getByText('Complete “Take out the trash”?')).toBeInTheDocument()
+    expect(screen.queryByText(/When did you do/)).not.toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole('button', { name: 'Done as Anna Aardvark' }))
+
+    // Widen the guard to `days_until_due <= 0` and this gains a `backdate` key.
+    expect(JSON.parse(String(completeCall(fetchMock, 10)![1]?.body))).toEqual({
+      completed_by_user_id: 2,
+    })
+  })
+
+  it('completes nothing when the when dialog is cancelled', async () => {
+    const fetchMock = mockFetch([
+      { path: FILTERS, method: 'GET', body: SOLO_OPTIONS },
+      {
+        path: HOME,
+        method: 'GET',
+        body: overdueBody({ assignees: [makeHouseholdMember({ id: 1 })] }),
+      },
+      { path: COMPLETE, method: 'POST', status: 201, body: {} },
+    ])
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+    await user.click(await screen.findByRole('button', { name: /^Done: .*trash/ }))
+    const dialog = await screen.findByRole('alertdialog')
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+    expect(completeCall(fetchMock, 10)).toBeUndefined()
+    expect(await screen.findByRole('button', { name: /^Done: .*trash/ })).toBeInTheDocument()
+  })
+
+  it('labels the button with the due date in the household’s zone', async () => {
+    mockFetch([
+      { path: FILTERS, method: 'GET', body: SOLO_OPTIONS },
+      {
+        path: HOME,
+        method: 'GET',
+        // 10:00Z is already the 6th in a +14 household, and the row says two days overdue
+        // against that calendar. Rendered in the viewer's zone the button would read 5 Aug
+        // and contradict it.
+        body: overdueBody({
+          next_due: '2026-08-05T10:00:00Z',
+          household: { id: 1, name: 'Test Household', timezone: 'Pacific/Kiritimati' },
+          assignees: [makeHouseholdMember({ id: 1 })],
+        }),
+      },
+      { path: COMPLETE, method: 'POST', status: 201, body: {} },
+    ])
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+    await user.click(await screen.findByRole('button', { name: /^Done: .*trash/ }))
+    const dialog = await screen.findByRole('alertdialog')
+
+    expect(within(dialog).getByRole('button', { name: 'On 6 Aug 2026' })).toBeInTheDocument()
+  })
+})
+
+// Completing on Home confirms with a toast, which is new: before this the row simply left and
+// a backdated completion had nothing to show for itself at all - it comes straight back, one
+// day less overdue, and the progress bar deliberately does not move for it.
+describe('completion toasts', () => {
+  function body(chore: Partial<DueChore> = {}) {
+    return homeBody(0, 1, [
+      makeDueChore({
+        id: 20,
+        title: 'Take out the trash',
+        assignees: [makeHouseholdMember({ id: 1 })],
+        ...chore,
+      }),
+    ])
+  }
+
+  it('confirms an ordinary completion', async () => {
+    mockFetch([
+      { path: FILTERS, method: 'GET', body: SOLO_OPTIONS },
+      { path: HOME, method: 'GET', body: body() },
+      { path: COMPLETE, method: 'POST', status: 201, body: {} },
+    ])
+    const success = vi.spyOn(toast, 'success')
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+    await user.click(await screen.findByRole('button', { name: /^Done: .*trash/ }))
+
+    await waitFor(() => expect(success).toHaveBeenCalledWith('Chore marked done'))
+  })
+
+  it('names the day a backdated completion was recorded against', async () => {
+    mockFetch([
+      { path: FILTERS, method: 'GET', body: SOLO_OPTIONS },
+      {
+        path: HOME,
+        method: 'GET',
+        body: body({ status: 'overdue', days_until_due: -2, next_due: '2026-08-06T00:00:00Z' }),
+      },
+      { path: COMPLETE, method: 'POST', status: 201, body: {} },
+    ])
+    const success = vi.spyOn(toast, 'success')
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+    await user.click(await screen.findByRole('button', { name: /^Done: .*trash/ }))
+    const dialog = await screen.findByRole('alertdialog')
+    await user.click(within(dialog).getByRole('button', { name: 'On 6 Aug 2026' }))
+
+    // Naming the day is the whole job: the row returns one day less overdue and the progress
+    // bar stays put, so "Chore marked done" would leave the tap looking like it did nothing.
+    await waitFor(() => expect(success).toHaveBeenCalledWith('Recorded as done on 6 Aug 2026'))
+  })
+
+  it('stays silent when a chore is skipped', async () => {
+    const fetchMock = mockFetch([
+      { path: FILTERS, method: 'GET', body: SOLO_OPTIONS },
+      { path: HOME, method: 'GET', body: body() },
+      { path: COMPLETE, method: 'POST', status: 201, body: {} },
+      { path: SKIP, method: 'POST', status: 201, body: {} },
+    ])
+    const posted = (path: string) =>
+      fetchMock.mock.calls.filter(
+        ([url, init]) => String(url).includes(path) && init?.method === 'POST',
+      ).length
+    const success = vi.spyOn(toast, 'success')
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+    await user.click(await screen.findByRole('button', { name: /^Skip: .*trash/ }))
+    const confirm = await screen.findByRole('alertdialog')
+    await user.click(within(confirm).getByRole('button', { name: 'Skip it' }))
+
+    // A skip was just confirmed through a dialog, so the tap is already acknowledged. The
+    // omission is deliberate, and a comment alone would not survive "why does Done toast and
+    // Skip not?". Waited on the request rather than the row leaving, since the stubbed refetch
+    // hands the same row straight back.
+    await waitFor(() => expect(posted('/skip')).toBe(1))
+    expect(success).not.toHaveBeenCalled()
+
+    // Completing in the same test is what makes that absence mean something: without it a
+    // broken spy, or a toast that never fires at all, would read as a passing assertion.
+    // The button has to come back out of its exit animation first - `closeChore` ignores a
+    // click while the row is still exiting, so clicking too early would post nothing and this
+    // control would fail for a reason that has nothing to do with toasts.
+    const done = await screen.findByRole('button', { name: /^Done: .*trash/ })
+    await waitFor(() => expect(done).toBeEnabled())
+    await user.click(done)
+    await waitFor(() => expect(success).toHaveBeenCalledWith('Chore marked done'))
   })
 })

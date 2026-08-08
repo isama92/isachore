@@ -12,6 +12,7 @@ from app.core.assignment import initial_assignee, next_assignee, should_reassign
 from app.core.chores import (
     days_until_due,
     due_status,
+    end_of_local_day,
     first_occurrence,
     next_occurrence_after,
     snap_to_slot,
@@ -640,6 +641,7 @@ async def _close_occurrence(
     *,
     closed_by_id: int,
     skipped: bool,
+    backdate: bool,
     conflict_detail: str,
 ) -> CompletionRead:
     """Close a chore's open occurrence and materialise its successor. Shared by completing
@@ -649,6 +651,16 @@ async def _close_occurrence(
     The successor's assignee is the one real behavioural fork: a completion hands the chore
     on when the turn ends (`_successor_assignee`), a skip keeps it where it is
     (`_retained_assignee`).
+
+    **`backdate` splits the one `now` this used to have into two, and which value goes where
+    is not interchangeable.** It dates the closure at the end of the occurrence's own local
+    day instead of at the moment the button was pressed, for the chore somebody did and
+    forgot to tick. Three consumers take that chosen instant - the stamped column, the
+    successor derivation, and the echoed `created_at`, which in this API means the completion
+    timestamp (`COMPLETION_SORT_COLUMNS["created_at"]` maps to `completed_at`). The fourth,
+    `days_until_due` on the way out, must keep the *real* `now`: `GET /home` computes the
+    same number from `clock.now()`, so a backdated one would have this 201 report "due in a
+    day" for a successor that the very next page load calls overdue, in the same second.
 
     **The two values this closure is computed from are re-read under a row lock first**, and the
     order matters. `occ` and `chore` arrive from plain selects taken before this was called, so
@@ -692,6 +704,12 @@ async def _close_occurrence(
         or "UTC"
     )
     scheduled_for = occ.scheduled_for
+    # Computed here rather than any earlier because both operands are post-lock reads: the
+    # slot above and the zone before it. Clamped to `now`, which is what makes the flag
+    # self-limiting instead of needing an overdue check - for a chore due today or completed
+    # early the end of its due day is still ahead, so the answer is `now`, which is on time
+    # anyway. A caller that mis-decides therefore cannot date a completion into the future.
+    completed_at = min(end_of_local_day(scheduled_for, tz), now) if backdate else now
     # Flip the current occurrence to done FIRST (it becomes the history row and frees
     # the one-open-per-chore slot), then materialise the successor - never the reverse,
     # or the two momentarily-open rows would trip the partial unique index.
@@ -699,16 +717,34 @@ async def _close_occurrence(
     occ.skipped = skipped
     occ.title = chore.title
     occ.completed_by_user_id = closed_by_id
-    occ.completed_at = now
+    occ.completed_at = completed_at
     # Snapshotted alongside `title`, and for the same reason: both are facts about this closure
-    # that a later change to the chore or the household would otherwise rewrite.
+    # that a later change to the chore or the household would otherwise rewrite. It is also the
+    # same `tz` the backdate above was built from, which is what makes a backdated closure read
+    # as `days_late == 0` by construction rather than by luck: History reads both operands back
+    # through `closure_zone`, so the two can never be judged against different calendars.
     occ.completed_timezone = str(tz)
     await session.flush()
 
     # Anchor the successor to the occurrence just cleared (skip-missed applied), so its
     # due date advances one interval on the grid rather than from the completion time.
-    # An unscheduled chore has no grid and reopens at `now` instead.
-    upcoming = next_occurrence_after(scheduled_for, now, rule_for(chore), tz)
+    # An unscheduled chore has no grid and reopens at the completion moment instead.
+    rule = rule_for(chore)
+    upcoming = next_occurrence_after(scheduled_for, completed_at, rule, tz)
+    if chore.repeats != RepeatPeriod.manual:
+        # Walk past any slot this chore has already completed. Unconditional rather than
+        # gated on `backdate`, because it is the identity whenever nothing collides and
+        # gating it would leave the same latent bug on the just-now path. It only became
+        # reachable with backdating: the successor can now land on or before today, so a
+        # chore whose open slot was re-seeded into the past (the unscheduled -> scheduled
+        # round trip) can walk onto a done row, and `uq_occurrence_chore_scheduled` would
+        # turn that into a 409 no retry could ever clear.
+        #
+        # `manual` is skipped because it has no grid: its successor is the completion instant
+        # rather than a slot, so every done row sits at an earlier instant and the walk would
+        # be the identity. Skipping it saves the query rather than avoiding a raise - the
+        # `next_slot_after` inside would be unreachable even if this ran.
+        upcoming = await free_slot_from(session, chore.id, upcoming, rule, tz)
     pool = list(chore.assignees)
     next_person = (
         _retained_assignee(chore, occ.assignee_id, pool)
@@ -729,10 +765,15 @@ async def _close_occurrence(
         await session.commit()
     except IntegrityError:
         # A concurrent double-submit races to create the same successor occurrence (or
-        # re-close the same slot); the unique guards turn that into a 409, not a 500.
+        # re-close the same slot); the unique guards turn that into a 409, not a 500. Since
+        # `free_slot_from` above, this is the *only* thing left that can land here, so the
+        # 409 now genuinely means "somebody else got there first" rather than "this edit
+        # recomputed an occupied slot". Not demonstrable under the savepoint fixtures, which
+        # give each test one connection.
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=conflict_detail) from None
 
+    # The real `now`, never the backdated instant: see the docstring.
     days = days_until_due(upcoming, now, tz)
     return CompletionRead(
         id=completion_id,
@@ -741,7 +782,7 @@ async def _close_occurrence(
         scheduled_for=scheduled_for,
         completed_by_user_id=closed_by_id,
         skipped=skipped,
-        created_at=now,
+        created_at=completed_at,
         next_due=upcoming,
         days_until_due=days,
         status=due_status(days),
@@ -766,8 +807,28 @@ async def complete_chore(
     By default the completion is credited to the caller. An optional
     `completed_by_user_id` credits it to another member so the History shows it under
     their name (used by the Home due view's credit dialog), but only if that member is
-    one of the chore's assignees; the assignee pool is never modified."""
+    one of the chore's assignees; the assignee pool is never modified.
+
+    An optional `backdate` records the completion against the occurrence's own due day
+    instead of now, for the chore that was done and not ticked: it reads as on time, and the
+    successor advances one slot rather than jumping past everything that was missed, so a
+    backlog is walked one completion at a time. Refused for an unscheduled chore, below."""
     chore = await _get_user_chore_or_404(session, user, chore_id)
+    if payload is not None and payload.backdate and chore.repeats == RepeatPeriod.manual:
+        # Placed here, before the occurrence lookup and before the credit check, for the same
+        # reason skip_chore's twin is: it is a property of the *target*, so every caller gets
+        # the same actionable answer rather than one about their own request.
+        #
+        # Refused rather than ignored because an unscheduled chore reopens AT its completion
+        # moment (`next_occurrence_after` returns it verbatim), so a backdated one would
+        # reopen at the end of a day - and doing the chore twice in one day would recompute
+        # the identical instant and collide on `uq_occurrence_chore_scheduled`, a 409 no
+        # retry could clear. There is nothing to record it against anyway: those chores are
+        # never due, and their `scheduled_for` reads as "open since", not a deadline.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="An unscheduled chore is never due, so there is nothing to backdate",
+        )
     occ = await _open_occurrence(session, chore.id)
     if occ is None:
         # Nothing open to complete. Not reachable by simply completing twice (the successor
@@ -794,6 +855,7 @@ async def complete_chore(
         occ,
         closed_by_id=completed_by_id,
         skipped=False,
+        backdate=payload is not None and payload.backdate,
         conflict_detail="This chore has already been completed",
     )
 
@@ -838,6 +900,10 @@ async def skip_chore(chore_id: int, user: CurrentUser, session: SessionDep) -> C
         occ,
         closed_by_id=user.id,
         skipped=True,
+        # Explicit rather than defaulted, so the decision is greppable: a skip records no
+        # work, so there is nothing to date on a due day and no "I did it on Friday" to tell
+        # apart from "I gave up on Friday". Its own missed-slot swallowing stands.
+        backdate=False,
         # Not the pre-check's wording: reaching this means the slot WAS open and a concurrent
         # request closed it underneath us, so "nothing to skip" would describe the wrong event.
         conflict_detail="This chore has already been closed",

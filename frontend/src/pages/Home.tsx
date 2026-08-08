@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
@@ -19,6 +20,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import BackdateDialog from '@/components/chores/BackdateDialog'
 import CreditDialog from '@/components/chores/CreditDialog'
 import DescriptionDialog from '@/components/chores/DescriptionDialog'
 import { useFilterOptions } from '@/components/chores/useFilterOptions'
@@ -46,9 +48,16 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null)
   // Ids of rows currently playing their exit animation.
   const [exiting, setExiting] = useState<Set<number>>(new Set())
+  // The chore whose "when did you do it?" dialog is open (null = closed). Only shown for an
+  // overdue chore, which is the only case where "now" and "its due day" differ.
+  const [backdateFor, setBackdateFor] = useState<DueChore | null>(null)
   // The chore whose "who gets credit" dialog is open (null = closed). Only shown
   // when completing a chore assigned to someone other than the current user.
-  const [creditFor, setCreditFor] = useState<DueChore | null>(null)
+  //
+  // Carries the backdate answer rather than reading it from a second piece of state, because
+  // the two are decided one dialog apart and a completion needs both: kept separate they
+  // could disagree if a second Done were pressed in between.
+  const [creditFor, setCreditFor] = useState<{ chore: DueChore; backdate: boolean } | null>(null)
   // Which chore's instructions are on screen; non-null opens the dialog, as with creditFor.
   const [descriptionFor, setDescriptionFor] = useState<DueChore | null>(null)
   // The chore awaiting a "really skip this?" confirmation (null = closed), same open-on-
@@ -110,7 +119,12 @@ export default function Home() {
   // of this: the exit animation, the double-click lock, the monotonic request guard and the
   // refetch. Only the request and the fallback error copy differ, and keeping them in one
   // function is what stops the animation timing and the guard drifting apart between them.
-  function closeChore(chore: DueChore, request: () => Promise<unknown>, fallbackError: string) {
+  function closeChore(
+    chore: DueChore,
+    request: () => Promise<unknown>,
+    fallbackError: string,
+    successMessage?: string,
+  ) {
     if (exiting.has(chore.id)) return // ignore repeat clicks while a row animates out
     setError(null)
     // Play the exit animation for responsiveness, then reconcile the whole view
@@ -131,6 +145,7 @@ export default function Home() {
     let req = 0
     request()
       .then(() => {
+        if (successMessage) toast.success(successMessage)
         req = ++reqRef.current
         return Promise.all([fetchHomeRef.current(), animated])
       })
@@ -143,40 +158,72 @@ export default function Home() {
       .finally(stopExiting)
   }
 
-  function completeChore(chore: DueChore, completedByUserId?: number) {
-    // Only send a body when crediting someone other than the current user; the
-    // default (no body) credits the caller.
-    const body =
-      completedByUserId === undefined ? undefined : { completed_by_user_id: completedByUserId }
+  function completeChore(
+    chore: DueChore,
+    {
+      completedByUserId,
+      backdate = false,
+    }: { completedByUserId?: number; backdate?: boolean } = {},
+  ) {
+    // Only send the keys that carry a decision; the default (no body at all) credits the
+    // caller and records the completion now, which is what the endpoint does with no payload.
+    const body: { completed_by_user_id?: number; backdate?: boolean } = {}
+    if (completedByUserId !== undefined) body.completed_by_user_id = completedByUserId
+    if (backdate) body.backdate = true
     closeChore(
       chore,
-      () => api.post(endpoints.chores.complete(chore.id), body),
+      () =>
+        api.post(
+          endpoints.chores.complete(chore.id),
+          Object.keys(body).length > 0 ? body : undefined,
+        ),
       t('home.completeError'),
+      backdate
+        ? t('home.backdate.recorded', {
+            date: formatDateTime(chore.next_due, chore.household.timezone),
+          })
+        : t('home.completed'),
     )
   }
 
   // No credit question for a skip: there is no work to attribute, so it is always recorded
-  // against whoever confirmed it and the endpoint takes no body.
+  // against whoever confirmed it and the endpoint takes no body. No toast either, unlike
+  // completing: a skip was just confirmed through a dialog, so the tap is already acknowledged.
   function skipChore(chore: DueChore) {
     closeChore(chore, () => api.post(endpoints.chores.skip(chore.id)), t('home.skipError'))
   }
 
-  // Clicking Done: an unassigned chore, or one I'm already an assignee of,
-  // completes straight away (credited to me). A chore assigned only to other
-  // members opens the credit dialog so I can choose who the History records.
+  // Clicking Done asks up to two questions, in this order. First "when did you do it?", but
+  // only for an overdue chore - for anything else now IS its due day or earlier, so there is
+  // nothing to choose between. Then "who gets the credit?", unchanged: an unassigned chore, or
+  // one I'm already an assignee of, is credited to me without asking.
   function requestComplete(chore: DueChore) {
-    const mine = user ? chore.assignees.some((a) => a.id === user.id) : false
-    if (chore.assignees.length === 0 || mine) {
-      completeChore(chore)
+    if (chore.days_until_due < 0) {
+      setBackdateFor(chore)
     } else {
-      setCreditFor(chore)
+      requestCredit(chore, false)
     }
   }
 
+  function requestCredit(chore: DueChore, backdate: boolean) {
+    const mine = user ? chore.assignees.some((a) => a.id === user.id) : false
+    if (chore.assignees.length === 0 || mine) {
+      completeChore(chore, { backdate })
+    } else {
+      setCreditFor({ chore, backdate })
+    }
+  }
+
+  function confirmBackdate(backdate: boolean) {
+    const chore = backdateFor
+    setBackdateFor(null)
+    if (chore) requestCredit(chore, backdate)
+  }
+
   function creditAndComplete(completedByUserId?: number) {
-    const chore = creditFor
+    const pending = creditFor
     setCreditFor(null)
-    if (chore) completeChore(chore, completedByUserId)
+    if (pending) completeChore(pending.chore, { completedByUserId, backdate: pending.backdate })
   }
 
   function confirmSkip() {
@@ -307,9 +354,18 @@ export default function Home() {
 
       <CreditDialog
         group="home"
-        chore={creditFor}
+        chore={creditFor?.chore ?? null}
         onClose={() => setCreditFor(null)}
         onConfirm={creditAndComplete}
+      />
+
+      {/* Asked first, and only for an overdue chore; a non-null `backdateFor` opens it, same
+          shape as its neighbours. Chains into the credit dialog above rather than folding both
+          questions into one, which keeps CreditDialog untouched and shared with Unscheduled. */}
+      <BackdateDialog
+        chore={backdateFor}
+        onClose={() => setBackdateFor(null)}
+        onConfirm={confirmBackdate}
       />
 
       {/* Inline rather than its own component, unlike CreditDialog: only this page skips, and

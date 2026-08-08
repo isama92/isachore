@@ -261,21 +261,41 @@ async def undo_completion(
         HouseholdLogAction.skip_undone if occ.skipped else HouseholdLogAction.completion_undone
     )
 
-    # Is this the chore's most recent completion? Ordered by `completed_at`, NOT by
-    # `scheduled_for`: slots only run in completion order while they come off a recurrence
-    # grid, and an unscheduled chore's successor is anchored at the moment it was completed.
-    # A chore switched to unscheduled while its slot was still in the future therefore ends
-    # up with a done row dated later than the open row that follows it, and ordering by slot
-    # would call the wrong completion the latest - reopening a future slot with a stale
-    # assignee while deleting the live open occurrence. `max` ignores NULLs, and no
-    # production path writes a done row without a completion time.
-    latest_completed_at = await session.scalar(
-        select(func.max(ChoreOccurrence.completed_at)).where(
+    # Is this the chore's most recent closure? Decided by row id, which is insertion order,
+    # because that is the one ordering nothing can invert. Neither of the two obvious
+    # alternatives holds:
+    #
+    #   - **Not `scheduled_for`.** Slots only run in completion order while they come off a
+    #     recurrence grid, and an unscheduled chore's successor is anchored at the moment it
+    #     was completed. A chore switched to unscheduled while its slot was still in the
+    #     future ends up with a done row dated later than the open row that follows it, so
+    #     ordering by slot reopens a future slot with a stale assignee while deleting the
+    #     live open occurrence.
+    #   - **Not `completed_at`**, which this used to use. A completion recorded on its due
+    #     day (`backdate`) is dated then rather than now, so it can be *older* than the
+    #     chore's previous closure whenever something has moved the open slot backwards -
+    #     the unscheduled -> scheduled round trip does exactly that, re-seeding the slot into
+    #     the past while recent done rows remain. The consequence was silent and permanent:
+    #     undoing the genuine latest took the `else` branch, deleting the history row and
+    #     leaving the successor open, while undoing the *older* one deleted the live open
+    #     occurrence instead.
+    #
+    # Insertion order is safe because every writer creates occurrences strictly in chain
+    # order - a successor is inserted by the closure it follows - and the reopen branch below
+    # deletes the successor before flipping this row back, so the ids left behind stay
+    # ordered. That holds for unscheduled chores too, whose ids ascend with completion order
+    # even though their slots do not. Pinned by
+    # `test_undo_reopens_the_latest_closure_even_when_it_is_dated_earliest`.
+    #
+    # The old `completed_at is not None` guard goes with the column: an id is never NULL, so
+    # a legacy done row missing its completion time can no longer reopen by accident.
+    latest_done_id = await session.scalar(
+        select(func.max(ChoreOccurrence.id)).where(
             ChoreOccurrence.chore_id == occ.chore_id,
             ChoreOccurrence.status == OccurrenceStatus.done,
         )
     )
-    if occ.completed_at is not None and occ.completed_at == latest_completed_at:
+    if occ.id == latest_done_id:
         # Reopen it: delete the successor open occurrence first (freeing the
         # one-open-per-chore slot), then flip this row back to open with its assignee.
         successor = (
