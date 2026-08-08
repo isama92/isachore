@@ -476,3 +476,52 @@ async def test_home_progress_counts_a_skip_as_dealt_with(
     # The chore is still listed (tomorrow is inside the 7-day window) but is no longer
     # part of today's tally, which is what makes the bar read 1 of 1 rather than 1 of 2.
     assert [i["days_until_due"] for i in after.json()["items"]] == [1]
+
+
+async def test_home_progress_does_not_count_a_backdated_completion_as_done_today(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    """A completion recorded against its own due day is not work done today, so the bar must
+    not move for it - it answers "how much of today's list did you get through". The chore
+    simply leaves the list, dropping out of the numerator and the denominator alike.
+
+    Built as an omission test rather than a count on an empty bar: the live completion goes in
+    first, so `done_today` is genuinely 1 before the backdated one is recorded. Counted from
+    zero, "the bar reads 1" would pass whatever `home.py` did with the second closure. Weekly
+    rather than daily for the backdated chore, so its successor lands outside today's tally
+    and the denominator visibly moves - a daily one would re-open still overdue and hold its
+    place in `total_today`, leaving the two assertions numerically identical.
+    """
+    user = await make_user()
+    household = await make_household(members=[user])
+    today = await make_chore(
+        household=household,
+        title="Done today",
+        start_date=_midnight(0).date(),
+        repeats=RepeatPeriod.daily,
+    )
+    overdue = await make_chore(
+        household=household,
+        title="Forgot to tick it yesterday",
+        start_date=_midnight(-1).date(),
+        repeats=RepeatPeriod.weekly,
+    )
+    client = await auth_client(user)
+
+    await client.post(f"/api/v1/chores/{today.id}/complete")
+    assert (await client.get("/api/v1/home")).json()["progress"] == {
+        "done_today": 1,
+        "total_today": 2,
+    }
+
+    await client.post(f"/api/v1/chores/{overdue.id}/complete", json={"backdate": True})
+
+    # Still 1, not 2: yesterday's work is not today's. And the chore has left the tally
+    # rather than sitting in it undone, so the bar reads "1 of 1" rather than stalling.
+    assert (await client.get("/api/v1/home")).json()["progress"] == {
+        "done_today": 1,
+        "total_today": 1,
+    }

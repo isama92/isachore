@@ -10,7 +10,9 @@ from app.core.chores import (
     days_since,
     days_until_due,
     due_status,
+    end_of_local_day,
     first_occurrence,
+    local_day_bounds,
     next_occurrence_after,
     next_slot_after,
     snap_to_slot,
@@ -623,3 +625,38 @@ def test_next_occurrence_after_off_grid_row_self_heals() -> None:
     assert snap_to_slot(
         datetime(2026, 7, 22, tzinfo=UTC), weekly_on(TUE, every=2), UTC_ZONE
     ) == datetime(2026, 7, 28, tzinfo=UTC)
+
+
+# --- end_of_local_day (dating a completion on its due day) -----------------
+
+
+def test_end_of_local_day_is_the_last_instant_not_the_next_midnight() -> None:
+    slot = datetime(2026, 8, 6, tzinfo=UTC)
+    assert end_of_local_day(slot, UTC_ZONE) == datetime(2026, 8, 6, 23, 59, 59, 999999, tzinfo=UTC)
+    # The trap this exists to avoid: `local_day_bounds`' upper bound is exclusive, so it is
+    # the *next* local midnight and belongs to the following date. Dating a completion with
+    # it would read as a day late and let `advance_anchor` roll a slot.
+    assert end_of_local_day(slot, UTC_ZONE) != local_day_bounds(slot, UTC_ZONE)[1]
+    assert end_of_local_day(slot, UTC_ZONE).astimezone(UTC_ZONE).date() == date(2026, 8, 6)
+
+
+def test_end_of_local_day_reads_the_day_the_moment_falls_in_not_the_day_it_is_called_on() -> None:
+    # Every caller passes a slot, never `now`, so the argument is load-bearing: a moment
+    # halfway through a day must yield that day's end, not that moment plus something.
+    assert end_of_local_day(datetime(2026, 8, 6, 14, 30, tzinfo=UTC), UTC_ZONE) == end_of_local_day(
+        datetime(2026, 8, 6, tzinfo=UTC), UTC_ZONE
+    )
+
+
+def test_advance_anchor_does_not_roll_for_a_completion_at_the_end_of_the_slots_own_day() -> None:
+    # The whole derivation behind recording a completion on its due day: dated at the end of
+    # the day it was due, the completion date equals the slot's date, so `advance_anchor`'s
+    # loop never runs and the successor is exactly one interval on - the missed days are not
+    # jumped over. Contrast test_advance_anchor_missed_a_week_skips_backlog_to_tomorrow,
+    # which is the same chore dated `now` instead.
+    slot = datetime(2026, 8, 6, tzinfo=UTC)
+    anchor = advance_anchor(slot, end_of_local_day(slot, UTC_ZONE), DAILY, UTC_ZONE)
+    assert anchor == slot
+    assert next_occurrence_after(slot, end_of_local_day(slot, UTC_ZONE), DAILY, UTC_ZONE) == (
+        datetime(2026, 8, 7, tzinfo=UTC)
+    )

@@ -957,3 +957,92 @@ async def test_stats_most_skipped_narrows_to_one_person(
     # so this cannot pass by accidentally returning the top of the unfiltered list.
     body = (await client.get(f"/api/v1/stats?user_id={user.id}")).json()
     assert [(c["title"], c["count"]) for c in body["most_skipped"]] == [("Ironing", 1)]
+
+
+# --- completions recorded on their due day ----------------------------------
+
+
+async def test_stats_scores_a_backdated_completion_as_on_time(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    """Two chores, identically overdue, closed through the endpoint the same way apart from the
+    flag. The pair is what makes each half mean something: on its own, "the backdated one is on
+    time" would also pass if punctuality scored everything as on time."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    due = NOW.date() - timedelta(days=2)
+    recorded = await make_chore(
+        household=household, title="Recorded", start_date=due, repeats=RepeatPeriod.daily
+    )
+    ticked = await make_chore(
+        household=household, title="Ticked", start_date=due, repeats=RepeatPeriod.daily
+    )
+    client = await auth_client(user)
+
+    await client.post(f"/api/v1/chores/{recorded.id}/complete", json={"backdate": True})
+    await client.post(f"/api/v1/chores/{ticked.id}/complete")
+
+    body = (await client.get("/api/v1/stats")).json()
+    assert body["punctuality"] == {"on_time": 1, "late": 1, "early": 0, "skipped": 0}
+    assert body["kpis"]["on_time_rate"] == pytest.approx(0.5)
+
+
+async def test_stats_buckets_a_backdated_completion_on_the_day_it_was_due(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    """The time series is bucketed on `completed_at`, so a completion recorded against its due
+    day lands on that day rather than today. Correct, and worth pinning: it is why catching up
+    a backlog does not pile everything onto one bar."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    due = NOW.date() - timedelta(days=2)
+    chore = await make_chore(household=household, start_date=due, repeats=RepeatPeriod.daily)
+    client = await auth_client(user)
+
+    await client.post(f"/api/v1/chores/{chore.id}/complete", json={"backdate": True})
+
+    buckets = _buckets((await client.get("/api/v1/stats")).json())
+    assert buckets[due.isoformat()] == 1
+    assert buckets[NOW.date().isoformat()] == 0
+
+
+async def test_stats_drops_a_backdated_completion_dated_outside_the_range(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    """The documented consequence of dating a closure honestly: clearing a long backlog moves
+    nothing on a 7-day Statistics page, because the work is recorded on the days it happened.
+    The in-range control in the same test is what stops this passing for the wrong reason."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    old = await make_chore(
+        household=household,
+        title="Neglected",
+        start_date=NOW.date() - timedelta(days=40),
+        repeats=RepeatPeriod.daily,
+    )
+    recent = await make_chore(
+        household=household,
+        title="Recent",
+        start_date=NOW.date() - timedelta(days=2),
+        repeats=RepeatPeriod.daily,
+    )
+    client = await auth_client(user)
+
+    await client.post(f"/api/v1/chores/{old.id}/complete", json={"backdate": True})
+    await client.post(f"/api/v1/chores/{recent.id}/complete", json={"backdate": True})
+
+    week = (await client.get("/api/v1/stats", params={"range": "7d"})).json()
+    assert week["kpis"]["completed_in_range"] == 1
+    # Both are there over a window wide enough to hold them, so the 1 above is the range
+    # doing its job rather than the backdated closure going missing.
+    quarter = (await client.get("/api/v1/stats", params={"range": "90d"})).json()
+    assert quarter["kpis"]["completed_in_range"] == 2

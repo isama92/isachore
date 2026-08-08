@@ -90,6 +90,15 @@ class ChoreOccurrence(Base):
     completed_by_user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), default=None
     )
+    # When the work happened, which is not always when the button was pressed: `POST
+    # /chores/{id}/complete`'s `backdate` records a closure against the end of the occurrence's
+    # own local day, for the chore somebody did and forgot to tick. So this is *chosen* at write
+    # time, from exactly two candidates (that day's end, or now, whichever is earlier).
+    #
+    # What stays forbidden is *re-anchoring* it afterwards - reinterpreting its wall clock in
+    # another zone yields a different instant, and the row would then claim the work happened at
+    # a time it did not. Choosing at write time and rewriting later are not the same thing, and
+    # only the second one lies.
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     # The household's timezone at the moment this row was closed, snapshotted for exactly the
     # reason `title` is: so a later change cannot rewrite history.

@@ -688,11 +688,15 @@ pre-commit run --all-files                           # what the git hook runs
   Answered in UTC, `days_until_due` told someone in Amsterdam at 01:30 that today's chore was
   due tomorrow, because 01:30 local is still yesterday in UTC. Eight things to keep straight:
   - **Two things deliberately do NOT move, and re-anchoring either is a data-corruption bug.**
-    `completed_at` is stamped from `clock.now()` when the button is pressed: it is a plain
-    instant, correct in every zone, and only the day boundary it is *read against* was ever
-    wrong. And an **unscheduled (`manual`) chore's `scheduled_for`** is the moment it became
-    available, not a calendar anchor. The timezone migration excludes both; so does
-    `reanchor_open_occurrences`.
+    `completed_at` is a plain instant, correct in every zone, and only the day boundary it is
+    *read against* was ever wrong. And an **unscheduled (`manual`) chore's `scheduled_for`** is
+    the moment it became available, not a calendar anchor. The timezone migration excludes both;
+    so does `reanchor_open_occurrences`.
+
+    **"Does not move" is about re-anchoring, not about the value being `clock.now()`.**
+    `completed_at` is *chosen* at write time from two candidates: now, or the end of the
+    occurrence's own local day when the caller passes `backdate` (see the completion section).
+    Both are honest answers to "when was this done"; rewriting one afterwards is the lie.
   - **`chores.start_date` stays a plain `date`.** It records the day the household means to
     start, and `first_occurrence` is the single place that turns it into an instant, in the
     household's zone. That is why the column, the wire type and `ChoreForm`'s Calendar all
@@ -741,10 +745,11 @@ pre-commit run --all-files                           # what the git hook runs
     `title` makes history survive a rename. Four things to keep straight:
     - **Shifting `completed_at` is NOT the alternative, and reviewers keep proposing it.** It is
       the instant the work happened, and it is load-bearing as an absolute: stats windows filter
-      on it, `undo_completion` finds the latest closure by `max(completed_at)`, and Home's "done
-      today" compares it to real day bounds. Reinterpreting its wall clock produces a *different
-      instant*, so the row would claim the work happened at a time it did not - measured at 12
-      hours out for an Amsterdam to Kiritimati move.
+      on it and Home's "done today" compares it to real day bounds. Reinterpreting its wall clock
+      produces a *different instant*, so the row would claim the work happened at a time it did
+      not - measured at 12 hours out for an Amsterdam to Kiritimati move. (This list used to name
+      `undo_completion` too, which found the latest closure by `max(completed_at)`. It orders by
+      row id now, for reasons in the completion section; the point about stats and Home stands.)
     - **Re-anchoring the done `scheduled_for` is not the alternative either.** It looks like it
       works on the case you first try and does not generalise: a completion at 23:30 local on its
       due day reads 0 days late in Amsterdam and 1 after the same move, re-anchored or not.
@@ -805,6 +810,52 @@ pre-commit run --all-files                           # what the git hook runs
     at 22:00Z prints "4 Aug" beside a server-computed "Due today" meaning the 5th. Account and
     admin surfaces (a user's `created_at`, an invitation's expiry) deliberately keep the
     viewer's zone: those belong to no household.
+- **Recording a completion on its due day** (`CompleteChoreRequest.backdate`): the chore
+  somebody did and forgot to tick. Without it, completing an overdue chore silently swallows
+  every occurrence that was missed - `advance_anchor` rolls the grid past every slot on or
+  before the completion date, so a daily chore due the 6th and ticked on the 8th gets a
+  successor of the 9th and the 7th and 8th never existed. With it, `completed_at` is
+  `min(end_of_local_day(scheduled_for, tz), now)` instead of `clock.now()`, and both wanted
+  behaviours fall out of the existing recurrence code: `days_late` is 0, and `advance_anchor`
+  cannot roll, so the successor is exactly one interval on. A backlog is then walked one
+  completion at a time, each offering the next missed day. Home asks through `BackdateDialog`
+  (overdue rows only), which chains into the unchanged `CreditDialog`. Seven things to keep
+  straight:
+  - **A flag, never a client-supplied datetime.** The server derives the instant, so there is
+    no clock skew, no timestamp in the future and no dating a completion to an arbitrary day.
+  - **The clamp is what removes the overdue check**, rather than being defensive tidying. For a
+    chore due today or completed early the end of its due day is still ahead, so the answer is
+    `now` - which is on time anyway. A client that mis-decides is therefore harmless, and no
+    validator has to re-derive "is this late" server-side.
+  - **`end_of_local_day` is derived from `local_day_bounds`, and must not be written by hand.**
+    That bound is *exclusive* - next local midnight, a different local date - so returning it
+    reads as a day late and lets `advance_anchor` roll a slot, reintroducing the exact bug.
+    Hand-building `23:59:59.999999` is wrong differently: it is ambiguous in a zone that falls
+    back at midnight, where `fold=0` picks the earlier occurrence, an hour before the day ends.
+  - **One `now` became two, and they are not interchangeable.** The stamped column, the
+    successor derivation and the echoed `created_at` take the chosen instant; `days_until_due`
+    on the way out keeps the real `now`, because `GET /home` computes the same number from
+    `clock.now()` and a backdated one would have the 201 call a successor "due in a day" that
+    the next page load calls overdue, in the same second.
+  - **Refused with a 400 for `manual`.** `next_occurrence_after` returns `completed_at` verbatim
+    for an unscheduled chore, so a backdated one would reopen at a day's end and collide with
+    itself on `uq_occurrence_chore_scheduled` the second time it was done that day - a 409 no
+    retry clears. Placed before the occurrence lookup and before the credit check, like
+    `skip_chore`'s twin: it is a property of the target, so every caller gets the same answer.
+  - **The successor now goes through `free_slot_from` on every scheduled completion**, not only
+    backdated ones. Backdating lets the successor land on or before today, so a chore whose open
+    slot was re-seeded into the past (the unscheduled -> scheduled round trip) can walk onto its
+    own done row. Deliberately not gated on the flag: gating it would leave the same latent bug
+    on the just-now path, and it is the identity whenever nothing collides. (`manual` is skipped,
+    for want of a grid to walk.) What that leaves in the `IntegrityError` catch is the genuine
+    concurrent race alone.
+  - **Three consequences that look like bugs and are not**, each pinned by a test so nobody
+    "fixes" them: Home's progress bar does not count a backdated completion (it answers "how
+    much of today's list did you get through", and that work was not today's); Statistics
+    buckets it on the day it was due, so clearing a 40-day backlog moves nothing on a 7-day
+    window; and a rotating chore advances **once per completion**, so walking three missed days
+    passes three turns. History also sorts it into the past rather than to the top, since the
+    default sort is `completed_at` desc.
 - **Who is on the hook now** is `chore_occurrences.assignee_id` on the single open
   occurrence, not a column on the chore; the pool is `chore_assignees` and the
   rotation order is computed, never stored (`app/core/assignment.py`). The API
@@ -884,11 +935,12 @@ pre-commit run --all-files                           # what the git hook runs
     bit once already. The root cause each time: an unscheduled chore anchors its successors
     at completion timestamps, so its done rows sit on **both sides** of its open one, and
     "the open slot is later than every done slot" is no longer true:
-    - `undo_completion` finds the latest completion by `max(completed_at)`, NOT
+    - `undo_completion` finds the latest closure by `max(id)` - insertion order - and NOT by
       `max(scheduled_for)`. Slots only run in completion order while they come off a grid;
       switch a not-yet-due chore to unscheduled and its next done row is dated *earlier*
       than the one before it, so ordering by slot reopens the wrong occurrence (resurrecting
-      a future slot with a stale assignee while deleting the live open row).
+      a future slot with a stale assignee while deleting the live open row). It used to order
+      by `max(completed_at)`, which backdating broke - see the completion section.
     - `_reconcile_open_occurrence` takes a `was_unscheduled` flag, read in `update_chore`
       *before* the payload overwrites `chore.repeats`. Unscheduled -> recurring must re-seed
       the slot from the new `start_date` rather than `snap_to_slot` it: snapping is the

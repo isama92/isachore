@@ -47,6 +47,31 @@ Completed history is not affected. Each closure records the timezone it was judg
 way it records the chore's title, so how late it was stays what it was however often the household
 moves afterwards.
 
+### Forgot to tick it off
+
+Marking an overdue chore done asks when you actually did it, with two answers:
+
+- **Just now** records it today. The chore moves on to its next date from today, so the days you
+  missed are gone - which is what you want for something you genuinely did not do.
+- **On \<date\>** records it against the day it was due. It counts as on time, and the chore comes
+  back on the *next* day it was due rather than jumping past the whole gap.
+
+So a daily chore two days behind takes three Done taps to catch up, each one offering the next
+missed day, and you can switch to "Just now" at any point to close the rest out. A chore that is
+due today or early never asks, because now is already on time.
+
+Three things follow from recording work on the day it happened, all deliberate:
+
+- Today's progress bar on My Chores does not count it. It answers "how much of today's list did
+  you get through", and yesterday's work is not today's - the chore just leaves the list.
+- Statistics counts it on the day it was due, so clearing a long backlog does not pile onto
+  today's bar and may not show at all on a seven-day range.
+- History sorts by when the work happened, so a catch-up appears in the past rather than at the
+  top of the list.
+
+Skipping is unchanged: it still moves the chore straight on to its next date, since there is no
+work to record a day for.
+
 ### Household roles
 
 Every membership carries a role, so a shared household can hand out chores without

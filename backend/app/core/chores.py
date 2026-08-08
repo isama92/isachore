@@ -50,9 +50,14 @@ Two consequences of that conversion worth knowing:
   2026: day 5 ends at 04:00Z and day 6 begins at 04:00Z, so the windows tile with no gap, no
   overlap and no completion counted twice.
 
-`completed_at` is the exception to all of this and is deliberately never re-anchored: it is
-stamped at the moment the button is pressed and is a plain instant, correct in any zone. It
-takes a `tz` here only to be *bucketed* into a local day, never to be moved.
+`completed_at` is the exception to all of this. It is a plain instant, correct in any zone,
+and it is deliberately never *re-anchored*: nothing reinterprets its wall clock into another
+zone, which would yield a different instant and so a row claiming the work happened at a time
+it did not. It is, however, *chosen* at write time. A completion recorded on its due day
+rather than at the moment the button was pressed is dated with `end_of_local_day` instead of
+`clock.now()` (`POST /chores/{id}/complete`'s `backdate` flag, for the chore somebody did but
+forgot to tick). Both are honest answers to "when was this done"; what stays forbidden is
+moving one afterwards. It takes a `tz` here only to be *bucketed* into a local day.
 """
 
 from calendar import monthrange
@@ -323,6 +328,33 @@ def local_day_bounds(now: datetime, tz: ZoneInfo) -> tuple[datetime, datetime]:
     local = now.astimezone(tz)
     start = datetime(local.year, local.month, local.day, tzinfo=tz)
     return start, start + timedelta(days=1)
+
+
+def end_of_local_day(moment: datetime, tz: ZoneInfo) -> datetime:
+    """The last representable instant of the local day `moment` falls in. What a completion
+    recorded on its due day is dated with, so it reads as on time and the successor advances
+    exactly one slot instead of skipping the days that were missed.
+
+    Derived from `local_day_bounds` rather than built here, which is what makes it correct
+    for free in the awkward zones: a fall-back day really is 25 hours long, and a zone whose
+    midnight does not exist still gets an instant on the right date.
+
+    Two ways to write this that are wrong, both of which look right:
+
+    - **Not `local_day_bounds(...)[1]`.** That bound is exclusive - it is the *next* local
+      midnight, which is a different local date. Dating a completion with it makes
+      `days_late` read 1 and lets `advance_anchor` roll a slot, i.e. it silently reintroduces
+      exactly the skipped occurrence this exists to prevent.
+    - **Not `datetime(y, m, d, 23, 59, 59, 999999, tzinfo=tz)`.** Besides duplicating the
+      midnight construction, 23:59 is ambiguous in a zone that falls back at midnight, and
+      `fold=0` there resolves to the earlier of the two occurrences - an hour before the day
+      actually ends.
+
+    One microsecond because `timestamptz` is microsecond-precision, so that is the exact
+    predecessor of the exclusive bound.
+    """
+    _, day_end = local_day_bounds(moment, tz)
+    return day_end - timedelta(microseconds=1)
 
 
 def due_status(days: int) -> DueStatus:

@@ -178,6 +178,14 @@
       "body": "Questa faccenda è assegnata a {{names}}. A chi va attribuito il completamento nella cronologia?",
       "doneAsMe": "Fatto da me",
       "doneAs": "Fatto da {{name}}"
+    },
+    "completed": "Faccenda segnata come completata",
+    "backdate": {
+      "title": "Quando hai fatto “{{title}}”?",
+      "body": "Era in scadenza il {{date}}. Registrandola in quel giorno la faccenda resta sul suo calendario, così la successiva cade il giorno dopo invece di saltare i giorni mancati.",
+      "justNow": "Proprio ora",
+      "onDate": "Il {{date}}",
+      "recorded": "Registrata come fatta il {{date}}"
     }
   },
   "unscheduled": {
