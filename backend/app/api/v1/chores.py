@@ -238,13 +238,31 @@ async def _completion_counts(session: SessionDep, chore_id: int) -> dict[int, in
     return {uid: count for uid, count in rows.all() if uid is not None}
 
 
+async def _strategy_pick(session: SessionDep, chore: Chore, pool: list[User]) -> User | None:
+    """`initial_assignee` with the tally `least_done` needs, for the three fallback paths that
+    reach it on a chore with history behind it (a skip whose assignee left the pool, and both
+    branches of `_reconcile_open_occurrence`). Without the counts those all rank alphabetically
+    instead of on work done.
+
+    Gated like `_successor_assignee`'s own read below: every other strategy ignores `counts`,
+    so only `least_done` pays for the query. `create_chore` deliberately does not go through
+    here - see the comment at its own call."""
+    counts = (
+        await _completion_counts(session, chore.id)
+        if chore.assignment_type == AssignmentType.least_done
+        else {}
+    )
+    return initial_assignee(chore.assignment_type, pool, counts=counts)
+
+
 async def _successor_assignee(
     session: SessionDep, chore: Chore, current_assignee_id: int | None, pool: list[User]
 ) -> User | None:
     """Who is on the hook for the occurrence that follows a completion. Holds the
     current assignee mid-turn; on a turn boundary the strategy picks the next person.
-    Counts are read after the completion is flushed, so they include it (the
-    post-completion snapshot least_done needs to actually rotate).
+    Counts are read after the completion is flushed, so they include it (the post-completion
+    snapshot least_done needs: a tally one short reads as a strict minimum rather than the tie
+    it really is, and whoever just finished would keep the chore for another turn).
 
     Skipped occurrences do not count towards the turn, because a skip does not hand the
     chore on (see `_retained_assignee`): counting them would spend someone's turn on work
@@ -274,8 +292,8 @@ async def _successor_assignee(
     return next_assignee(chore.assignment_type, pool, current, counts)
 
 
-def _retained_assignee(
-    chore: Chore, current_assignee_id: int | None, pool: list[User]
+async def _retained_assignee(
+    session: SessionDep, chore: Chore, current_assignee_id: int | None, pool: list[User]
 ) -> User | None:
     """Who is on the hook for the occurrence that follows a SKIP: the same person, because
     skipping does not hand the chore on. Whoever chose not to do it this time is still up
@@ -297,11 +315,18 @@ def _retained_assignee(
     for an unassigned row as well as a stale one - that is an edit reconciling the whole chore,
     where "no assignee" is a gap to fill, while here it is an answer to respect. The two agree
     on the stale case and differ on the empty one, and the difference is the point of this
-    function. Needs no session, since unlike a handoff it counts nothing."""
+    function. Agreeing on the stale case is why both go through `_strategy_pick`: give one the
+    completion tally and not the other and they would answer differently for `least_done`.
+
+    Counting is what the session is for, and only on that fallback: it stays in the `else`
+    position below so an ordinary skip - the overwhelmingly common path, where the assignee is
+    still in the pool - runs no extra query at all. The tally itself is honest for free, since
+    `_close_occurrence` has already flushed this closure but `_completion_counts` filters
+    skipped rows out, so a skip cannot pad the skipper's own standing."""
     if not pool or current_assignee_id is None:
         return None
     current = next((u for u in pool if u.id == current_assignee_id), None)
-    return current if current is not None else initial_assignee(chore.assignment_type, pool)
+    return current if current is not None else await _strategy_pick(session, chore, pool)
 
 
 async def _reconcile_open_occurrence(
@@ -363,12 +388,14 @@ async def _reconcile_open_occurrence(
         )
         # Same shape as create_chore's version below, deliberately: the ternary this replaces
         # relied on `or` binding tighter than the conditional expression, which parsed correctly
-        # but read as though the `or` might attach to the whole else branch.
+        # but read as though the `or` might attach to the whole else branch. The strategy
+        # fallback is the one thing that differs, and only because this chore has history for
+        # `least_done` to rank on where a brand-new one has none.
         current = None
         if not payload.clear_current_assignee:
-            current = _resolve_current_assignee(
-                pool, payload.current_assignee_id
-            ) or initial_assignee(chore.assignment_type, pool)
+            current = _resolve_current_assignee(pool, payload.current_assignee_id)
+            if current is None:
+                current = await _strategy_pick(session, chore, pool)
         session.add(
             ChoreOccurrence(
                 chore_id=chore.id,
@@ -393,7 +420,7 @@ async def _reconcile_open_occurrence(
     elif explicit is not None:
         occ.assignee_id = explicit.id
     elif occ.assignee_id is None or not any(a.id == occ.assignee_id for a in pool):
-        nxt = initial_assignee(chore.assignment_type, pool)
+        nxt = await _strategy_pick(session, chore, pool)
         occ.assignee_id = nxt.id if nxt is not None else None
     # No start date means unscheduled: there is nothing for the slot to follow and no grid
     # to snap it to, and the slot only records when the chore became available, so it stands
@@ -448,6 +475,14 @@ async def create_chore(
     # The initial current assignee: unassigned if asked for, else an explicit choice
     # (validated), else derived from the strategy (manual with several members has no
     # auto-pick -> unassigned/shared anyway).
+    #
+    # This is the one strategy fallback that does NOT go through `_strategy_pick`, and the
+    # reason is mechanical rather than a preference: the flush above assigns `chore.id` to a
+    # row whose first occurrence is added a few lines below, so `_completion_counts` would be
+    # `{}` by construction and `least_done` would take the same alphabetical branch anyway. A
+    # clone is no exception - it is a new chore id, so it inherits no history either. Nothing
+    # observable distinguishes the two calls here, so this comment is the only thing carrying
+    # the decision; if a chore ever gains completions before this point, it stops being true.
     current = None
     if not payload.clear_current_assignee:
         current = _resolve_current_assignee(assignees, payload.current_assignee_id)
@@ -747,7 +782,7 @@ async def _close_occurrence(
         upcoming = await free_slot_from(session, chore.id, upcoming, rule, tz)
     pool = list(chore.assignees)
     next_person = (
-        _retained_assignee(chore, occ.assignee_id, pool)
+        await _retained_assignee(session, chore, occ.assignee_id, pool)
         if skipped
         else await _successor_assignee(session, chore, occ.assignee_id, pool)
     )

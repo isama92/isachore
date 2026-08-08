@@ -259,8 +259,9 @@ async def test_skip_earns_no_least_done_credit(
     skipping is the cheap way to look busy and stop being picked.
 
     The counts are set up so the skip is the deciding one. Ava holds one real completion and
-    one skip, Ben none; when Ben completes, the honest tally is 1-1, which ties and falls to
-    Ava alphabetically. Counting the skip would make it Ava 2, Ben 1, and send it back to Ben.
+    one skip, Ben none; when Ben completes, the honest tally is 1-1, and a tie hands over from
+    whoever is on the hook - Ben - which leaves Ava. Counting the skip would make it Ava 2,
+    Ben 1, so Ben would be the strict minimum and it would come straight back to him.
     """
     ava = await make_user(email="ava@example.com", first_name="Ava")
     ben = await make_user(email="ben@example.com", first_name="Ben")
@@ -368,7 +369,9 @@ async def test_skipping_re_derives_when_the_assignee_left_the_pool(
         assignees=[ava, ben],
         with_occurrence=False,
     )
-    # Cara holds the occurrence but is not in the chore's pool (dropped by a later edit).
+    # Cara holds the occurrence but is not in the chore's pool. Built directly here, because an
+    # edit cannot leave this state - a PATCH always reconciles the open row, which is exactly
+    # what moves a chore off somebody who has gone. The test below walks the route that can.
     await make_occurrence(
         chore=chore, scheduled_for=TODAY_START, status=OccurrenceStatus.open, assignee=cara
     )
@@ -376,6 +379,70 @@ async def test_skipping_re_derives_when_the_assignee_left_the_pool(
 
     assert (await client.post(f"/api/v1/chores/{chore.id}/skip")).status_code == 201
     assert await _open_assignee(db_session, chore.id) == ava.id
+
+
+async def test_skipping_after_an_undo_resurrects_a_departed_assignee_uses_the_tally(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    """The route that actually reaches the fallback above, walked through the API, plus the
+    tally it re-derives on. Undo is the only way in: it reopens a done row with the assignee
+    that row closed on, and done rows are never reconciled, so somebody a later edit removed
+    can come back onto an open occurrence. That makes the fallback a real path rather than a
+    defensive one - and for least_done it has to rank on completions, not on names."""
+    ava = await make_user(email="ava@example.com", first_name="Ava")
+    ben = await make_user(email="ben@example.com", first_name="Ben")
+    cara = await make_user(email="cara@example.com", first_name="Cara")
+    household = await make_household(members=[ava, ben, cara])
+    # turn_length 5 keeps Cara on the hook across both completions, so the rows below close on
+    # her rather than rotating away.
+    chore = await make_chore(
+        household=household,
+        repeats=RepeatPeriod.daily,
+        assignment_type=AssignmentType.least_done,
+        turn_length=5,
+        assignees=[ava, ben, cara],
+        current_assignee=cara,
+    )
+    client = await auth_client(ava)
+
+    async def complete_for(user: User) -> int:
+        resp = await client.post(
+            f"/api/v1/chores/{chore.id}/complete", json={"completed_by_user_id": user.id}
+        )
+        assert resp.status_code == 201
+        return int(resp.json()["id"])
+
+    await complete_for(ava)
+    second = await complete_for(cara)
+
+    # The edit drops Cara and reconciles the OPEN row off her. The done rows still name her.
+    patched = await client.patch(
+        f"/api/v1/chores/{chore.id}",
+        json={
+            "title": chore.title,
+            "start_date": TODAY_START.date().isoformat(),
+            "repeats": "daily",
+            "assignment_type": "least_done",
+            "turn_length": 5,
+            "assignee_ids": [ava.id, ben.id],
+        },
+    )
+    assert patched.status_code == 200
+    assert await _open_assignee(db_session, chore.id) != cara.id
+
+    # Undoing Cara's completion deletes that reconciled open row and reopens hers in its
+    # place, assignee and all - so the chore is now back on somebody who has left the pool.
+    assert (await client.delete(f"/api/v1/completions/{second}")).status_code == 204
+    assert await _open_assignee(db_session, chore.id) == cara.id
+
+    # Skipping cannot keep a turn for her, so the strategy picks. Ava's completion survived the
+    # undo, so the tally is Ava 1 / Ben 0 and it is Ben's. By name alone it would be Ava's.
+    assert (await client.post(f"/api/v1/chores/{chore.id}/skip")).status_code == 201
+    assert await _open_assignee(db_session, chore.id) == ben.id
 
 
 async def test_skip_by_someone_other_than_the_assignee(

@@ -873,6 +873,49 @@ pre-commit run --all-files                           # what the git hook runs
   is what the `currentAssigneeTurnHint` copy promises the user, so keep them in
   step. Every live chore has exactly one open occurrence whatever its period, so
   `current_assignee: null` means unassigned/shared and never "nothing left to do".
+
+  **`least_done` reads a tie as a handover, and that is the one rule in this module that is
+  not obvious from the name.** `next_assignee` takes the minimum, then drops whoever is on the
+  hook from the tied set: two people level means the chore moves across, never another turn
+  for whoever sorts earlier. It used to be a plain `min` over the alphabetically ordered pool,
+  which re-picked the person who had just finished whenever they sorted first - reported as
+  "1 and 1, and it stayed put" (#58). **Only a tie, though.** Somebody genuinely behind keeps
+  the chore while they catch up, so this is deliberately NOT `random`'s blanket exclusion of
+  `current`; make it one and `least_done` becomes `alphabetical` with extra steps. A test for
+  it has to put the just-finished person **first** alphabetically, or it passes either way -
+  which is why the bug survived two tie tests that both happened to tie on the second name.
+
+  Three further consequences worth keeping straight:
+  - **`initial_assignee` takes the tally too, and breaks its ties by name alone**, there being
+    no current assignee for a repeat to be a repeat *of*. It is the fallback wherever there is
+    nobody to hand over from - `next_assignee`'s own "current is not in the pool" branch, both
+    branches of `_reconcile_open_occurrence`, and `_retained_assignee`'s stale-assignee case -
+    and those sit on a chore with history, so without counts they answered alphabetically and
+    quietly undid the strategy. (The one exception is the revive branch reached with no closure
+    at all, where the tally is empty and the answer was never wrong.) `_strategy_pick`
+    (`api/v1/chores.py`) is the
+    one place that pairs it with `_completion_counts`, gated so only `least_done` pays for the
+    query. **`create_chore` deliberately does not go through it**: the flush there assigns an id
+    to a chore whose first occurrence does not exist yet, so the tally is `{}` by construction
+    and both calls agree. `counts` is therefore optional, and omitting it is *identical* to the
+    old alphabetical arm (every key reads 0, so `min` returns the first) - which is what lets
+    `db/seed.py` and the `make_chore` fixture keep calling it untallied.
+  - **The post-completion snapshot requirement survives, but its reason changed.** A stale tally
+    no longer means "never rotates"; it leaves the finisher a completion short, so a real tie
+    reads as a strict minimum and they hold one extra turn. `_close_occurrence` flushes before
+    `_successor_assignee`, which is what makes it honest.
+  - **`_retained_assignee`'s stale-assignee fallback is reachable, and only through undo.** An
+    edit cannot leave somebody it just dropped from the chore's *assignee pool* on an open row -
+    `_reconcile_open_occurrence` is exactly what moves them off - but `undo_completion` reopens a
+    *done* row with the assignee it closed on, and done rows are never reconciled. So complete,
+    drop that person in an edit, undo, skip. That path is what stops the fallback being
+    defensive code, and it is pinned by
+    `test_skipping_after_an_undo_resurrects_a_departed_assignee_uses_the_tally`. Note "dropped
+    from the pool" is narrower than "left the household", and deliberately so here: `remove_member`
+    deletes the `household_members` row alone and prunes no `chore_assignees`, so somebody who
+    leaves stays in `chore.assignees` and keeps being picked. Pre-existing, out of scope for the
+    above, and not what this fallback is about.
+
   **Handing a chore back to the household is its own field, `clear_current_assignee`,
   and cannot be folded into `current_assignee_id: null`.** Null already means "no
   explicit choice", and `_reconcile_open_occurrence` then *keeps* an assignee who is

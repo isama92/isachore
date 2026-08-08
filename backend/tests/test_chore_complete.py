@@ -465,7 +465,86 @@ async def test_complete_least_done_gives_it_to_whoever_did_least(
     await complete_as(anna.id)
     assert await _current_assignee_id(client, chore.id) == bob.id  # Anna now ahead
     await complete_as(bob.id)
-    assert await _current_assignee_id(client, chore.id) == anna.id  # level -> alphabetical
+    # Level again, and Bob is the one up. He is dropped from the tie, which leaves Anna - the
+    # same answer the old plain `min` gave, since Bob sorted second and it was already
+    # skipping him. That is exactly why this test never caught #58; the one below does.
+    assert await _current_assignee_id(client, chore.id) == anna.id
+
+
+async def test_complete_least_done_hands_over_the_moment_the_pair_are_level(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    """Issue #58 end to end: the tie has to fall with the ALPHABETICALLY FIRST member on the
+    hook. That is the household's report - one person a completion ahead, the other levels up,
+    and the chore stayed put instead of moving across."""
+    chore, anna, bob = await _daily_rotating_chore(
+        make_user, make_household, make_chore, assignment_type=AssignmentType.least_done
+    )
+    client = await auth_client(anna)
+
+    async def complete_as(assignee_id: int) -> None:
+        resp = await client.post(
+            f"/api/v1/chores/{chore.id}/complete", json={"completed_by_user_id": assignee_id}
+        )
+        assert resp.status_code == 201
+
+    assert await _current_assignee_id(client, chore.id) == anna.id
+    # Bob one ahead, Anna on zero: she is the strict minimum, so she keeps it while she
+    # catches up. This half fails if the fix over-reaches into excluding whoever is up.
+    await complete_as(bob.id)
+    assert await _current_assignee_id(client, chore.id) == anna.id
+    # One each now, with Anna still on the hook. This is the assertion that used to fail: a
+    # tie handed the chore straight back to her because she sorts first.
+    await complete_as(anna.id)
+    assert await _current_assignee_id(client, chore.id) == bob.id
+
+
+async def test_complete_least_done_ranks_on_the_counts_with_nobody_on_the_hook(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    """An unassigned chore ("nobody in particular") re-derives from scratch at every turn
+    boundary, because there is no current assignee to hand over from. That fallback used to
+    drop the tally on the floor and answer alphabetically, so the person who had done all the
+    work kept being handed it back."""
+    now = datetime.now(UTC)
+    today_start = datetime(now.year, now.month, now.day, tzinfo=UTC)
+    anna = await make_user(email="anna@example.com", first_name="Anna")
+    bob = await make_user(email="bob@example.com", first_name="Bob")
+    household = await make_household(members=[anna, bob])
+    chore = await make_chore(
+        household=household,
+        start_date=today_start.date() - timedelta(days=1),
+        repeats=RepeatPeriod.daily,
+        assignment_type=AssignmentType.least_done,
+        assignees=[anna, bob],
+        with_occurrence=False,
+    )
+    # Anna has done it once; the open row is the state `clear_current_assignee` leaves behind.
+    # Done row first, open row last - see `make_occurrence` on why the chain order matters.
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=today_start - timedelta(days=1),
+        status=OccurrenceStatus.done,
+        completed_by=anna,
+        completed_at=today_start - timedelta(hours=16),
+    )
+    await make_occurrence(chore=chore, scheduled_for=today_start, status=OccurrenceStatus.open)
+    client = await auth_client(anna)
+
+    resp = await client.post(
+        f"/api/v1/chores/{chore.id}/complete", json={"completed_by_user_id": anna.id}
+    )
+    assert resp.status_code == 201
+    # Anna is now two ahead of Bob, so the chore has to land on Bob. Alphabetically it would
+    # be Anna, which is what made this worth pinning: nothing else exercises that fallback.
+    assert await _current_assignee_id(client, chore.id) == bob.id
 
 
 # --- recurrence interval and pinned weekdays -------------------------------
