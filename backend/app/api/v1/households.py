@@ -7,7 +7,7 @@ from sqlalchemy import ColumnElement, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, SessionDep
-from app.api.responses import FORBIDDEN_OWNER, FORBIDDEN_ROLE, FORBIDDEN_ROLE_OR_OWNER
+from app.api.responses import FORBIDDEN_OWNER, FORBIDDEN_ROLE, FORBIDDEN_ROLE_OR_OWNER, refusals
 from app.core import clock
 from app.core.config import settings
 from app.core.households import (
@@ -218,10 +218,20 @@ async def set_household_admin(session: SessionDep, household: Household, new_adm
     refuses to touch. Hand a helper the household without this and they would own a
     household they cannot manage the chores of, with no way to fix it. The previous
     owner keeps `organiser` and becomes an ordinary one, so the new owner can demote
-    them like anybody else."""
+    them like anybody else.
+
+    **400, and it used to be a 422.** Two reasons it moved. It matches `_resolve_assignees`
+    in the chores router, which answers 400 for the identical shape of complaint ("must be a
+    member of your household") about a referenced user - so the API now gives one answer to
+    one question. And a hand-raised 422 is the one refusal this app cannot document: FastAPI
+    reserves that code for pydantic's `HTTPValidationError` array, so the operation published
+    a 422 of one shape while answering with another, and a client parsing the declared one
+    broke on the real one. Nothing in the UI notices the change - `api.ts` renders a string
+    `detail` verbatim whatever the status - so the message a user sees is what it always was.
+    """
     if not await is_active_member(session, household.id, new_admin_id):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="The new household admin must be a member of the household",
         )
     household.admin_id = new_admin_id
@@ -492,7 +502,16 @@ async def create_household(
     return await load_household_read(session, household.id)
 
 
-@router.get("/{household_id}", response_model=HouseholdListRead)
+@router.get(
+    "/{household_id}",
+    response_model=HouseholdListRead,
+    responses=refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No household with this id that you are a member of.",
+        ),
+    ),
+)
 async def get_household(
     household_id: int, user: CurrentUser, session: SessionDep
 ) -> HouseholdListRead:
@@ -503,7 +522,27 @@ async def get_household(
     )
 
 
-@router.patch("/{household_id}", response_model=HouseholdListRead, responses=FORBIDDEN_OWNER)
+@router.patch(
+    "/{household_id}",
+    response_model=HouseholdListRead,
+    responses=FORBIDDEN_OWNER
+    | refusals(
+        (
+            status.HTTP_400_BAD_REQUEST,
+            "The account named as the new owner is not an active member of this "
+            "household. Transfer only ever moves a household to somebody already in it.",
+        ),
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No household with this id that you are a member of.",
+        ),
+        (
+            status.HTTP_409_CONFLICT,
+            "A chore was completed while the timezone was being changed, so a "
+            "rescheduled occurrence collided with the closed one. Retrying is safe.",
+        ),
+    ),
+)
 async def update_household(
     household_id: int, payload: HouseholdUpdate, user: CurrentUser, session: SessionDep
 ) -> HouseholdListRead:
@@ -516,7 +555,17 @@ async def update_household(
     return await load_household_read(session, household.id)
 
 
-@router.delete("/{household_id}", status_code=status.HTTP_204_NO_CONTENT, responses=FORBIDDEN_OWNER)
+@router.delete(
+    "/{household_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=FORBIDDEN_OWNER
+    | refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No household with this id that you are a member of.",
+        ),
+    ),
+)
 async def delete_household(household_id: int, user: CurrentUser, session: SessionDep) -> None:
     household = await _get_owned_household(session, user.id, household_id)
     # Soft delete: hide the household but leave its chores untouched.
@@ -524,7 +573,16 @@ async def delete_household(household_id: int, user: CurrentUser, session: Sessio
     await session.commit()
 
 
-@router.get("/{household_id}/members", response_model=Page[HouseholdMemberRoleRead])
+@router.get(
+    "/{household_id}/members",
+    response_model=Page[HouseholdMemberRoleRead],
+    responses=refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No household with this id that you are a member of.",
+        ),
+    ),
+)
 async def list_household_members(
     household_id: int,
     user: CurrentUser,
@@ -553,7 +611,19 @@ async def list_household_members(
     "/{household_id}/members/{user_id}",
     response_model=HouseholdMemberRoleRead,
     # Both, because this handler refuses both ways - see the block's own comment.
-    responses=FORBIDDEN_ROLE_OR_OWNER,
+    responses=FORBIDDEN_ROLE_OR_OWNER
+    | refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No household with this id that you are a member of, or no active member "
+            "of it with this user id.",
+        ),
+        (
+            status.HTTP_409_CONFLICT,
+            "That member owns the household, and an owner is always an organiser. "
+            "Transfer ownership instead.",
+        ),
+    ),
 )
 async def update_household_member(
     household_id: int,
@@ -591,7 +661,19 @@ async def update_household_member(
 @router.delete(
     "/{household_id}/members/{user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    responses=FORBIDDEN_OWNER,
+    responses=FORBIDDEN_OWNER
+    | refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No household with this id that you are a member of, or nobody with this "
+            "user id belongs to it. Unlike setting a role, this reaches a member whose "
+            "account is disabled.",
+        ),
+        (
+            status.HTTP_409_CONFLICT,
+            "That member owns the household. Transfer ownership before removing them.",
+        ),
+    ),
 )
 async def remove_household_member(
     household_id: int, user_id: int, user: CurrentUser, session: SessionDep
@@ -600,7 +682,20 @@ async def remove_household_member(
     await remove_member(session, household_id, user_id)
 
 
-@router.post("/{household_id}/leave", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/{household_id}/leave",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No household with this id that you are a member of.",
+        ),
+        (
+            status.HTTP_409_CONFLICT,
+            "You own this household. Transfer ownership before leaving.",
+        ),
+    ),
+)
 async def leave_household(household_id: int, user: CurrentUser, session: SessionDep) -> None:
     # Any member may leave a household they belong to, except the owner: they
     # must transfer ownership first (enforced by remove_member's 409).
@@ -654,7 +749,18 @@ async def _get_invitation_or_404(
     "/{household_id}/invitations",
     response_model=HouseholdInvitationRead,
     status_code=status.HTTP_201_CREATED,
-    responses=FORBIDDEN_ROLE,
+    responses=FORBIDDEN_ROLE
+    | refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No household with this id that you are a member of.",
+        ),
+        (
+            status.HTTP_409_CONFLICT,
+            "The household is at its cap of pending invitations. The cap is shared by "
+            "every organiser, so revoke one first.",
+        ),
+    ),
 )
 async def create_invitation(
     household_id: int, user: CurrentUser, session: SessionDep
@@ -711,7 +817,13 @@ async def create_invitation(
 @router.get(
     "/{household_id}/invitations",
     response_model=list[HouseholdInvitationRead],
-    responses=FORBIDDEN_ROLE,
+    responses=FORBIDDEN_ROLE
+    | refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No household with this id that you are a member of.",
+        ),
+    ),
 )
 async def list_invitations(
     household_id: int, user: CurrentUser, session: SessionDep
@@ -729,7 +841,19 @@ async def list_invitations(
 @router.post(
     "/{household_id}/invitations/{invitation_id}/revoke",
     response_model=HouseholdInvitationRead,
-    responses=FORBIDDEN_ROLE,
+    responses=FORBIDDEN_ROLE
+    | refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No household with this id that you are a member of, or no invitation "
+            "with this id belonging to it.",
+        ),
+        (
+            status.HTTP_409_CONFLICT,
+            "Only a pending invitation can be revoked; this one is already accepted, "
+            "revoked or expired.",
+        ),
+    ),
 )
 async def revoke_invitation(
     household_id: int, invitation_id: int, user: CurrentUser, session: SessionDep
@@ -750,7 +874,18 @@ async def revoke_invitation(
 @router.delete(
     "/{household_id}/invitations/{invitation_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    responses=FORBIDDEN_ROLE,
+    responses=FORBIDDEN_ROLE
+    | refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No household with this id that you are a member of, or no invitation "
+            "with this id belonging to it.",
+        ),
+        (
+            status.HTTP_409_CONFLICT,
+            "This invitation is still pending. Revoke it before deleting it.",
+        ),
+    ),
 )
 async def delete_invitation(
     household_id: int, invitation_id: int, user: CurrentUser, session: SessionDep

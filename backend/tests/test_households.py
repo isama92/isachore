@@ -507,7 +507,10 @@ async def test_transfer_to_non_member_rejected(
     client = await auth_client(alice)
 
     resp = await client.patch(f"/api/v1/households/{household.id}", json={"admin_id": stranger.id})
-    assert resp.status_code == 422
+    # 400, not 422: a non-member is a bad reference to another user, which is what
+    # _resolve_assignees answers 400 for too. 422 is reserved for pydantic's own array-shaped
+    # body, and hand-raising one there made the operation publish a shape it did not send.
+    assert resp.status_code == 400
 
 
 # --- leaving -----------------------------------------------------------

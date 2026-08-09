@@ -76,6 +76,50 @@ describe('Login', () => {
     expect(screen.getByText('dash-marker')).toBeInTheDocument()
   })
 
+  it('hands the browser over for a ?next= target rather than routing to it', async () => {
+    // /docs is served by nginx from the backend, not by the SPA, and App.tsx has no
+    // catch-all - so a client-side navigation there renders nothing. The redirect has to be
+    // a real page load, which is why this asserts on location.assign and not on a marker.
+    // `replace`, not `assign`: nginx already replaced the /docs history entry, so pushing
+    // would make Back bounce between the login page and the reference.
+    const replace = vi.fn()
+    vi.spyOn(window, 'location', 'get').mockReturnValue({
+      ...window.location,
+      replace,
+    } as unknown as Location)
+
+    renderWithProviders(<Login />, {
+      route: '/login?next=%2Fdocs',
+      authValue: { user: makeUser() },
+    })
+
+    await waitFor(() => expect(replace).toHaveBeenCalledWith('/docs'))
+  })
+
+  it('ignores a hostile ?next= and falls back to home', () => {
+    // The open-redirect case. safeReturnPath discards it, so the ordinary in-app redirect
+    // runs instead - proving the guard is wired in, not merely exported.
+    const replace = vi.fn()
+    vi.spyOn(window, 'location', 'get').mockReturnValue({
+      ...window.location,
+      replace,
+    } as unknown as Location)
+
+    const tree = (
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/" element={<div>home-marker</div>} />
+      </Routes>
+    )
+    renderWithProviders(tree, {
+      route: `/login?next=${encodeURIComponent('https://evil.example')}`,
+      authValue: { user: makeUser() },
+    })
+
+    expect(screen.getByText('home-marker')).toBeInTheDocument()
+    expect(replace).not.toHaveBeenCalled()
+  })
+
   it('submits the credentials and shows a pending state', async () => {
     let resolveLogin: (r: { twoFactorRequired: boolean }) => void = () => {}
     const pending = new Promise<{ twoFactorRequired: boolean }>((resolve) => {

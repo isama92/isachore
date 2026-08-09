@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import contains_eager, defer, selectinload
 
 from app.api.deps import CurrentUser, Impersonator, SessionDep
-from app.api.responses import FORBIDDEN_ROLE
+from app.api.responses import FORBIDDEN_ROLE, refusals
 from app.api.v1.households import SortDir
 from app.core import clock
 from app.core.assignment import initial_assignee, next_assignee, should_reassign
@@ -473,7 +473,22 @@ async def _reconcile_open_occurrence(
 
 
 @router.post(
-    "", response_model=ChoreRead, status_code=status.HTTP_201_CREATED, responses=FORBIDDEN_ROLE
+    "",
+    response_model=ChoreRead,
+    status_code=status.HTTP_201_CREATED,
+    responses=FORBIDDEN_ROLE
+    | refusals(
+        (
+            status.HTTP_400_BAD_REQUEST,
+            "An assignee, a tag or the named current assignee does not belong where "
+            "it must: assignees and tags have to be from the chore's own household, "
+            "and the current assignee has to be one of the chore's assignees.",
+        ),
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No household with this id that you are a member of.",
+        ),
+    ),
 )
 async def create_chore(
     payload: ChoreCreate, user: CurrentUser, session: SessionDep, impersonator: Impersonator
@@ -598,14 +613,45 @@ async def list_chores(
     return Page[ChoreListRead](items=items, total=total, page=page, page_size=page_size)
 
 
-@router.get("/{chore_id}", response_model=ChoreRead)
+@router.get(
+    "/{chore_id}",
+    response_model=ChoreRead,
+    responses=refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No chore with this id in any household you belong to.",
+        ),
+    ),
+)
 async def get_chore(chore_id: int, user: CurrentUser, session: SessionDep) -> Chore:
     chore = await _get_user_chore_or_404(session, user, chore_id)
     await _attach_current_assignee(session, [chore])
     return chore
 
 
-@router.patch("/{chore_id}", response_model=ChoreRead, responses=FORBIDDEN_ROLE)
+@router.patch(
+    "/{chore_id}",
+    response_model=ChoreRead,
+    responses=FORBIDDEN_ROLE
+    | refusals(
+        (
+            status.HTTP_400_BAD_REQUEST,
+            "An assignee, a tag or the named current assignee does not belong where "
+            "it must: assignees and tags have to be from the chore's own household, "
+            "and the current assignee has to be one of the chore's assignees.",
+        ),
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No chore with this id in any household you belong to.",
+        ),
+        (
+            status.HTTP_409_CONFLICT,
+            "Somebody completed or skipped this chore while the edit was in flight, "
+            "so the rescheduled occurrence collided with the closed one. Retrying is "
+            "safe.",
+        ),
+    ),
+)
 async def update_chore(
     chore_id: int,
     payload: ChoreUpdate,
@@ -668,7 +714,17 @@ async def update_chore(
     return await _load_chore(session, chore.id)
 
 
-@router.delete("/{chore_id}", status_code=status.HTTP_204_NO_CONTENT, responses=FORBIDDEN_ROLE)
+@router.delete(
+    "/{chore_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=FORBIDDEN_ROLE
+    | refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No chore with this id in any household you belong to.",
+        ),
+    ),
+)
 async def delete_chore(
     chore_id: int, user: CurrentUser, session: SessionDep, impersonator: Impersonator
 ) -> None:
@@ -844,7 +900,27 @@ async def _close_occurrence(
 
 
 @router.post(
-    "/{chore_id}/complete", response_model=CompletionRead, status_code=status.HTTP_201_CREATED
+    "/{chore_id}/complete",
+    response_model=CompletionRead,
+    status_code=status.HTTP_201_CREATED,
+    responses=refusals(
+        (
+            status.HTTP_400_BAD_REQUEST,
+            "The completion credits somebody who is neither you nor one of the "
+            "chore's assignees, or `backdate` was asked for on an unscheduled chore, "
+            "which is never due and so has no due day to backdate to.",
+        ),
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No chore with this id in any household you belong to.",
+        ),
+        (
+            status.HTTP_409_CONFLICT,
+            "The chore has no open occurrence at all, its open one was closed by somebody "
+            "else first, or the successor landed on a slot that was already taken. "
+            "Reload before retrying.",
+        ),
+    ),
 )
 async def complete_chore(
     chore_id: int,
@@ -914,7 +990,26 @@ async def complete_chore(
     )
 
 
-@router.post("/{chore_id}/skip", response_model=CompletionRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{chore_id}/skip",
+    response_model=CompletionRead,
+    status_code=status.HTTP_201_CREATED,
+    responses=refusals(
+        (
+            status.HTTP_400_BAD_REQUEST,
+            "The chore is unscheduled, so it is never due and there is nothing to skip.",
+        ),
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No chore with this id in any household you belong to.",
+        ),
+        (
+            status.HTTP_409_CONFLICT,
+            "The chore has no open occurrence, or its open one was closed by somebody "
+            "else first. Reload before retrying.",
+        ),
+    ),
+)
 async def skip_chore(chore_id: int, user: CurrentUser, session: SessionDep) -> CompletionRead:
     """Skip a chore's current occurrence: close it and move the chore on to its next slot
     without recording any work. Ungated like completing, since every role that can complete a

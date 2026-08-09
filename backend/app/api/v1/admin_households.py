@@ -3,6 +3,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, HTTPException, Query, status
 
 from app.api.deps import AdminUser, SessionDep
+from app.api.responses import refusals
 from app.api.v1.households import (
     HouseholdSortBy,
     MemberSortBy,
@@ -86,12 +87,41 @@ async def create_household(
     return await load_household_read(session, household.id)
 
 
-@router.get("/{household_id}", response_model=HouseholdListRead)
+@router.get(
+    "/{household_id}",
+    response_model=HouseholdListRead,
+    responses=refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No household with this id.",
+        ),
+    ),
+)
 async def get_household(household_id: int, _: AdminUser, session: SessionDep) -> HouseholdListRead:
     return await load_household_read(session, household_id)
 
 
-@router.patch("/{household_id}", response_model=HouseholdListRead)
+@router.patch(
+    "/{household_id}",
+    response_model=HouseholdListRead,
+    responses=refusals(
+        (
+            status.HTTP_400_BAD_REQUEST,
+            "The account named as the new owner is not an active member of this "
+            "household. Transfer only ever moves a household to somebody already in it.",
+        ),
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No household with this id.",
+        ),
+        (
+            status.HTTP_409_CONFLICT,
+            "A chore was completed while this household's timezone was being changed, "
+            "so a rescheduled occurrence collided with the closed one. Retrying is "
+            "safe.",
+        ),
+    ),
+)
 async def update_household(
     household_id: int, payload: HouseholdUpdate, _: AdminUser, session: SessionDep
 ) -> HouseholdListRead:
@@ -104,7 +134,16 @@ async def update_household(
     return await load_household_read(session, household.id)
 
 
-@router.delete("/{household_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{household_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No household with this id.",
+        ),
+    ),
+)
 async def delete_household(household_id: int, _: AdminUser, session: SessionDep) -> None:
     household = await _get_household_or_404(session, household_id)
     if household.deleted_at is None:
@@ -112,7 +151,16 @@ async def delete_household(household_id: int, _: AdminUser, session: SessionDep)
         await session.commit()
 
 
-@router.post("/{household_id}/restore", response_model=HouseholdListRead)
+@router.post(
+    "/{household_id}/restore",
+    response_model=HouseholdListRead,
+    responses=refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No household with this id.",
+        ),
+    ),
+)
 async def restore_household(
     household_id: int, _: AdminUser, session: SessionDep
 ) -> HouseholdListRead:
@@ -122,7 +170,16 @@ async def restore_household(
     return await load_household_read(session, household.id)
 
 
-@router.get("/{household_id}/members", response_model=Page[HouseholdMemberRoleRead])
+@router.get(
+    "/{household_id}/members",
+    response_model=Page[HouseholdMemberRoleRead],
+    responses=refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No household with this id.",
+        ),
+    ),
+)
 async def list_household_members(
     household_id: int,
     _: AdminUser,
@@ -145,7 +202,21 @@ async def list_household_members(
     )
 
 
-@router.patch("/{household_id}/members/{user_id}", response_model=HouseholdMemberRoleRead)
+@router.patch(
+    "/{household_id}/members/{user_id}",
+    response_model=HouseholdMemberRoleRead,
+    responses=refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No household with this id, or no active member of it with this user id.",
+        ),
+        (
+            status.HTTP_409_CONFLICT,
+            "That member owns the household, and an owner is always an organiser. "
+            "Transfer ownership instead.",
+        ),
+    ),
+)
 async def update_household_member(
     household_id: int,
     user_id: int,
@@ -167,7 +238,21 @@ async def update_household_member(
     return await set_member_role(session, household, user_id, payload.role)
 
 
-@router.delete("/{household_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{household_id}/members/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No household with this id, or nobody with this user id belongs to it. "
+            "Unlike setting a role, this reaches a member whose account is disabled.",
+        ),
+        (
+            status.HTTP_409_CONFLICT,
+            "That member owns the household. Transfer ownership before removing them.",
+        ),
+    ),
+)
 async def remove_household_member(
     household_id: int, user_id: int, _: AdminUser, session: SessionDep
 ) -> None:

@@ -15,7 +15,7 @@ from app.api.deps import (
     get_request_token,
     get_user_by_token,
 )
-from app.api.responses import THROTTLED, UNAUTHORISED
+from app.api.responses import THROTTLED, UNAUTHORISED, refusals
 from app.core.app_settings import get_app_settings
 from app.core.audit import record_event
 from app.core.config import settings
@@ -160,11 +160,32 @@ async def _me_read(session: SessionDep, user: User, *, impersonating: bool = Fal
     )
 
 
-# This router is mixed, so it carries no block from router.py and each gated or throttled
-# route declares its own. Only the cross-cutting refusals are here: login's own 401 on bad
-# credentials, its 403 under OIDC_ONLY and its 503 with 2FA unavailable are endpoint answers,
-# and documenting those across the API is its own README todo.
-@router.post("/login", response_model=LoginResponse, responses=THROTTLED)
+# This router is mixed, so it carries no block from router.py and every route declares its
+# own refusals - the throttle, and login's three endpoint answers: 401 on bad credentials,
+# 403 under OIDC_ONLY, 503 when 2FA is enabled but its secret cannot be decrypted.
+@router.post(
+    "/login",
+    response_model=LoginResponse,
+    responses=THROTTLED
+    | refusals(
+        (
+            status.HTTP_401_UNAUTHORIZED,
+            "The email and password do not match an active account. One message for "
+            "every cause, so the response cannot be used to discover which addresses "
+            "exist.",
+        ),
+        (
+            status.HTTP_403_FORBIDDEN,
+            "This server is configured for single sign-on only, so password login is switched off.",
+        ),
+        (
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "The account has two-factor authentication enabled but the server cannot "
+            "decrypt its secret, so no session can be issued. An operator has to fix "
+            "APP_KEY.",
+        ),
+    ),
+)
 async def login(
     payload: LoginRequest,
     session: SessionDep,
@@ -245,7 +266,20 @@ async def login(
     return LoginResponse(user=await _me_read(session, user))
 
 
-@router.post("/verify-2fa", response_model=MeRead, responses=THROTTLED)
+@router.post(
+    "/verify-2fa",
+    response_model=MeRead,
+    responses=THROTTLED
+    | refusals(
+        (
+            status.HTTP_401_UNAUTHORIZED,
+            "No two-factor challenge is in progress, the parked challenge has expired, the "
+            "code is wrong, or the account stopped being usable between the two steps "
+            "- deactivated, or its secret no longer decryptable, which the first step "
+            "answers with a 503.",
+        ),
+    ),
+)
 async def verify_two_factor(
     payload: TwoFactorVerifyRequest,
     session: SessionDep,

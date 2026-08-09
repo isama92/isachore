@@ -1,10 +1,15 @@
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.v1.docs import page_router as docs_page_router
 from app.api.v1.router import api_router
 from app.core.avatars import avatars_dir
 from app.core.body_limit import BodySizeLimitMiddleware
@@ -69,7 +74,80 @@ so what matters is that a cross-site form cannot set the header at all.
 `Authorization: Bearer` requests are exempt, as are requests carrying no auth cookie.
 """
 
-app = FastAPI(title="isachore API", version="0.1.0", description=API_DESCRIPTION, lifespan=lifespan)
+# `redoc_url=None` because api/v1/docs.py serves that page instead, from a vendored bundle
+# with no third-party requests at all. Swagger UI keeps FastAPI's own page and its CDN: no
+# deployment exposes it (the prod nginx proxies the reference and nothing else), so it costs
+# only a developer's own machine, and it is the one reader with a "Try it out" console.
+app = FastAPI(
+    title="isachore API",
+    version="0.1.0",
+    description=API_DESCRIPTION,
+    lifespan=lifespan,
+    redoc_url=None,
+)
+
+
+@app.exception_handler(RequestValidationError)
+async def strip_the_rejected_value(_: Request, exc: RequestValidationError) -> JSONResponse:
+    """FastAPI's own 422, minus pydantic's echo of what the caller sent.
+
+    The stock handler returns each error with an `input` key holding the value that failed,
+    which for a password below `min_length=8` means the password comes back in the response
+    body in plaintext. Four routes take a constrained password and so reach it: `POST
+    /confirm/{token}`, `POST /admin/users`, `PATCH /admin/users/{id}` and the profile password
+    change. Nothing in the app was ever showing it (`validationError.ts`
+    reads `type`, `loc`, `msg` and `ctx`), so this is a wire and log-capture exposure rather
+    than a visible one, but a proxy access log or an error tracker that records response
+    bodies keeps it.
+
+    Two things stay exactly as they were, and both are load-bearing:
+
+    - **the array shape.** `detail` is a *list* of `{loc, msg, type, ctx}`, which
+      `lib/validationError.ts` parses into one translated sentence. `/api/v1` also has future
+      non-browser clients, so flattening it to a string server-side would take the
+      machine-readable form away from them.
+    - **`ctx`.** The frontend interpolates `ctx.min_length`, `ctx.max_length` and
+      `ctx.expected` into those sentences, so dropping it would silently degrade every field
+      error to pydantic's developer-facing English.
+
+    `jsonable_encoder` is what the stock handler uses and is not optional: a `value_error`
+    carries the original exception object in `ctx`, which is not JSON on its own.
+    """
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        content={
+            "detail": jsonable_encoder(
+                [
+                    {key: value for key, value in error.items() if key != "input"}
+                    for error in exc.errors()
+                ]
+            )
+        },
+    )
+
+
+def _openapi_without_the_rejected_value() -> dict[str, Any]:
+    """The generated document, minus the `input` property the handler above never sends.
+
+    FastAPI's published `ValidationError` schema lists `input` as an optional property,
+    because its stock handler does return one. Removing it from the body and leaving the
+    schema alone would swap one lie for another - a document advertising a field the API
+    never produces - which is exactly the defect the rest of this work exists to remove.
+
+    Written defensively rather than with a bare subscript: this runs whenever anybody fetches
+    /openapi.json, and a KeyError there would be a 500 on a live deployment if FastAPI ever
+    renamed the schema. `test_the_spec_does_not_advertise_the_rejected_value` is what turns
+    that rename into a failing test instead of a silently-restored field.
+    """
+    schema = _generate_openapi()
+    validation_error = schema.get("components", {}).get("schemas", {}).get("ValidationError", {})
+    validation_error.get("properties", {}).pop("input", None)
+    return schema
+
+
+_generate_openapi = app.openapi
+app.openapi = _openapi_without_the_rejected_value  # type: ignore[method-assign]
+
 # Transport-level request body cap (max_request_bytes); defence in depth behind
 # the prod nginx client_max_body_size for deployments without a proxy in front.
 app.add_middleware(BodySizeLimitMiddleware)
@@ -77,6 +155,10 @@ app.add_middleware(BodySizeLimitMiddleware)
 # a forged cookie-authenticated mutation is rejected before its body is spooled.
 app.add_middleware(CsrfProtectMiddleware)
 app.include_router(api_router, prefix="/api/v1")
+# At the ROOT, not under /api/v1, and that is load-bearing: the prod nginx gates one exact
+# location (`= /docs`, rewritten here) while proxying all of /api/ ungated, so a reference
+# page under the API prefix would be readable by anybody. See api/v1/docs.py.
+app.include_router(docs_page_router)
 
 # Serve uploaded avatars under the /api prefix so the prod nginx /api proxy
 # reaches them untouched. Mount the avatars folder specifically (not the whole

@@ -193,7 +193,7 @@ pre-commit run --all-files                           # what the git hook runs
     relaxes the CSP.** It carries the shared body of the two API-reference locations
     (`/docs`, rewritten to the backend's `/redoc`, and `/openapi.json`), and it exists as
     its own file because it is *location*-context where `nginx-common.conf` is
-    server-context. Seven things to keep straight:
+    server-context. Ten things to keep straight:
     - It has to restate every inherited security header, because nginx replaces an
       inherited `add_header` set rather than merging it - the same rule as `/sw.js`, but
       here the point is to widen the CSP rather than to avoid losing it. **A new security
@@ -203,10 +203,14 @@ pre-commit run --all-files                           # what the git hook runs
       second copy this feature shipped with restated five where six were inherited and
       silently dropped HSTS in the tls mode - the one mode that has it. Only CSP and HSTS
       stay out of the shared file, and both for stated reasons.
-    - The CSP relaxations were each measured in a browser against what ReDoc actually
-      requests; `'unsafe-inline'` is deliberately **absent** from `script-src`, since
-      ReDoc's page carries no inline script (Swagger UI's does, which is a second reason
-      only one reader is exposed).
+    - **The CSP now differs from the app's by exactly one directive**, `worker-src 'self'
+      blob:`, which ReDoc needs to build its search index - without it the page renders and
+      the search box is dead. There is no third-party origin in it at all: the bundle is
+      vendored into the backend image and Google Fonts is off (`api/v1/docs.py`). It stays
+      location-scoped rather than joining the app-wide policy because nothing in the SPA
+      makes a blob worker. `'unsafe-inline'` is deliberately **absent** from `script-src`,
+      since ReDoc's page carries no inline script - Swagger UI's does, which is a second
+      reason only one reader is published.
     - **HSTS reaches it through `$hsts`, which is baked, and that is a deployment-safety
       rule rather than a style one.** The map lives in `nginx-maps.conf` ->
       `conf.d/00-isachore-maps.conf` because the tls mode bind-mounts an *operator's own*
@@ -223,8 +227,32 @@ pre-commit run --all-files                           # what the git hook runs
       error instead of "sign in". `@docs_sign_in` also needs `absolute_redirect off`, or
       nginx builds the `Location` from its own listen scheme and downgrades an HTTPS visitor
       to plain HTTP in the http and traefik modes, where TLS is terminated upstream.
+    - **It redirects to `/login?next=/docs`, and that value is a LITERAL.** `$request_uri`
+      would be the general answer and is the wrong one: it carries the query string, nginx
+      has no urlencode, so a `?` or `&` in the path produces a mangled parameter. A literal
+      works because this named location is reached from one place - `/docs`'s own
+      `error_page`, since `/openapi.json` answers `@docs_unauthorised` instead. The SPA
+      still validates it (`safeReturnPath`), because the parameter is client-controlled
+      whatever nginx sends, and it honours it with `window.location.assign` rather than
+      react-router: `/docs` is not an SPA route and `App.tsx` has no catch-all, so a
+      client-side navigation there renders a blank page. It is `location.replace`, not
+      `assign`: nginx's 302 already replaced the /docs entry, so pushing would leave Back
+      on the login page with a live session, bouncing forward and stranding what came
+      before.
     - `https://cdn.redoc.ly/redoc/logo-mini.svg` stays blocked on purpose, so /docs logs
       exactly one CSP error on every load. Anything else in that console is a real finding.
+    - **The page lives at the app root (`/redoc`), NOT under `/api/v1`, and that is the
+      gate.** nginx gates one exact location and proxies all of `/api/` ungated, so moving
+      the page under the API prefix for tidiness would publish the whole reference
+      anonymously. Its bundle goes under `/api/v1/docs/` for the mirror-image reason: public
+      JavaScript needing no gate, and no new nginx location. Both halves are asserted in
+      `tests/test_docs_page.py`, including the absence of a route at `/api/v1/docs/redoc`.
+    - **ReDoc is vendored, pinned by digest**, by the two `ARG`s at the top of
+      `docker/backend.Dockerfile`: a version alone still trusts whatever the CDN serves
+      under that tag. It lands in `/opt/redoc`, outside `/app`, because the dev stage's bind
+      mount would hide it - the `docker-entrypoint.sh` reasoning again - and `prod` needs
+      its own `COPY --from=builder`, since it starts from a bare python image. Bumping means
+      changing both ARGs; a wrong digest fails the build rather than shipping.
     - The gate is `auth_request` against `GET /api/v1/auth/verify`, a 204-or-401 route that
       exists for nothing else. Its only caller is a conf file, so it reads as dead code from
       inside Python - hence the docstring. The subrequest is a GET, so CSRF exempts it.
@@ -1212,6 +1240,36 @@ pre-commit run --all-files                           # what the git hook runs
   (`ChoreForm`, `admin/ServerSettings`, `users/UserForm` - the last is the one where the
   checkbox is the final control before submit). Extract a `lib/` helper if a second one
   adopts it; one caller does not earn the indirection.
+- **`safeReturnPath` (`lib/routes.ts`) and `_safe_return_to` (`api/v1/oidc.py`) guard the
+  same idea and are NOT the same function**, which is the part to keep straight. Both refuse
+  a post-sign-in destination that is not our own origin - the SPA's `?next=`, the backend's
+  SSO `return_to` - and both discard rather than correct. But the frontend one asks the
+  WHATWG URL parser and returns the NORMALISED path, because a string rule is holed against
+  its sink: the parser strips ASCII tab, LF and CR *before* parsing, so `/%09/evil.example`
+  satisfies "one leading slash, no `//`, no backslash" and `location.replace` then lands on
+  `https://evil.example`. That shipped once. The backend keeps the string rule and is safe
+  only because Starlette percent-encodes the `Location` header, which is safe by accident
+  rather than by design - so do not treat either as proof of the other, and do not
+  "simplify" the frontend one back into a character check. The frontend needs its own guard
+  at all because the SPA is static: nothing server-side sees `?next=` before the browser
+  acts on it.
+- **A 422 does not echo the rejected value under `input`.** Scoped deliberately, because
+  the absolute version of that sentence is false: a validator writing `f"{value!r} is not a
+  known timezone"` puts the value in `msg`, and `schemas/household.py` does exactly that. The
+  mechanism removes one key; keeping a value out of a message a validator composes is still
+  the validator author's job. `strip_the_rejected_value` in `main.py` handles
+  `RequestValidationError` and drops pydantic's `input` key, which carries the value that
+  failed - so a password under `min_length=8` used to come back in the response body in
+  plaintext on four routes (both admin user endpoints, the confirmation flow and the
+  profile password change). Nothing in the app rendered it, which is why it survived: the
+  exposure is the wire and anything recording bodies. Three things must survive with it:
+  the **array** shape (`lib/validationError.ts` parses it, and non-browser clients need the
+  machine-readable form), **`ctx`** (the frontend interpolates `min_length` and friends into
+  its sentences), and `jsonable_encoder` (a `value_error` carries an exception object in
+  `ctx`, which is not JSON). `_openapi_without_the_rejected_value` drops `input` from the
+  published `ValidationError` schema to match - FastAPI advertises it because its own
+  handler sends one - and `tests/test_validation_errors.py` pins the property by asserting
+  the secret appears **nowhere** in the body, not merely that the key is gone.
 - **Readable 422s**: `lib/validationError.ts` turns pydantic's `detail` *list* into one
   sentence, and `handle()` in `api.ts` calls it whenever `detail` is not a string. Every
   hand-raised `HTTPException` carries a string and is shown verbatim; only pydantic sends
@@ -1227,13 +1285,10 @@ pre-commit run --all-files                           # what the git hook runs
   `RequestValidationError` handler that flattens `detail` to a string. Translation goes
   through the `i18n` singleton, not a captured `t`: `api.ts` has no React context.
 
-  **Open, and not settled by the above:** pydantic's stock handler echoes the rejected value
-  back under `input`, so a password below `min_length=8` comes back in the response body in
-  plaintext (`POST /confirm/{token}`, `PATCH /admin/users/{id}`, the profile password change).
-  `formatValidationDetail` never reads `input`, so nothing leaks in-app - it is a wire and
-  log-capture exposure, and one worth an AVG/ISO 27001 look. Stripping that one key in a
-  `RequestValidationError` handler would keep the array contract intact, so the rule above
-  does not rule it out. It predates this work and has not been decided either way.
+  **Settled:** pydantic's stock handler echoed the rejected value back under `input`, which
+  put a too-short password in the response body in plaintext. `main.py` now strips that key
+  and only that key, which keeps the array contract this rule is about - see the 422 note
+  above for what else has to survive the strip, and why `ctx` is not part of it.
 - **Design tokens** (colours, fonts, radii, shadows) live ONLY in
   `frontend/src/index.css`, never hardcode hex in components. They are split by
   role: theme-invariant tokens (fonts, shadows, brand radii) under `@theme`; the
@@ -1804,10 +1859,35 @@ the negative paths (401/403/400/404/409), not just the happy one.
     A fourth 403 exists and is deliberately undocumented per route: `CsrfProtectMiddleware`,
     which is transport-level and lives in `main.py`'s `API_DESCRIPTION`.
   - **`security` and the 401 are asserted to be the same set** in
-    `tests/test_openapi_security.py`. That single equality catches both drift directions,
-    because one side is derived and the other hand-written: a new gated route in an
-    unblocked router declares no 401, and a block on a public router declares one nothing
-    raises.
+    `tests/test_openapi_security.py`, give or take a two-entry allow-list. One side is
+    derived and the other hand-written, so they drift in opposite directions: a new gated
+    route in an unblocked router declares no 401, and a block on a public router declares
+    one nothing raises. `PUBLIC_OPERATIONS_ANSWERING_401` holds the two anonymous routes
+    that genuinely answer 401 by themselves (login's bad credentials, verify-2fa's missing
+    challenge); a 401 on any other public operation still fails.
+  - **The PER-ENDPOINT refusals are a separate file and a different technique.**
+    `tests/test_openapi_refusals.py` covers the 404s, 409s, 400s and so on - 87 of them
+    across 53 operations, far too many to hold in a hand-written set - by reading the code:
+    it walks each handler's call graph and compares the reachable status codes with the
+    declared ones, failing in *both* directions. Four things about that walker to know
+    before touching it, each of which it got wrong once:
+    - Its symbol table spans `core/`, `deps.py` **and the other routers**, because routers
+      import from each other (`admin_households.py` takes `load_household_read` and
+      `set_member_role` from `households.py`). Leaving the routers out made it report a
+      route as raising nothing at all.
+    - It resolves **module-level `HTTPException` constants** by name, not just calls -
+      `_invalid_token_exc`, `_credentials_exc`. Following calls alone missed their routes.
+    - Operations are keyed by **router prefix plus path**, not by handler name: eight
+      handler names collide between `households.py` and `admin_households.py`, and keying
+      by name silently compared one route against the other's declarations.
+    - The 401 and the admin 403 arrive by *dependency*, so the walk cannot see them and
+      `_invisible_to_the_walk` excludes exactly those two. Every other gate refusal is
+      walkable, which is what lets it catch a `FORBIDDEN_ROLE` on a route that never calls
+      `require_role`.
+
+    Where the walker over-reports, `UNREACHABLE` records the case and the reason. **Never
+    silence one by declaring the refusal instead** - that trades a red test for a document
+    that lies, which is the defect the file exists to prevent.
   - Regenerate `docs/api/openapi.yaml` after any of this, or `test_openapi_spec.py` fails.
 - **`docs/api/openapi.yaml` is committed generated output**, regenerated with the pinned
   `npx @redocly/cli@2` command in README.md - by hand, or by `spec.yml` after a merge.

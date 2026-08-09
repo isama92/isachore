@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from sqlalchemy import delete, func, or_, select
 
 from app.api.deps import AdminUser, Impersonator, SessionDep, get_request_token
+from app.api.responses import refusals
 from app.core.app_settings import get_app_settings
 from app.core.audit import record_event
 from app.core.email import NO_SMTP_DETAIL, send_confirmation_email, smtp_configured
@@ -161,12 +162,36 @@ async def list_users(
     )
 
 
-@router.get("/{user_id}", response_model=UserRead)
+@router.get(
+    "/{user_id}",
+    response_model=UserRead,
+    responses=refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No user with this id.",
+        ),
+    ),
+)
 async def get_user(user_id: int, _: AdminUser, session: SessionDep) -> User:
     return await _get_user_or_404(session, user_id)
 
 
-@router.post("", response_model=UserRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=UserRead,
+    status_code=status.HTTP_201_CREATED,
+    responses=refusals(
+        (
+            status.HTTP_400_BAD_REQUEST,
+            "A password is required while email confirmation is switched off, and "
+            "confirmation itself needs a configured SMTP server.",
+        ),
+        (
+            status.HTTP_409_CONFLICT,
+            "Another account already uses that email address.",
+        ),
+    ),
+)
 async def create_user(
     payload: UserCreate,
     admin: AdminUser,
@@ -238,7 +263,25 @@ async def create_user(
     return user
 
 
-@router.patch("/{user_id}", response_model=UserRead)
+@router.patch(
+    "/{user_id}",
+    response_model=UserRead,
+    responses=refusals(
+        (
+            status.HTTP_400_BAD_REQUEST,
+            "You cannot demote or deactivate yourself, and moving somebody back to "
+            "awaiting-confirmation needs a configured SMTP server.",
+        ),
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No user with this id.",
+        ),
+        (
+            status.HTTP_409_CONFLICT,
+            "Another account already uses that email address.",
+        ),
+    ),
+)
 async def update_user(
     user_id: int,
     payload: UserUpdate,
@@ -329,7 +372,20 @@ async def update_user(
     return user
 
 
-@router.post("/{user_id}/impersonate", response_model=UserRead)
+@router.post(
+    "/{user_id}/impersonate",
+    response_model=UserRead,
+    responses=refusals(
+        (
+            status.HTTP_400_BAD_REQUEST,
+            "That account is not active, or it is already the one you are signed in as.",
+        ),
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No user with this id.",
+        ),
+    ),
+)
 async def impersonate_user(
     user_id: int,
     admin: AdminUser,
@@ -384,7 +440,20 @@ async def impersonate_user(
     return user
 
 
-@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=refusals(
+        (
+            status.HTTP_400_BAD_REQUEST,
+            "You cannot deactivate yourself.",
+        ),
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No user with this id.",
+        ),
+    ),
+)
 async def deactivate_user(
     user_id: int,
     admin: AdminUser,
@@ -413,7 +482,16 @@ async def deactivate_user(
     await session.commit()
 
 
-@router.post("/{user_id}/reset-2fa", response_model=UserRead)
+@router.post(
+    "/{user_id}/reset-2fa",
+    response_model=UserRead,
+    responses=refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No user with this id.",
+        ),
+    ),
+)
 async def reset_two_factor(
     user_id: int,
     admin: AdminUser,
@@ -445,7 +523,24 @@ async def reset_two_factor(
     return user
 
 
-@router.post("/{user_id}/resend-confirmation", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/{user_id}/resend-confirmation",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=refusals(
+        (
+            status.HTTP_400_BAD_REQUEST,
+            "That account is not awaiting confirmation, or no SMTP server is configured.",
+        ),
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No user with this id.",
+        ),
+        (
+            status.HTTP_502_BAD_GATEWAY,
+            "The SMTP server refused the message or could not be reached.",
+        ),
+    ),
+)
 async def resend_confirmation(
     user_id: int,
     _: AdminUser,

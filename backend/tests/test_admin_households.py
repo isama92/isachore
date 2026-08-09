@@ -278,7 +278,8 @@ async def test_admin_set_household_owner(
     bad = await client.patch(
         f"/api/v1/admin/households/{household.id}", json={"admin_id": stranger.id}
     )
-    assert bad.status_code == 422
+    # 400 through the shared set_household_admin, same as the user-facing route.
+    assert bad.status_code == 400
 
 
 async def test_admin_remove_member_as_member_forbidden(

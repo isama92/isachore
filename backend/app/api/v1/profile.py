@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Request, UploadFile, status
 from sqlalchemy import delete
 
 from app.api.deps import CurrentUser, Impersonator, SessionDep, get_request_token
+from app.api.responses import refusals
 from app.core.audit import record_event
 from app.core.avatars import delete_avatar, store_avatar
 from app.core.config import settings
@@ -13,7 +14,16 @@ from app.schemas import ProfileUpdate, UserRead
 router = APIRouter()
 
 
-@router.patch("", response_model=UserRead)
+@router.patch(
+    "",
+    response_model=UserRead,
+    responses=refusals(
+        (
+            status.HTTP_400_BAD_REQUEST,
+            "Changing the password needs the current one, and the one given does not match.",
+        ),
+    ),
+)
 async def update_profile(
     payload: ProfileUpdate,
     user: CurrentUser,
@@ -72,7 +82,20 @@ async def update_profile(
     return user
 
 
-@router.put("/avatar", response_model=UserRead)
+@router.put(
+    "/avatar",
+    response_model=UserRead,
+    responses=refusals(
+        (
+            status.HTTP_400_BAD_REQUEST,
+            "The upload is not an image the server can decode.",
+        ),
+        (
+            status.HTTP_413_CONTENT_TOO_LARGE,
+            "The image is above the upload cap.",
+        ),
+    ),
+)
 async def upload_avatar(
     file: UploadFile,
     user: CurrentUser,

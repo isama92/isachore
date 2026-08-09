@@ -9,6 +9,77 @@ ENV UV_LINK_MODE=copy \
     PATH="/opt/venv/bin:$PATH"
 WORKDIR /app
 
+# The ReDoc bundle that renders /docs, vendored so the page is entirely first-party.
+#
+# Proxying FastAPI's stock page meant the browser fetched this from jsdelivr on a floating
+# `redoc@2` range with no integrity attribute, and pulled Montserrat and Roboto from Google
+# Fonts - an unpinned script running same-origin with the SPA, and every signed-in reader's
+# IP going to two third parties for typography. Both close by serving our own copy; see
+# app/api/v1/docs.py.
+#
+# Fetched at build time rather than committed, so a megabyte of minified JavaScript stays out
+# of git, and pinned by DIGEST rather than by version, which is the part that matters: the
+# version alone still trusts whatever the CDN serves under that tag today. Verified against
+# two independent mirrors (jsdelivr and unpkg) when it was chosen.
+#
+# In /opt, NOT /app: the dev stage ships no source and takes it from the ./backend bind
+# mount, which would hide anything placed under /app - the same reason docker-entrypoint.sh
+# installs to /usr/local/bin. `prod` does not inherit from this stage, so it copies the
+# directory across explicitly.
+#
+# python:3.14-slim carries no curl, and Python is right here, so urllib plus hashlib does it
+# with no apt layer. The digest check is `RUN`-time, so a mismatch fails the build.
+#
+# Two consequences of fetching rather than committing, both acceptable and neither obvious.
+#
+# The image build now needs jsdelivr reachable. That is broader than CI: this is the `base`
+# stage, so `dev` and `builder` both inherit it and an ordinary `docker compose up --build`
+# fails offline, with a urlopen traceback rather than anything self-explanatory. Accepted
+# because the dev stack wants the bundle too - /redoc works there - and because the
+# alternative is a megabyte of minified JavaScript in git.
+#
+# And the bundle's LICENSE sibling has to come along, because the first line of the bundle
+# points at it and shipping the pointer without the file would leave a dangling attribution
+# for third-party MIT code. It is served too - see api/v1/docs.py - or the pointer would
+# still dangle for anyone reading the file over HTTP.
+#
+# Bumping ReDoc means changing BOTH args here (a version without its digest pins nothing)
+# and `REDOC_VERSION` in app/api/v1/docs.py, which versions the url for cache-busting.
+ARG REDOC_VERSION=2.5.3
+ARG REDOC_SHA256=1320f442151c57c447d3b70c7ffc6c4f86d08464020fe34c8cc5d3164e9944f0
+RUN python - "$REDOC_VERSION" "$REDOC_SHA256" <<'PY'
+import hashlib, pathlib, sys, urllib.request
+
+version, expected = sys.argv[1], sys.argv[2]
+base = f"https://cdn.jsdelivr.net/npm/redoc@{version}/bundles"
+
+
+def fetch(name: str) -> bytes:
+    return urllib.request.urlopen(f"{base}/{name}", timeout=60).read()  # noqa: S310
+
+
+payload = fetch("redoc.standalone.js")
+actual = hashlib.sha256(payload).hexdigest()
+if actual != expected:
+    raise SystemExit(f"redoc {version}: expected sha256 {expected}, got {actual}")
+
+target = pathlib.Path("/opt/redoc")
+target.mkdir(parents=True, exist_ok=True)
+# Versioned filename, so `app/api/v1/docs.py`'s own REDOC_VERSION cannot drift from this
+# ARG unnoticed: if the two disagree the route looks for a file that is not there and says
+# so, instead of serving new bytes at an old immutable url that browsers cache for a year.
+(target / f"redoc-{version}.standalone.js").write_bytes(payload)
+# Not digest-pinned, and deliberately not fatal: it is an attribution file the app never
+# serves, so a missing one should not stop a build that has already verified the code.
+try:
+    (target / "redoc.standalone.js.LICENSE.txt").write_bytes(
+        fetch("redoc.standalone.js.LICENSE.txt")
+    )  # the name the bundle's own first line points at, so it is served under that name too
+except Exception as exc:  # noqa: BLE001
+    print(f"warning: could not vendor the redoc LICENSE file: {exc}")
+print(f"vendored redoc {version} ({len(payload)} bytes, sha256 {actual})")
+PY
+
 # dev: dependencies only; source code arrives via the compose bind mount.
 # The venv lives at /opt/venv so the ./backend:/app mount cannot clobber it.
 FROM base AS dev
@@ -36,6 +107,9 @@ COPY . /app
 FROM python:3.14-slim AS prod
 RUN groupadd -r app && useradd -r -g app app
 COPY --from=builder /opt/venv /opt/venv
+# The vendored ReDoc bundle. Needs its own COPY because this stage starts from a bare
+# python image rather than `base`, so it inherits nothing the base stage fetched.
+COPY --from=builder /opt/redoc /opt/redoc
 COPY --from=builder --chown=app:app /app /app
 # Create the avatars storage dir owned by the non-root app user so the mounted
 # named volume inherits writable ownership on first mount.
