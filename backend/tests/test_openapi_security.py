@@ -98,10 +98,6 @@ def _operations() -> dict[tuple[str, str], dict[str, Any]]:
 OPERATIONS = _operations()
 
 
-def operations() -> dict[tuple[str, str], dict[str, Any]]:
-    return OPERATIONS
-
-
 def declaring(code: str) -> set[tuple[str, str]]:
     return {key for key, op in OPERATIONS.items() if code in op["responses"]}
 
@@ -179,19 +175,19 @@ def test_a_gated_operation_and_a_401_are_the_same_thing() -> None:
     guard being deleted; it is written down here because a green equality assertion
     otherwise reads as an invariant and the todo reads as forbidden.
     """
-    assert {key for key, op in operations().items() if op.get("security")} == declaring("401")
+    assert {key for key, op in OPERATIONS.items() if op.get("security")} == declaring("401")
 
 
 def test_the_public_operations_are_exactly_these() -> None:
     """The `auth` and `invitations` routers each mix public routes with gated ones, so no
     include_router block can be right for them and every gate there is hand-declared. This is
     what notices when a hand-declared one is forgotten."""
-    anonymous = {key for key, op in operations().items() if not op.get("security")}
+    anonymous = {key for key, op in OPERATIONS.items() if not op.get("security")}
     assert anonymous == PUBLIC_OPERATIONS
 
 
 def test_every_admin_operation_declares_a_403() -> None:
-    admin = {key for key in operations() if key[1].startswith("/api/v1/admin/")}
+    admin = {key for key in OPERATIONS if key[1].startswith("/api/v1/admin/")}
     assert admin, "no admin operations found; the /admin prefix rule has moved"
     assert admin <= declaring("403")
 
@@ -219,9 +215,16 @@ def test_the_owner_gate_and_the_role_gate_say_different_things() -> None:
     403 tells the caller a promotion would help and an ownership 403 tells them it would not,
     so swapping the blocks is a silent documentation bug that no status-code check finds.
 
-    Asserting the ABSENCE of the other word is what makes this bite. Checking only that an
-    owner-gated route says "owner" passed happily while one route said "role" and meant
-    ownership, because a description can contain both words while describing one gate.
+    Asserting the ABSENCE of the other gate's wording is what makes this bite. Checking only
+    that an owner-gated route says "owner" passed happily while one route said "role" and
+    meant ownership, because a description can contain both words while describing one gate.
+
+    The discriminator is "role held", not "role", and that is the second version of this
+    test: FORBIDDEN_OWNER's own text contains the word "role" (in "no role change grants
+    it"), so a bare `"role" in description` let FORBIDDEN_OWNER stand in for the combined
+    block - publishing "only the owner may do this" on a route an organiser may legitimately
+    call. Only the two role blocks say "role held", so the three sets are now mutually
+    exclusive and every swap between them fails.
     """
     for key in OWNER_GATED_OPERATIONS:
         description = OPERATIONS[key]["responses"]["403"]["description"].lower()
@@ -231,7 +234,7 @@ def test_the_owner_gate_and_the_role_gate_say_different_things() -> None:
         assert "role held" in description and "owner" not in description, key
     for key in BOTH_GATES_OPERATIONS:
         description = OPERATIONS[key]["responses"]["403"]["description"].lower()
-        assert "owner" in description and "role" in description, key
+        assert "owner" in description and "role held" in description, key
 
 
 def test_the_throttled_operations_declare_a_429_carrying_retry_after() -> None:
@@ -256,7 +259,7 @@ def test_every_declared_refusal_carries_its_explanation() -> None:
     """A refusal declared with a `description` and no `model` publishes itself as bodyless,
     which is wrong for every hand-raised HTTPException in this app: they all answer in
     ErrorDetail's shape. Cheap to get wrong, since the description alone reads complete."""
-    for key, op in operations().items():
+    for key, op in OPERATIONS.items():
         for code in ("401", "403", "429"):
             response = op["responses"].get(code)
             if response is None:

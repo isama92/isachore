@@ -87,12 +87,27 @@ jobs:
       # instead of a compose stack, and it is why the README documents the same pair of
       # commands - what CI runs here has to be what a person can run by hand.
       #
-      # The redocly major is pinned for the same reason the README pins it: a reformat from a
-      # future one would open a PR with a 4,000-line diff nobody can review.
+      # redocly is pinned EXACTLY, not to the major, for the same reason node is above and
+      # the reasoning is the same sentence: this job rests on regeneration being
+      # byte-reproducible, and `@2` resolves the newest 2.x at run time, so the first release
+      # that changes quoting or wrapping opens a several-thousand-line formatting PR with no
+      # CI on it to explain itself. Bumping is manual and deliberate. Keep it identical to
+      # README.md's copy of the same command.
       - name: Regenerate docs/api/openapi.yaml
         run: |
           (cd backend && uv run python -c 'import json; from app.main import app; print(json.dumps(app.openapi()))') > "$RUNNER_TEMP/openapi.json"
-          npx --yes @redocly/cli@2 bundle "$RUNNER_TEMP/openapi.json" -o docs/api/openapi.yaml
+          npx --yes @redocly/cli@2.46.0 bundle "$RUNNER_TEMP/openapi.json" -o docs/api/openapi.yaml
+
+      # Check our own output before offering it to anybody. The PR this job opens gets no CI
+      # (a GITHUB_TOKEN push raises no workflow events), so without this the one automated
+      # producer of spec-only PRs is the one thing `docs/**` came off ci.yml's paths-ignore
+      # to catch. If redocly ever emits YAML that parses to something other than
+      # app.openapi(), this fails here rather than becoming a PR somebody waves through and
+      # a failure on the next person's build - which is the exact blame-shifting this whole
+      # feature exists to stop.
+      - name: The regenerated spec still round-trips
+        run: uv run pytest tests/test_openapi_spec.py -q
+        working-directory: backend
 
       - id: drift
         run: |

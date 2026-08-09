@@ -56,7 +56,7 @@ and the non-obvious gotchas.
 - **Docker** (`docker/`): everything Docker-related except the dev compose file,
   which stays at the root as `compose.yml` because it is the everyday entry point.
   `docker/` holds `backend.Dockerfile` and `frontend.Dockerfile` (multi-stage),
-  `nginx/` (five nginx configs: two mode files, two baked snippets and a baked
+  `nginx/` (six nginx configs: two mode files, three baked snippets and a baked
   http-context map file), and one self-contained
   `compose.prod.<mode>.yml` per prod deployment mode: http / tls / traefik.
 - **CI** (`.github/workflows/`): `ci.yml` (ruff + pytest + eslint + prettier +
@@ -193,15 +193,20 @@ pre-commit run --all-files                           # what the git hook runs
     relaxes the CSP.** It carries the shared body of the two API-reference locations
     (`/docs`, rewritten to the backend's `/redoc`, and `/openapi.json`), and it exists as
     its own file because it is *location*-context where `nginx-common.conf` is
-    server-context. Four things to keep straight:
-    - It restates **six** security headers, because nginx replaces inherited `add_header`
-      directives rather than merging them - the same rule as `/sw.js`, but here the point
-      is to widen the CSP rather than to avoid losing it. Count them if you touch it: an
-      earlier draft of this very feature restated five and silently dropped HSTS from these
-      two responses in the tls mode, which is the mode that has it. Every relaxation was
-      measured in a browser against what ReDoc actually requests; `'unsafe-inline'` is
-      deliberately **absent** from `script-src`, since ReDoc's page carries no inline script
-      (Swagger UI's does, which is a second reason only one reader is exposed).
+    server-context. Seven things to keep straight:
+    - It has to restate every inherited security header, because nginx replaces an
+      inherited `add_header` set rather than merging it - the same rule as `/sw.js`, but
+      here the point is to widen the CSP rather than to avoid losing it. **A new security
+      header therefore goes in `nginx-headers.conf` and nowhere else**: that third snippet
+      is included at server level from `nginx-common.conf` and again at location level from
+      `nginx-docs.conf`, so one edit reaches both. It exists because the hand-written
+      second copy this feature shipped with restated five where six were inherited and
+      silently dropped HSTS in the tls mode - the one mode that has it. Only CSP and HSTS
+      stay out of the shared file, and both for stated reasons.
+    - The CSP relaxations were each measured in a browser against what ReDoc actually
+      requests; `'unsafe-inline'` is deliberately **absent** from `script-src`, since
+      ReDoc's page carries no inline script (Swagger UI's does, which is a second reason
+      only one reader is exposed).
     - **HSTS reaches it through `$hsts`, which is baked, and that is a deployment-safety
       rule rather than a style one.** The map lives in `nginx-maps.conf` ->
       `conf.d/00-isachore-maps.conf` because the tls mode bind-mounts an *operator's own*
@@ -1268,9 +1273,10 @@ pre-commit run --all-files                           # what the git hook runs
     prod nginx answers `/docs` from the backend (ReDoc), and it is a same-origin `text/html`
     navigation, so the navigate branch would store the API reference as the *offline app
     shell* and every later offline navigation would render the docs instead of isachore.
-    `NOT_THE_APP` is that guard. It lists the HTML one only - `/openapi.json` is proxied
-    beside it and stays off the list deliberately, since its content type already fails the
-    shell check. Bump `CACHE` when editing the worker, but
+    `NOT_THE_APP` is that guard. It lists the HTML one only: `/openapi.json` is proxied
+    beside it but ReDoc fetches it with `fetch()` (mode `cors`), which reaches no branch at
+    all, so listing it would pin a fall-through rather than a guard. Bump `CACHE` when
+    editing the worker, but
     note that does not prune anything on an ordinary deploy: the worker is
     byte-identical across them, so none activates and each deploy's hashed
     `/assets/` accumulate, which is left to the browser's storage eviction.
@@ -1769,7 +1775,7 @@ the negative paths (401/403/400/404/409), not just the happy one.
   document lies.** `securitySchemes` and per-operation `security` come only from
   `SecurityBase` dependencies, and `Depends` carries no `responses` at all, so before
   `app/api/responses.py` existed every gated route published itself as anonymous with no
-  refusals. Five things to keep straight:
+  refusals. Six things to keep straight:
   - The schemes are three `Security(...)` declarations in `api/deps.py`
     (`sessionCookie`, `bearerToken`, `parkedAdminCookie`), all `auto_error=False` and all
     **ignored parameters**. They are documentation: the token read stays in

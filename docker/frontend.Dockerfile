@@ -33,6 +33,9 @@ FROM nginx:stable-alpine AS prod
 COPY --from=nginxconf nginx-maps.conf /etc/nginx/conf.d/00-isachore-maps.conf
 COPY --from=nginxconf nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=nginxconf nginx-common.conf /etc/nginx/snippets/isachore-common.conf
+# The security headers that do not vary, included by BOTH of the two above so that adding
+# one reaches the ordinary responses and the API reference together. See nginx-headers.conf.
+COPY --from=nginxconf nginx-headers.conf /etc/nginx/snippets/isachore-headers.conf
 # The shared body of the two API-reference locations (/docs and /openapi.json), which
 # nginx-common.conf includes from each of them. A separate snippet rather than two copies,
 # and separate from isachore-common.conf because it is location-context (that one is

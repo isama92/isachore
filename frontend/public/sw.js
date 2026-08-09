@@ -26,9 +26,13 @@ const SHELL = '/index.html'
 // offline app shell, and the next offline visit to any app route would render the API
 // reference instead of isachore.
 //
-// Only the HTML one. `/openapi.json` is proxied beside it and is deliberately absent: it
-// serves application/json, which the content-type check in the navigate branch already
-// refuses to cache as the shell, so listing it would suppress a `respondWith` for no gain.
+// Only the HTML one. `/openapi.json` is proxied beside it and is deliberately absent, but
+// not for the reason it first looks: ReDoc fetches it with `fetch()`, whose request mode is
+// `cors`, so it never reaches the navigate branch at all and falls through with no handler
+// - the content-type check there is not what protects it, because it does not run. The
+// check only matters for the rarer case of typing that url into the address bar, which IS a
+// navigation and where it correctly refuses to cache JSON as the shell. Either way there is
+// nothing to guard, so listing it would pin a fall-through.
 const NOT_THE_APP = ['/docs']
 
 // Cache writes are fire-and-forget as far as the response is concerned, but they

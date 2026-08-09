@@ -90,7 +90,6 @@ _LOCATION_HEADER = {
     }
 }
 _REFUSALS = {
-    # Both endpoints reach the throttle before the 404 below, so it is documented first.
     **THROTTLED,
     status.HTTP_404_NOT_FOUND: {"model": ErrorDetail, "description": NO_OIDC_DETAIL},
 }

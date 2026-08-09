@@ -846,9 +846,17 @@ and their pydantic models, and serves it three ways while the dev stack is up:
 reader.** The prod nginx proxies two paths (`/docs`, which it rewrites to the
 backend's `/redoc`, and `/openapi.json`, which ReDoc fetches); Swagger UI is not
 published, and `/redoc` itself falls through to the SPA. Both proxied paths sit
-behind an nginx `auth_request` against `GET /api/v1/auth/verify`, so an anonymous
-visitor is redirected to `/login` rather than shown the API surface. Details, and
-the one deliberately-blocked image, are in `docker/nginx/nginx-docs.conf`.
+behind an nginx `auth_request` against `GET /api/v1/auth/verify`. Details, and the
+one deliberately-blocked image, are in `docker/nginx/nginx-docs.conf`.
+
+**The gate is "any active account", not "any operator"**, and that is deliberate:
+`/auth/verify` is `CurrentUser`-gated, so a household helper reads the same reference
+an administrator does, including the twenty `/admin/...` operations and their
+schemas. What it keeps out is the anonymous internet. Nothing there is secret - the
+same document is committed to a public repository - so the gate is about not
+publishing your deployment's API surface to passers-by, not about privilege. A
+refused visitor is redirected to `/login`; note they land on Home after signing in
+rather than back at `/docs`, since the redirect carries no return path.
 
 Two things follow that look like faults and are not. The page logs exactly one CSP
 error, for ReDoc's own watermark logo on `cdn.redoc.ly` - anything else in that
@@ -865,14 +873,17 @@ output is identical either way - which is the property the whole job rests on.
 
 ```bash
 (cd backend && uv run python -c 'import json; from app.main import app; print(json.dumps(app.openapi()))') > /tmp/openapi.json
-npx @redocly/cli@2 bundle /tmp/openapi.json -o docs/api/openapi.yaml
-npx @redocly/cli@2 build-docs docs/api/openapi.yaml -o docs/api/openapi.html   # offline reader
+npx @redocly/cli@2.46.0 bundle /tmp/openapi.json -o docs/api/openapi.yaml
+npx @redocly/cli@2.46.0 build-docs docs/api/openapi.yaml -o docs/api/openapi.html  # offline reader
 ```
 
-The major is pinned because a reformat from a future one would produce a
-4,000-line diff nobody can review. The YAML is committed; the HTML is a ~900 kB
-render of it and is gitignored, so build it when you want to read the reference
-without a server, or hand it to someone without a checkout.
+The version is pinned **exactly**, and `spec.yml` pins the same one: a reformat from
+any later release would produce a several-thousand-line diff nobody can review, and
+because the bot's own pull request runs no CI, one arriving that way would have
+nothing on it to explain itself. Bumping it is a deliberate edit in both places. The
+YAML is committed; the HTML is a ~900 kB render of it and is gitignored, so build it
+when you want to read the reference without a server, or hand it to someone without a
+checkout.
 
 Two things keep the committed copy in step, because it is generated output that
 nothing else would notice going stale:
@@ -968,7 +979,7 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
 - [ ] Live updates when a housemate completes a chore (websocket)
 - [ ] Declare the per-endpoint refusals in the OpenAPI spec. The cross-cutting ones are
       done (401 wherever a gate can refuse, 403 on `/admin` and the sixteen role-gated
-      routes, 429 on the four throttled ones), but the answers belonging to one endpoint
+      routes, 429 on the five throttled ones), but the answers belonging to one endpoint
       are still missing: a 404 for a missing chore, a 409 on a duplicate tag, login's own
       401 on bad credentials and its 403 under `OIDC_ONLY`. Each needs `responses=` on
       that route. Worth doing carefully rather than quickly - a `description` that
