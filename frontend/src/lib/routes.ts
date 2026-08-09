@@ -111,5 +111,11 @@ export function safeReturnPath(raw: string | null | undefined): string | null {
     return null
   }
   if (resolved.origin !== SAME_ORIGIN_BASE) return null
-  return `${resolved.pathname}${resolved.search}${resolved.hash}`
+  const path = `${resolved.pathname}${resolved.search}${resolved.hash}`
+  // Checked again after normalising, because percent-encoding LENGTHENS: `/a b` comes back
+  // as `/a%20b`, so an input under the cap can leave over it. The cap exists to match the
+  // 255-char column the backend stores this in when it rides on to SSO as `return_to`, and
+  // that is the value it stores - so measuring only the input would let a path through here
+  // that `_safe_return_to` then silently drops, landing the user on Home.
+  return path.length > MAX_RETURN_PATH ? null : path
 }

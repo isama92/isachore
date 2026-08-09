@@ -30,12 +30,18 @@ WORKDIR /app
 # python:3.14-slim carries no curl, and Python is right here, so urllib plus hashlib does it
 # with no apt layer. The digest check is `RUN`-time, so a mismatch fails the build.
 #
-# Two consequences of fetching rather than committing, both acceptable and neither obvious:
-# the image build now needs jsdelivr reachable, so a CDN outage or an egress-restricted
-# runner fails `ci.yml`'s images job and `publish.yml` with a urlopen traceback rather than
-# anything self-explanatory; and the bundle's LICENSE sibling has to come along, because the
-# first line of the bundle points at it and shipping the pointer without the file would
-# leave a dangling attribution for third-party MIT code.
+# Two consequences of fetching rather than committing, both acceptable and neither obvious.
+#
+# The image build now needs jsdelivr reachable. That is broader than CI: this is the `base`
+# stage, so `dev` and `builder` both inherit it and an ordinary `docker compose up --build`
+# fails offline, with a urlopen traceback rather than anything self-explanatory. Accepted
+# because the dev stack wants the bundle too - /redoc works there - and because the
+# alternative is a megabyte of minified JavaScript in git.
+#
+# And the bundle's LICENSE sibling has to come along, because the first line of the bundle
+# points at it and shipping the pointer without the file would leave a dangling attribution
+# for third-party MIT code. It is served too - see api/v1/docs.py - or the pointer would
+# still dangle for anyone reading the file over HTTP.
 #
 # Bumping ReDoc means changing BOTH args here (a version without its digest pins nothing)
 # and `REDOC_VERSION` in app/api/v1/docs.py, which versions the url for cache-busting.
@@ -59,13 +65,16 @@ if actual != expected:
 
 target = pathlib.Path("/opt/redoc")
 target.mkdir(parents=True, exist_ok=True)
-(target / "redoc.standalone.js").write_bytes(payload)
+# Versioned filename, so `app/api/v1/docs.py`'s own REDOC_VERSION cannot drift from this
+# ARG unnoticed: if the two disagree the route looks for a file that is not there and says
+# so, instead of serving new bytes at an old immutable url that browsers cache for a year.
+(target / f"redoc-{version}.standalone.js").write_bytes(payload)
 # Not digest-pinned, and deliberately not fatal: it is an attribution file the app never
 # serves, so a missing one should not stop a build that has already verified the code.
 try:
     (target / "redoc.standalone.js.LICENSE.txt").write_bytes(
         fetch("redoc.standalone.js.LICENSE.txt")
-    )
+    )  # the name the bundle's own first line points at, so it is served under that name too
 except Exception as exc:  # noqa: BLE001
     print(f"warning: could not vendor the redoc LICENSE file: {exc}")
 print(f"vendored redoc {version} ({len(payload)} bytes, sha256 {actual})")

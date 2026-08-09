@@ -46,7 +46,6 @@ ROLE_GATED_OPERATIONS = {
     ("GET", "/api/v1/tags/{tag_id}"),
     ("PATCH", "/api/v1/tags/{tag_id}"),
     ("DELETE", "/api/v1/tags/{tag_id}"),
-    ("DELETE", "/api/v1/completions/{completion_id}"),
     ("GET", "/api/v1/households/{household_id}/invitations"),
     ("POST", "/api/v1/households/{household_id}/invitations"),
     ("POST", "/api/v1/households/{household_id}/invitations/{invitation_id}/revoke"),
@@ -62,6 +61,15 @@ OWNER_GATED_OPERATIONS = {
     ("PATCH", "/api/v1/households/{household_id}"),
     ("DELETE", "/api/v1/households/{household_id}"),
     ("DELETE", "/api/v1/households/{household_id}/members/{user_id}"),
+}
+
+# The one 403 in the API that is neither gate: undoing a closure is allowed to the person who
+# recorded it OR to an organiser of that household, a disjunction `require_role` cannot state.
+# The handler hand-raises it for exactly that reason, and its comment calls the role-only
+# wording "a lie" - so publishing FORBIDDEN_ROLE here would have told every client author that
+# a helper can never undo anything, which is the opposite of the feature.
+SELF_OR_ROLE_OPERATIONS = {
+    ("DELETE", "/api/v1/completions/{completion_id}"),
 }
 
 # Setting a member's role refuses both ways in one handler - organiser for the change
@@ -226,7 +234,13 @@ def test_a_403_is_declared_only_where_a_gate_can_raise_one() -> None:
         for key in declaring("403")
         if not key[1].startswith("/api/v1/admin/") and key not in ENDPOINT_403
     }
-    assert gate_403s == ROLE_GATED_OPERATIONS | OWNER_GATED_OPERATIONS | BOTH_GATES_OPERATIONS
+    assert (
+        gate_403s
+        == ROLE_GATED_OPERATIONS
+        | OWNER_GATED_OPERATIONS
+        | BOTH_GATES_OPERATIONS
+        | SELF_OR_ROLE_OPERATIONS
+    )
 
 
 def test_the_owner_gate_and_the_role_gate_say_different_things() -> None:
@@ -254,6 +268,11 @@ def test_the_owner_gate_and_the_role_gate_say_different_things() -> None:
     for key in BOTH_GATES_OPERATIONS:
         description = OPERATIONS[key]["responses"]["403"]["description"].lower()
         assert "owner" in description and "role held" in description, key
+    for key in SELF_OR_ROLE_OPERATIONS:
+        # Must name the self half, or it has collapsed back into the role-only wording the
+        # handler warns against - which is a description a status-code check cannot catch.
+        description = OPERATIONS[key]["responses"]["403"]["description"].lower()
+        assert "your own" in description or "did not record" in description, key
 
 
 def test_the_throttled_operations_declare_a_429_carrying_retry_after() -> None:

@@ -112,6 +112,17 @@ describe('safeReturnPath', () => {
     expect(safeReturnPath(`/${'a'.repeat(254)}`)).toBe(`/${'a'.repeat(254)}`)
   })
 
+  it('measures the cap against the normalised path, which can be longer', () => {
+    // Percent-encoding lengthens: each space becomes %20. An input under the cap can leave
+    // over it, and the cap exists to match the 255-char column the backend stores this in
+    // when it rides on to SSO - so it is the *returned* value that has to fit.
+    // Interior spaces, not trailing ones - the parser strips trailing whitespace, so a
+    // fixture using it shortens instead of lengthening and proves nothing.
+    const spaced = `/${Array(85).fill('a').join(' ')}`
+    expect(spaced.length).toBeLessThanOrEqual(255)
+    expect(safeReturnPath(spaced)).toBeNull()
+  })
+
   it('rejects nothing at all', () => {
     expect(safeReturnPath(null)).toBeNull()
     expect(safeReturnPath(undefined)).toBeNull()

@@ -195,11 +195,13 @@ def reachable_codes(module: Path) -> dict[str, set[str]]:
             if re.search(rf"\b{re.escape(constant)}\b", body):
                 codes |= _status_codes(source)
         direct[name] = codes
-        callees[name] = {
-            other
-            for other in functions
-            if other != name and re.search(rf"\b{re.escape(other)}\s*\(", body)
-        }
+        # Every name this body calls, read in ONE pass, then intersected with the functions
+        # we know about. The obvious spelling - a regex search per candidate name - is
+        # quadratic in the symbol table (~260 functions, so ~66k searches per module, and
+        # this runs per router), which took the walk from a second to half a minute at import
+        # time and dominated the whole backend suite.
+        called = set(re.findall(r"\b(\w+)\s*\(", body))
+        callees[name] = (called & functions.keys()) - {name}
 
     reachable = {name: set(codes) for name, codes in direct.items()}
     changed = True
@@ -287,11 +289,13 @@ def test_nothing_hand_raises_a_422() -> None:
     absence. If this fails, move the raise to the code that fits (400 for a bad reference,
     409 for a state conflict) rather than reaching for a per-route `responses[422]`.
     """
+    # Reuses the walker's own reader rather than grepping for `HTTP_422`, which would miss
+    # `HTTPException(422, ...)` and `status_code=422` - the two spellings `_status_codes` was
+    # taught precisely because they are what somebody writes by hand.
     offenders = [
-        f"{path.relative_to(BACKEND)}:{number}"
+        str(path.relative_to(BACKEND))
         for path in sorted((BACKEND / "app").rglob("*.py"))
-        for number, line in enumerate(path.read_text().splitlines(), start=1)
-        if "HTTP_422" in line and path.name != "main.py"
+        if path.name != "main.py" and AUTO_VALIDATION in _status_codes(path.read_text())
     ]
     assert not offenders, (
         "a hand-raised 422 cannot be documented - the code belongs to pydantic's array-shaped "

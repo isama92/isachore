@@ -52,7 +52,20 @@ def refusals(*entries: tuple[int, str]) -> Responses:
     wrong for every refusal in this API.
 
     Compose with the gate blocks where a route has both: `FORBIDDEN_ROLE | refusals(...)`.
+
+    Passing the same status twice raises rather than silently keeping the last one. That is
+    not a hypothetical slip: the paragraph above tells you to cover every branch, and writing
+    one entry per branch is the obvious way to do it - which a plain dict comprehension would
+    answer by publishing only the final sentence, with no test able to notice. Put the
+    branches in ONE description instead.
     """
+    seen = [code for code, _ in entries]
+    duplicated = {code for code in seen if seen.count(code) > 1}
+    if duplicated:
+        raise ValueError(
+            f"refusals() got {sorted(duplicated)} more than once. One entry per status code: "
+            "put every branch that produces it into a single description."
+        )
     return {
         status_code: {"model": ErrorDetail, "description": text} for status_code, text in entries
     }

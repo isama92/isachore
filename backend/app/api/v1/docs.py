@@ -29,7 +29,7 @@ already-proxied prefix means it needs no new nginx location either.
 
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, status
 from fastapi.openapi.docs import get_redoc_html
 from fastapi.responses import FileResponse, HTMLResponse
 
@@ -38,22 +38,53 @@ page_router = APIRouter()
 # Mounted under /api/v1/docs: reachable through the existing /api/ proxy, ungated.
 asset_router = APIRouter()
 
-# Where docker/backend.Dockerfile puts the vendored bundle. Outside /app so the dev stage's
-# ./backend bind mount cannot hide it.
-REDOC_BUNDLE = Path("/opt/redoc/redoc.standalone.js")
-
-# The version is IN the url, and that is what makes the immutable cache below safe: the
-# response carries a year-long `immutable` Cache-Control, so with a fixed path a returning
-# reader would keep the old bundle for a year after the image bumped ReDoc.
+# The version is IN the url, which is what makes the immutable cache below safe: the response
+# carries a year-long `immutable` Cache-Control, so with a fixed path a returning reader would
+# keep the old bundle for a year after the image bumped ReDoc.
 #
-# It is a SECOND copy of the version - `REDOC_VERSION` in docker/backend.Dockerfile is the
-# one that decides which bytes are fetched, and this one only labels the url. Bumping ReDoc
-# means editing both. Getting it wrong is mild and silent rather than loud: the page still
-# works, because the file on disk has a fixed name and this only renames the route, but the
-# url stops changing and the cache-busting quietly stops happening.
+# It is a second copy of `ARG REDOC_VERSION` in docker/backend.Dockerfile, which is the one
+# that decides which bytes are fetched - so bumping ReDoc means editing both. What keeps that
+# honest is that the Dockerfile writes the file under its *versioned* name and this builds the
+# same name: disagree, and the route looks for a file that is not there and says so on the
+# first request, rather than serving new bytes at an old url that browsers cache for a year.
 REDOC_VERSION = "2.5.3"
 BUNDLE_FILENAME = f"redoc-{REDOC_VERSION}.standalone.js"
 BUNDLE_URL = f"/api/v1/docs/{BUNDLE_FILENAME}"
+
+# Outside /app so the dev stage's ./backend bind mount cannot hide it.
+VENDOR_DIR = Path("/opt/redoc")
+REDOC_BUNDLE = VENDOR_DIR / BUNDLE_FILENAME
+# The name the bundle's own first line points at (`/*! For license information please see
+# redoc.standalone.js.LICENSE.txt */`). Served under exactly that name, because the pointer is
+# resolved relative to the bundle's url - vendoring the file into the image without serving it
+# would leave the attribution dangling for anybody who actually followed it.
+LICENSE_FILENAME = "redoc.standalone.js.LICENSE.txt"
+
+
+def _vendored(path: Path, media_type: str) -> FileResponse:
+    """Serve a file the image was supposed to vendor, or say plainly that it did not.
+
+    `FileResponse` stats the path inside `__call__`, so a missing file becomes a RuntimeError
+    and an opaque 500 with a traceback - and the page it breaks renders blank, with nothing on
+    screen saying why. That is not an anomaly but a documented case: the bundle is fetched at
+    image-build time, so it is absent from a bare checkout and from CI's host-side runner, and
+    it would also be absent if `REDOC_VERSION` here drifted from the Dockerfile's ARG. A named
+    503 turns an afternoon into a sentence.
+    """
+    if not path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                f"{path.name} was not vendored into this image. It is fetched by "
+                "docker/backend.Dockerfile at build time; check that REDOC_VERSION there "
+                "matches the one in app/api/v1/docs.py."
+            ),
+        )
+    return FileResponse(
+        path,
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
 
 
 @asset_router.get(f"/{BUNDLE_FILENAME}", include_in_schema=False)
@@ -69,11 +100,18 @@ async def redoc_bundle() -> FileResponse:
     path: bump `REDOC_VERSION` and the URL changes with the bytes. An unversioned path with
     this header would leave returning readers on the old bundle long after an upgrade.
     """
-    return FileResponse(
-        REDOC_BUNDLE,
-        media_type="text/javascript",
-        headers={"Cache-Control": "public, max-age=31536000, immutable"},
-    )
+    return _vendored(REDOC_BUNDLE, "text/javascript")
+
+
+@asset_router.get(f"/{LICENSE_FILENAME}", include_in_schema=False)
+async def redoc_license() -> FileResponse:
+    """The bundle's licence text, at the name the bundle's first line points at.
+
+    Not decoration: that pointer is resolved against the bundle's own url, so serving the
+    script without this leaves a dangling attribution for third-party MIT code to anybody who
+    follows it. Unversioned, because the pointer inside the file is.
+    """
+    return _vendored(VENDOR_DIR / LICENSE_FILENAME, "text/plain")
 
 
 @page_router.get("/redoc", include_in_schema=False)

@@ -235,7 +235,10 @@ pre-commit run --all-files                           # what the git hook runs
       still validates it (`safeReturnPath`), because the parameter is client-controlled
       whatever nginx sends, and it honours it with `window.location.assign` rather than
       react-router: `/docs` is not an SPA route and `App.tsx` has no catch-all, so a
-      client-side navigation there renders a blank page.
+      client-side navigation there renders a blank page. It is `location.replace`, not
+      `assign`: nginx's 302 already replaced the /docs entry, so pushing would leave Back
+      on the login page with a live session, bouncing forward and stranding what came
+      before.
     - `https://cdn.redoc.ly/redoc/logo-mini.svg` stays blocked on purpose, so /docs logs
       exactly one CSP error on every load. Anything else in that console is a real finding.
     - **The page lives at the app root (`/redoc`), NOT under `/api/v1`, and that is the
@@ -1237,12 +1240,19 @@ pre-commit run --all-files                           # what the git hook runs
   (`ChoreForm`, `admin/ServerSettings`, `users/UserForm` - the last is the one where the
   checkbox is the final control before submit). Extract a `lib/` helper if a second one
   adopts it; one caller does not earn the indirection.
-- **`safeReturnPath` (`lib/routes.ts`) is a hand-mirror of `_safe_return_to`
-  (`api/v1/oidc.py`)**, and both are open-redirect guards on a post-sign-in destination -
-  the SPA's `?next=`, the backend's SSO `return_to`. Same rule (single leading slash, no
-  `//`, no backslash, length-capped) and the same discard-rather-than-correct stance; keep
-  them in step by hand, like `HOUSEHOLD_ROLES` and `_ROLE_LADDER`. The frontend needs its own
-  because the SPA is static: nothing server-side sees `?next=` before the browser acts on it.
+- **`safeReturnPath` (`lib/routes.ts`) and `_safe_return_to` (`api/v1/oidc.py`) guard the
+  same idea and are NOT the same function**, which is the part to keep straight. Both refuse
+  a post-sign-in destination that is not our own origin - the SPA's `?next=`, the backend's
+  SSO `return_to` - and both discard rather than correct. But the frontend one asks the
+  WHATWG URL parser and returns the NORMALISED path, because a string rule is holed against
+  its sink: the parser strips ASCII tab, LF and CR *before* parsing, so `/%09/evil.example`
+  satisfies "one leading slash, no `//`, no backslash" and `location.replace` then lands on
+  `https://evil.example`. That shipped once. The backend keeps the string rule and is safe
+  only because Starlette percent-encodes the `Location` header, which is safe by accident
+  rather than by design - so do not treat either as proof of the other, and do not
+  "simplify" the frontend one back into a character check. The frontend needs its own guard
+  at all because the SPA is static: nothing server-side sees `?next=` before the browser
+  acts on it.
 - **A 422 does not echo the rejected value under `input`.** Scoped deliberately, because
   the absolute version of that sentence is false: a validator writing `f"{value!r} is not a
   known timezone"` puts the value in `msg`, and `schemas/household.py` does exactly that. The
@@ -1250,7 +1260,8 @@ pre-commit run --all-files                           # what the git hook runs
   the validator author's job. `strip_the_rejected_value` in `main.py` handles
   `RequestValidationError` and drops pydantic's `input` key, which carries the value that
   failed - so a password under `min_length=8` used to come back in the response body in
-  plaintext on three routes. Nothing in the app rendered it, which is why it survived: the
+  plaintext on four routes (both admin user endpoints, the confirmation flow and the
+  profile password change). Nothing in the app rendered it, which is why it survived: the
   exposure is the wire and anything recording bodies. Three things must survive with it:
   the **array** shape (`lib/validationError.ts` parses it, and non-browser clients need the
   machine-readable form), **`ctx`** (the frontend interpolates `min_length` and friends into
