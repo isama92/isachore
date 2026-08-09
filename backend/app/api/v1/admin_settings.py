@@ -3,7 +3,7 @@ import logging
 from fastapi import APIRouter, HTTPException, status
 
 from app.api.deps import AdminUser, RedisDep, SessionDep
-from app.api.responses import THROTTLED
+from app.api.responses import THROTTLED, refusals
 from app.api.v1.auth import DEFAULT_PROVIDER_NAME
 from app.core.app_settings import get_app_settings
 from app.core.config import settings
@@ -45,7 +45,17 @@ async def read_settings(_: AdminUser, session: SessionDep) -> ServerSettingsRead
     return _read(await get_app_settings(session))
 
 
-@router.patch("", response_model=ServerSettingsRead)
+@router.patch(
+    "",
+    response_model=ServerSettingsRead,
+    responses=refusals(
+        (
+            status.HTTP_400_BAD_REQUEST,
+            "Email confirmation cannot be switched on while no SMTP server is "
+            "configured, since nobody could then receive the link.",
+        ),
+    ),
+)
 async def update_settings(
     payload: ServerSettingsUpdate, _: AdminUser, session: SessionDep
 ) -> ServerSettingsRead:
@@ -61,7 +71,21 @@ async def update_settings(
 
 # Its own cooldown, so its own 429 - the /admin block on the include_router call carries
 # only the 401 and 403 every admin route shares.
-@router.post("/test-email", status_code=status.HTTP_204_NO_CONTENT, responses=THROTTLED)
+@router.post(
+    "/test-email",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=THROTTLED
+    | refusals(
+        (
+            status.HTTP_400_BAD_REQUEST,
+            "No SMTP server is configured, so there is nothing to test.",
+        ),
+        (
+            status.HTTP_502_BAD_GATEWAY,
+            "The SMTP server refused the message or could not be reached.",
+        ),
+    ),
+)
 async def send_test_email(admin: AdminUser, redis: RedisDep) -> None:
     if not smtp_configured():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=NO_SMTP_DETAIL)

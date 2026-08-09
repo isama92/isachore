@@ -858,12 +858,20 @@ publishing your deployment's API surface to passers-by, not about privilege. A
 refused visitor is redirected to `/login`; note they land on Home after signing in
 rather than back at `/docs`, since the redirect carries no return path.
 
-Two things follow that look like faults and are not. The page logs exactly one CSP
-error, for ReDoc's own watermark logo on `cdn.redoc.ly` - anything else in that
-console is a real finding. And those two paths are the only place in the whole
-deployment where the CSP permits third-party script (jsdelivr serves the ReDoc
-bundle), which is the price of proxying to FastAPI's own page instead of shipping a
-rendered one.
+**The page is entirely first-party**: the ReDoc bundle is vendored into the backend
+image at build time, pinned by sha256, and served from this origin, and Google Fonts
+is switched off. So a reader's browser talks to nobody but your deployment. That
+closes two things at once - an unpinned script from a floating `redoc@2` CDN range
+executing same-origin with the SPA, and every signed-in reader's IP going to Google
+for typography, which for an app that otherwise loads nothing external is a transfer
+worth not making. The version and its digest are the two `ARG`s at the top of
+`docker/backend.Dockerfile`; bumping ReDoc means changing both, and a wrong digest
+fails the image build rather than shipping.
+
+Because of that, the CSP on those paths is the app's own plus exactly one directive,
+`worker-src 'self' blob:`, which ReDoc needs to build its search index. One thing is
+still deliberately blocked, and it logs a single console error on every load: ReDoc's
+own watermark on `cdn.redoc.ly`. Anything else in that console is a real finding.
 
 Regenerate the committed document whenever you add or change an endpoint, from the
 repository root. Neither command needs the dev stack: every `Settings` field has a
@@ -913,9 +921,27 @@ The spec is also only as honest as the routes say it is, in two ways:
   pins all of it, including three closed sets that will need an edit when you add a
   route - that edit is the point.
 
-Still undeclared, and its own todo below: the per-endpoint refusals (a 404 for a
-missing chore, a 409 on a duplicate tag, login's own 401). Only the cross-cutting
-ones are documented today.
+- **Per-endpoint refusals.** The 404 for a missing chore, the 409 on a duplicate tag,
+  login's own 401 - all declared now, on the route that raises them, with
+  `refusals()` from `app/api/responses.py`.
+  `backend/tests/test_openapi_refusals.py` keeps them honest by *reading the code*
+  rather than by holding a list: it walks each handler's call graph, collects the
+  status codes reachable from it, and fails both when one is undeclared and when one
+  is declared that nothing can raise. Where it is wrong - a helper branch a given
+  caller cannot reach - there is an `UNREACHABLE` entry with its reason. Never
+  silence it by declaring the refusal instead; that swaps a red test for a document
+  that lies.
+
+  What no test can check is whether a `description` is *true*. Most of these codes
+  have several branches (`PATCH /chores/{id}` answers 404 for a missing chore, or
+  household, or tag, or assignee), and naming one of them reads as complete while
+  hiding the rest. If you add a refusal, describe every branch that produces it.
+
+Pydantic's 422 is the one refusal the app reshapes: `main.py` strips the `input` key
+before answering, because it echoes the rejected value and a password below the
+minimum length came back in plaintext. The array shape and `ctx` stay exactly as they
+were - the frontend parser needs both - and the published `ValidationError` schema
+drops `input` to match.
 
 ### Continuous integration
 
@@ -977,34 +1003,16 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
 ### Todo
 
 - [ ] Live updates when a housemate completes a chore (websocket)
-- [ ] Declare the per-endpoint refusals in the OpenAPI spec. The cross-cutting ones are
-      done (401 wherever a gate can refuse, 403 on `/admin` and the sixteen role-gated
-      routes, 429 on the five throttled ones), but the answers belonging to one endpoint
-      are still missing: a 404 for a missing chore, a 409 on a duplicate tag, login's own
-      401 on bad credentials and its 403 under `OIDC_ONLY`. Each needs `responses=` on
-      that route. Worth doing carefully rather than quickly - a `description` that
-      overstates what an endpoint can raise is worse than no entry, and nothing in CI can
-      catch that.
-- [ ] Strip pydantic's `input` echo from 422 bodies. Its stock handler returns the
-      rejected value, so a password below `min_length=8` comes back in the response body
-      in plaintext (`POST /confirm/{token}`, `PATCH /admin/users/{id}`, the profile
-      password change). Nothing leaks in-app - `formatValidationDetail` never reads
-      `input` - so this is a wire and log-capture exposure, and one worth an AVG / ISO
-      27001 look. A `RequestValidationError` handler dropping that one key would keep the
-      array contract the frontend parser depends on.
-- [ ] Serve `/docs` from our own route rather than FastAPI's built-in `/redoc`, and close
-      the two things that proxying somebody else's page cannot. Both come from
-      `get_redoc_html`'s defaults, and both need the same small change - a local route
-      passing `redoc_js_url=` and `with_google_fonts=False`, with the bundle vendored (the
-      backend image is python-slim with no npm, so it has to be fetched at build time or
-      committed).
-      - **Supply chain.** The script URL is `redoc@2`, a floating major range resolved at
-        request time, and FastAPI emits no `integrity` attribute, so there is nothing
-        pinning what executes. It runs same-origin with the SPA, where it could call the
-        API with the reader's cookie and set `X-CSRF-Token` itself. Pinning an exact
-        version is the cheap interim step even before vendoring.
-      - **AVG / GDPR.** The page pulls Montserrat and Roboto from Google Fonts, so every
-        signed-in reader's IP goes to Google for typography alone. The app loads nothing
-        else third-party, and Dutch and German case law has treated exactly this embed as
-        a transfer needing a basis. Narrow: an authenticated internal page, no personal
-        data in the request beyond the IP. Worth closing anyway.
+- [ ] Reconcile the one hand-raised 422. `set_household_admin` refuses a transfer to a
+      non-member with `HTTP_422_UNPROCESSABLE_CONTENT` and a plain-string `detail`, so
+      `PATCH /households/{id}` and its admin twin answer 422 in two different shapes: that
+      one, and pydantic's `HTTPValidationError` array. A client parsing the declared 422
+      breaks on the hand-raised one. `_resolve_assignees` answers **400** for the identical
+      shape of error ("must be a member of your household"), so 400 is probably the right
+      code here too - but it is an API change, and the refusal guard deliberately excludes
+      422 from both sides, so nothing will fail until somebody decides.
+- [ ] Give the sign-in redirect a return path. A colleague following a link to `/docs`
+      without a session is sent to `/login` and lands on Home after signing in, with no
+      way back but retyping the URL. `@docs_sign_in` in `docker/nginx/nginx-common.conf`
+      has `$request_uri` to hand, but `?next=` is client-controlled, so the SPA side needs
+      a same-origin allow-list before it can honour one.

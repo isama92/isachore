@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
 from app.api.deps import CurrentUser, SessionDep
-from app.api.responses import UNAUTHORISED
+from app.api.responses import UNAUTHORISED, refusals
 from app.core.households import add_member, is_active_member
 from app.models import HouseholdInvitation, HouseholdInvitationStatus, HouseholdRole
 from app.schemas import HouseholdInvitationInfo, HouseholdMemberRead
@@ -41,7 +41,18 @@ async def _resolve_token(session: SessionDep, token: str) -> HouseholdInvitation
     return invitation
 
 
-@router.get("/{token}", response_model=HouseholdInvitationInfo)
+@router.get(
+    "/{token}",
+    response_model=HouseholdInvitationInfo,
+    responses=refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "The link is unknown, already used, revoked, expired, or belongs to a "
+            "deleted household. One answer for all of them, so a guessed token "
+            "discloses nothing.",
+        ),
+    ),
+)
 async def invitation_info(token: str, session: SessionDep) -> HouseholdInvitationInfo:
     """Public: what the accept page shows before the recipient joins."""
     invitation = await _resolve_token(session, token)
@@ -56,7 +67,23 @@ async def invitation_info(token: str, session: SessionDep) -> HouseholdInvitatio
 # This router is mixed - reading an invitation is public, so whoever follows the link can be
 # told what they are being invited to before signing in - so the 401 is declared here rather
 # than on the include_router call.
-@router.post("/{token}/accept", status_code=status.HTTP_204_NO_CONTENT, responses=UNAUTHORISED)
+@router.post(
+    "/{token}/accept",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=UNAUTHORISED
+    | refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "The link is unknown, already used, revoked, expired, or belongs to a "
+            "deleted household. One answer for all of them, so a guessed token "
+            "discloses nothing.",
+        ),
+        (
+            status.HTTP_409_CONFLICT,
+            "You already belong to that household.",
+        ),
+    ),
+)
 async def accept_invitation(token: str, user: CurrentUser, session: SessionDep) -> None:
     """The logged-in recipient joins the household; the invite is single-use."""
     invitation = await _resolve_token(session, token)

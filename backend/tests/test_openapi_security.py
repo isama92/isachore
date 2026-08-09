@@ -83,6 +83,20 @@ THROTTLED_OPERATIONS = {
     ("POST", "/api/v1/admin/settings/test-email"),
 }
 
+# The only two anonymous operations that can answer 401 by themselves - bad credentials, and
+# a missing or expired two-factor challenge. Everything else answering 401 is a gate refusing
+# a session, which is what the assertion below pairs with `security`.
+PUBLIC_OPERATIONS_ANSWERING_401 = {
+    ("POST", "/api/v1/auth/login"),
+    ("POST", "/api/v1/auth/verify-2fa"),
+}
+
+# A 403 that is not a gate refusing anybody: `POST /auth/login` answers it when the server is
+# configured for single sign-on only, which is a property of the deployment rather than of
+# the caller. It is owned by test_openapi_refusals.py along with the other per-endpoint
+# refusals; naming it here keeps the gate sets below closed.
+ENDPOINT_403 = {("POST", "/api/v1/auth/login")}
+
 ROUTERS_DIR = Path(__file__).resolve().parents[1] / "app" / "api" / "v1"
 
 
@@ -160,22 +174,23 @@ def test_the_security_schemes_are_exactly_the_three_transports() -> None:
 
 
 def test_a_gated_operation_and_a_401_are_the_same_thing() -> None:
-    """Both directions, in one assertion.
+    """Both directions, and the second one needs an allow-list now.
 
     `security` comes from the dependency tree and the 401 comes from a hand-written
     `responses=`, so the two drift apart in opposite ways: a new gated route added to a
     router that carries no block declares no 401, and a block placed on a public router
-    declares a 401 nothing can raise. Comparing the two sets catches either.
+    declares a 401 nothing can raise.
 
-    **This equality is stronger than the API is, and will have to be relaxed once.** Two
-    PUBLIC operations can genuinely answer 401 - `POST /auth/login` on bad credentials, and
-    `POST /auth/verify-2fa` with no challenge cookie - and documenting those is the first
-    item on README's remaining todo list. When that lands, this becomes `gated <= 401` plus
-    an explicit allow-list of public-but-401 operations. That is an expected edit, not a
-    guard being deleted; it is written down here because a green equality assertion
-    otherwise reads as an invariant and the todo reads as forbidden.
+    This was an equality until the per-endpoint refusals landed, and the docstring predicted
+    the relaxation: two PUBLIC operations genuinely answer 401, `POST /auth/login` on bad
+    credentials and `POST /auth/verify-2fa` with no challenge cookie, so documenting them
+    made the reverse direction false. It is an allow-list rather than a dropped assertion,
+    which is the difference between recording two known exceptions and losing the guard: a
+    401 appearing on any other public operation still fails here.
     """
-    assert {key for key, op in OPERATIONS.items() if op.get("security")} == declaring("401")
+    gated = {key for key, op in OPERATIONS.items() if op.get("security")}
+    assert gated <= declaring("401"), "a gated operation that does not declare its 401"
+    assert declaring("401") - gated == PUBLIC_OPERATIONS_ANSWERING_401
 
 
 def test_the_public_operations_are_exactly_these() -> None:
@@ -206,8 +221,12 @@ def test_a_403_is_declared_only_where_a_gate_can_raise_one() -> None:
     property of the transport rather than of any route, and documenting it per operation
     would bury the two gates this test is about.
     """
-    non_admin = {key for key in declaring("403") if not key[1].startswith("/api/v1/admin/")}
-    assert non_admin == ROLE_GATED_OPERATIONS | OWNER_GATED_OPERATIONS | BOTH_GATES_OPERATIONS
+    gate_403s = {
+        key
+        for key in declaring("403")
+        if not key[1].startswith("/api/v1/admin/") and key not in ENDPOINT_403
+    }
+    assert gate_403s == ROLE_GATED_OPERATIONS | OWNER_GATED_OPERATIONS | BOTH_GATES_OPERATIONS
 
 
 def test_the_owner_gate_and_the_role_gate_say_different_things() -> None:

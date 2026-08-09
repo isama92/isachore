@@ -33,6 +33,7 @@ from app.api.v1 import (
     chores,
     completions,
     confirmations,
+    docs,
     health,
     home,
     households,
@@ -52,6 +53,10 @@ api_router = APIRouter()
 
 # Public: no session is needed to reach any route in these.
 api_router.include_router(health.router, tags=["health"])
+# The vendored ReDoc bundle, ungated on purpose: public JavaScript, and the *page* that loads
+# it is what nginx gates. Out of the schema, so it adds no operation. Its sibling route (the
+# page) is mounted at the app root instead - see api/v1/docs.py for why that matters.
+api_router.include_router(docs.asset_router, prefix="/docs")
 api_router.include_router(oidc.router, prefix="/auth/oidc", tags=["auth"])
 api_router.include_router(confirmations.router, prefix="/confirm", tags=["confirm"])
 

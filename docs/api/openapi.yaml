@@ -185,6 +185,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConfirmTokenInfo'
+        '404':
+          description: The link is unknown, already used, or expired. One answer for all three, so a guessed token cannot be told apart from an expired one.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -219,6 +225,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserRead'
+        '404':
+          description: The link is unknown, already used, or expired. One answer for all three, so a guessed token cannot be told apart from an expired one.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -244,6 +256,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: The email and password do not match an active account. One message for every cause, so the response cannot be used to discover which addresses exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: This server is configured for single sign-on only, so password login is switched off.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -257,6 +281,12 @@ paths:
               description: Seconds until the throttle window clears.
               schema:
                 type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '503':
+          description: The account has two-factor authentication enabled but the server cannot decrypt its secret, so no session can be issued. An operator has to fix APP_KEY.
           content:
             application/json:
               schema:
@@ -283,6 +313,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MeRead'
+        '401':
+          description: No two-factor challenge is in progress, the parked challenge has expired, the code is wrong, or the account stopped being usable between the two steps - deactivated, or its secret no longer decryptable, which the first step answers with a 503.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -422,6 +458,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HouseholdInvitationInfo'
+        '404':
+          description: The link is unknown, already used, revoked, expired, or belongs to a deleted household. One answer for all of them, so a guessed token discloses nothing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -450,6 +492,18 @@ paths:
           description: Successful Response
         '401':
           description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: The link is unknown, already used, revoked, expired, or belongs to a deleted household. One answer for all of them, so a guessed token discloses nothing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '409':
+          description: You already belong to that household.
           content:
             application/json:
               schema:
@@ -484,6 +538,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserRead'
+        '400':
+          description: Changing the password needs the current one, and the one given does not match.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '401':
           description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
           content:
@@ -521,8 +581,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserRead'
+        '400':
+          description: The upload is not an image the server can decode.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '401':
           description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '413':
+          description: The image is above the upload cap.
           content:
             application/json:
               schema:
@@ -580,6 +652,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorDetail'
+        '409':
+          description: Two-factor authentication is already enabled on this account.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '503':
+          description: The server cannot encrypt or decrypt two-factor secrets, so enrolment is unavailable. An operator has to fix APP_KEY.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
       security:
         - sessionCookie: []
         - bearerToken: []
@@ -605,8 +689,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RecoveryCodesRead'
+        '400':
+          description: No enrolment is in progress, or the code is wrong.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '401':
           description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '409':
+          description: Two-factor authentication is already enabled on this account.
           content:
             application/json:
               schema:
@@ -617,6 +713,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '503':
+          description: The server cannot encrypt or decrypt two-factor secrets, so enrolment is unavailable. An operator has to fix APP_KEY.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
       security:
         - sessionCookie: []
         - bearerToken: []
@@ -642,6 +744,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RecoveryCodesRead'
+        '400':
+          description: Two-factor authentication is not enabled on this account, or the code is wrong.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '401':
           description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
           content:
@@ -654,6 +762,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '503':
+          description: The server cannot decrypt this account's two-factor secret, so the code cannot be checked. An operator has to fix APP_KEY.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
       security:
         - sessionCookie: []
         - bearerToken: []
@@ -679,6 +793,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserRead'
+        '400':
+          description: Two-factor authentication is not enabled on this account, or the code is wrong.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '401':
           description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
           content:
@@ -691,6 +811,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '503':
+          description: The server cannot decrypt this account's two-factor secret, so the code cannot be checked. An operator has to fix APP_KEY.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
       security:
         - sessionCookie: []
         - bearerToken: []
@@ -1141,6 +1267,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No household with this id that you are a member of.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1187,6 +1319,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No household with this id that you are a member of.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '409':
+          description: A chore was completed while the timezone was being changed, so a rescheduled occurrence collided with the closed one. Retrying is safe.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1219,6 +1363,12 @@ paths:
                 $ref: '#/components/schemas/ErrorDetail'
         '403':
           description: Only the household's owner may do this. Being an organiser is not enough, and no role change grants it - ownership has to be transferred.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No household with this id that you are a member of.
           content:
             application/json:
               schema:
@@ -1304,6 +1454,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No household with this id that you are a member of.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1370,6 +1526,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No household with this id that you are a member of, or no active member of it with this user id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '409':
+          description: That member owns the household, and an owner is always an organiser. Transfer ownership instead.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1412,6 +1580,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No household with this id that you are a member of, or nobody with this user id belongs to it. Unlike setting a role, this reaches a member whose account is disabled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '409':
+          description: That member owns the household. Transfer ownership before removing them.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1439,6 +1619,18 @@ paths:
           description: Successful Response
         '401':
           description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No household with this id that you are a member of.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '409':
+          description: You own this household. Transfer ownership before leaving.
           content:
             application/json:
               schema:
@@ -1484,6 +1676,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No household with this id that you are a member of.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '409':
+          description: The household is at its cap of pending invitations. The cap is shared by every organiser, so revoke one first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1523,6 +1727,12 @@ paths:
                 $ref: '#/components/schemas/ErrorDetail'
         '403':
           description: A member of the household, but the role held there does not reach what this route requires.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No household with this id that you are a member of.
           content:
             application/json:
               schema:
@@ -1574,6 +1784,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No household with this id that you are a member of, or no invitation with this id belonging to it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '409':
+          description: Only a pending invitation can be revoked; this one is already accepted, revoked or expired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1613,6 +1835,18 @@ paths:
                 $ref: '#/components/schemas/ErrorDetail'
         '403':
           description: A member of the household, but the role held there does not reach what this route requires.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No household with this id that you are a member of, or no invitation with this id belonging to it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '409':
+          description: This invitation is still pending. Revoke it before deleting it.
           content:
             application/json:
               schema:
@@ -1693,6 +1927,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: 'Tags are an organiser surface, and both halves of this are about that role rather than membership: no household with the id given that you ORGANISE - a deputy or helper of it reaches this too - or, when no id is given, you organise none at all, so there is nothing to fall back to.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1728,6 +1968,18 @@ paths:
                 $ref: '#/components/schemas/ErrorDetail'
         '403':
           description: A member of the household, but the role held there does not reach what this route requires.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No household with this id that you are a member of.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '409':
+          description: That household already has a tag with this name.
           content:
             application/json:
               schema:
@@ -1769,6 +2021,12 @@ paths:
                 $ref: '#/components/schemas/ErrorDetail'
         '403':
           description: A member of the household, but the role held there does not reach what this route requires.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No tag with this id in any household you belong to.
           content:
             application/json:
               schema:
@@ -1819,6 +2077,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No tag with this id in any household you belong to.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '409':
+          description: That household already has a tag with this name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1855,6 +2125,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No tag with this id in any household you belong to.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1883,6 +2159,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ChoreRead'
+        '400':
+          description: 'An assignee, a tag or the named current assignee does not belong where it must: assignees and tags have to be from the chore''s own household, and the current assignee has to be one of the chore''s assignees.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '401':
           description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
           content:
@@ -1891,6 +2173,12 @@ paths:
                 $ref: '#/components/schemas/ErrorDetail'
         '403':
           description: A member of the household, but the role held there does not reach what this route requires.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No household with this id that you are a member of.
           content:
             application/json:
               schema:
@@ -2016,6 +2304,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No chore with this id in any household you belong to.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -2050,6 +2344,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ChoreRead'
+        '400':
+          description: 'An assignee, a tag or the named current assignee does not belong where it must: assignees and tags have to be from the chore''s own household, and the current assignee has to be one of the chore''s assignees.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '401':
           description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
           content:
@@ -2058,6 +2358,18 @@ paths:
                 $ref: '#/components/schemas/ErrorDetail'
         '403':
           description: A member of the household, but the role held there does not reach what this route requires.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No chore with this id in any household you belong to.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '409':
+          description: Somebody completed or skipped this chore while the edit was in flight, so the rescheduled occurrence collided with the closed one. Retrying is safe.
           content:
             application/json:
               schema:
@@ -2094,6 +2406,12 @@ paths:
                 $ref: '#/components/schemas/ErrorDetail'
         '403':
           description: A member of the household, but the role held there does not reach what this route requires.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No chore with this id in any household you belong to.
           content:
             application/json:
               schema:
@@ -2151,8 +2469,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CompletionRead'
+        '400':
+          description: The completion credits somebody who is neither you nor one of the chore's assignees, or `backdate` was asked for on an unscheduled chore, which is never due and so has no due day to backdate to.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '401':
           description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No chore with this id in any household you belong to.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '409':
+          description: The chore has no open occurrence at all, its open one was closed by somebody else first, or the successor landed on a slot that was already taken. Reload before retrying.
           content:
             application/json:
               schema:
@@ -2206,8 +2542,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CompletionRead'
+        '400':
+          description: The chore is unscheduled, so it is never due and there is nothing to skip.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '401':
           description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No chore with this id in any household you belong to.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '409':
+          description: The chore has no open occurrence, or its open one was closed by somebody else first. Reload before retrying.
           content:
             application/json:
               schema:
@@ -2403,6 +2757,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No closure with this id in any household you belong to.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -2541,6 +2901,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserRead'
+        '400':
+          description: A password is required while email confirmation is switched off, and confirmation itself needs a configured SMTP server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '401':
           description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
           content:
@@ -2549,6 +2915,12 @@ paths:
                 $ref: '#/components/schemas/ErrorDetail'
         '403':
           description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '409':
+          description: Another account already uses that email address.
           content:
             application/json:
               schema:
@@ -2594,6 +2966,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No user with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -2628,6 +3006,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserRead'
+        '400':
+          description: You cannot demote or deactivate yourself, and moving somebody back to awaiting-confirmation needs a configured SMTP server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '401':
           description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
           content:
@@ -2636,6 +3020,18 @@ paths:
                 $ref: '#/components/schemas/ErrorDetail'
         '403':
           description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No user with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '409':
+          description: Another account already uses that email address.
           content:
             application/json:
               schema:
@@ -2664,6 +3060,12 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '400':
+          description: You cannot deactivate yourself.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '401':
           description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
           content:
@@ -2672,6 +3074,12 @@ paths:
                 $ref: '#/components/schemas/ErrorDetail'
         '403':
           description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No user with this id.
           content:
             application/json:
               schema:
@@ -2705,6 +3113,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserRead'
+        '400':
+          description: That account is not active, or it is already the one you are signed in as.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '401':
           description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
           content:
@@ -2713,6 +3127,12 @@ paths:
                 $ref: '#/components/schemas/ErrorDetail'
         '403':
           description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No user with this id.
           content:
             application/json:
               schema:
@@ -2763,6 +3183,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No user with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -2788,6 +3214,12 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '400':
+          description: That account is not awaiting confirmation, or no SMTP server is configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '401':
           description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
           content:
@@ -2800,12 +3232,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No user with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '502':
+          description: The SMTP server refused the message or could not be reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
   /api/v1/admin/settings:
     get:
       tags:
@@ -2852,6 +3296,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServerSettingsRead'
+        '400':
+          description: Email confirmation cannot be switched on while no SMTP server is configured, since nobody could then receive the link.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '401':
           description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
           content:
@@ -2882,6 +3332,12 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '400':
+          description: No SMTP server is configured, so there is nothing to test.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '401':
           description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
           content:
@@ -2901,6 +3357,12 @@ paths:
               description: Seconds until the throttle window clears.
               schema:
                 type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '502':
+          description: The SMTP server refused the message or could not be reached.
           content:
             application/json:
               schema:
@@ -3075,6 +3537,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No household with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -3121,6 +3589,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No household with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '409':
+          description: A chore was completed while this household's timezone was being changed, so a rescheduled occurrence collided with the closed one. Retrying is safe.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -3153,6 +3633,12 @@ paths:
                 $ref: '#/components/schemas/ErrorDetail'
         '403':
           description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No household with this id.
           content:
             application/json:
               schema:
@@ -3194,6 +3680,12 @@ paths:
                 $ref: '#/components/schemas/ErrorDetail'
         '403':
           description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No household with this id.
           content:
             application/json:
               schema:
@@ -3285,6 +3777,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No household with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -3348,6 +3846,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No household with this id, or no active member of it with this user id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '409':
+          description: That member owns the household, and an owner is always an organiser. Transfer ownership instead.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -3386,6 +3896,18 @@ paths:
                 $ref: '#/components/schemas/ErrorDetail'
         '403':
           description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No household with this id, or nobody with this user id belongs to it. Unlike setting a role, this reaches a member whose account is disabled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '409':
+          description: That member owns the household. Transfer ownership before removing them.
           content:
             application/json:
               schema:
@@ -5498,8 +6020,6 @@ components:
         type:
           type: string
           title: Error Type
-        input:
-          title: Input
         ctx:
           type: object
           title: Context

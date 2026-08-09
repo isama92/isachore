@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from sqlalchemy import delete
 
 from app.api.deps import CurrentUser, Impersonator, SessionDep
+from app.api.responses import refusals
 from app.core.audit import record_event
 from app.core.crypto import crypto_configured, decrypt, encrypt
 from app.core.rate_limit import client_ip
@@ -49,7 +50,21 @@ async def _replace_recovery_codes(session: SessionDep, user: User) -> list[str]:
     return codes
 
 
-@router.post("/setup", response_model=TwoFactorSetupRead)
+@router.post(
+    "/setup",
+    response_model=TwoFactorSetupRead,
+    responses=refusals(
+        (
+            status.HTTP_409_CONFLICT,
+            "Two-factor authentication is already enabled on this account.",
+        ),
+        (
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "The server cannot encrypt or decrypt two-factor secrets, so enrolment is "
+            "unavailable. An operator has to fix APP_KEY.",
+        ),
+    ),
+)
 async def setup_two_factor(user: CurrentUser, session: SessionDep) -> TwoFactorSetupRead:
     """Begin enrolment: generate a fresh secret (stored encrypted but not yet
     active) and return the QR / manual key. Confirm with a code to activate."""
@@ -66,7 +81,25 @@ async def setup_two_factor(user: CurrentUser, session: SessionDep) -> TwoFactorS
     return TwoFactorSetupRead(secret=secret, otpauth_uri=uri, qr=qr_data_uri(uri))
 
 
-@router.post("/confirm", response_model=RecoveryCodesRead)
+@router.post(
+    "/confirm",
+    response_model=RecoveryCodesRead,
+    responses=refusals(
+        (
+            status.HTTP_400_BAD_REQUEST,
+            "No enrolment is in progress, or the code is wrong.",
+        ),
+        (
+            status.HTTP_409_CONFLICT,
+            "Two-factor authentication is already enabled on this account.",
+        ),
+        (
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "The server cannot encrypt or decrypt two-factor secrets, so enrolment is "
+            "unavailable. An operator has to fix APP_KEY.",
+        ),
+    ),
+)
 async def confirm_two_factor(
     payload: TwoFactorConfirmRequest,
     user: CurrentUser,
@@ -106,7 +139,21 @@ async def confirm_two_factor(
     return RecoveryCodesRead(recovery_codes=codes)
 
 
-@router.post("/recovery-codes", response_model=RecoveryCodesRead)
+@router.post(
+    "/recovery-codes",
+    response_model=RecoveryCodesRead,
+    responses=refusals(
+        (
+            status.HTTP_400_BAD_REQUEST,
+            "Two-factor authentication is not enabled on this account, or the code is wrong.",
+        ),
+        (
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "The server cannot decrypt this account's two-factor secret, so the code "
+            "cannot be checked. An operator has to fix APP_KEY.",
+        ),
+    ),
+)
 async def regenerate_recovery_codes(
     payload: TwoFactorDisableRequest,
     user: CurrentUser,
@@ -139,7 +186,21 @@ async def regenerate_recovery_codes(
     return RecoveryCodesRead(recovery_codes=codes)
 
 
-@router.post("/disable", response_model=UserRead)
+@router.post(
+    "/disable",
+    response_model=UserRead,
+    responses=refusals(
+        (
+            status.HTTP_400_BAD_REQUEST,
+            "Two-factor authentication is not enabled on this account, or the code is wrong.",
+        ),
+        (
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "The server cannot decrypt this account's two-factor secret, so the code "
+            "cannot be checked. An operator has to fix APP_KEY.",
+        ),
+    ),
+)
 async def disable_two_factor(
     payload: TwoFactorDisableRequest,
     user: CurrentUser,

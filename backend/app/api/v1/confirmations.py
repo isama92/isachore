@@ -5,6 +5,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import joinedload
 
 from app.api.deps import SessionDep
+from app.api.responses import refusals
 from app.core.audit import record_event
 from app.core.rate_limit import client_ip
 from app.core.security import (
@@ -39,7 +40,17 @@ async def _resolve_token(session: SessionDep, token: str) -> ConfirmationToken |
     return result.scalar_one_or_none()
 
 
-@router.get("/{token}", response_model=ConfirmTokenInfo)
+@router.get(
+    "/{token}",
+    response_model=ConfirmTokenInfo,
+    responses=refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "The link is unknown, already used, or expired. One answer for all three, "
+            "so a guessed token cannot be told apart from an expired one.",
+        ),
+    ),
+)
 async def confirmation_info(token: str, session: SessionDep) -> User:
     """Validate a confirmation link so the set-password page can greet the user
     (or show an invalid/expired state) before they submit."""
@@ -49,7 +60,17 @@ async def confirmation_info(token: str, session: SessionDep) -> User:
     return confirmation.user
 
 
-@router.post("/{token}", response_model=UserRead)
+@router.post(
+    "/{token}",
+    response_model=UserRead,
+    responses=refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "The link is unknown, already used, or expired. One answer for all three, "
+            "so a guessed token cannot be told apart from an expired one.",
+        ),
+    ),
+)
 async def confirm_account(
     token: str,
     payload: ConfirmRequest,

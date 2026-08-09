@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, SessionDep, get_current_household
-from app.api.responses import FORBIDDEN_ROLE
+from app.api.responses import FORBIDDEN_ROLE, refusals
 from app.api.v1.households import SortDir
 from app.core.households import get_member_household, require_role
 from app.models import Household, HouseholdRole, Tag, User, household_members
@@ -60,7 +60,19 @@ async def _get_organiser_tag_or_error(session: SessionDep, user: User, tag_id: i
     return tag
 
 
-@router.get("", response_model=Page[TagRead])
+@router.get(
+    "",
+    response_model=Page[TagRead],
+    responses=refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "Tags are an organiser surface, and both halves of this are about that role "
+            "rather than membership: no household with the id given that you ORGANISE "
+            "- a deputy or helper of it reaches this too - or, when no id is given, "
+            "you organise none at all, so there is nothing to fall back to.",
+        ),
+    ),
+)
 async def list_tags(
     user: CurrentUser,
     session: SessionDep,
@@ -108,7 +120,20 @@ async def list_tags(
 
 
 @router.post(
-    "", response_model=TagRead, status_code=status.HTTP_201_CREATED, responses=FORBIDDEN_ROLE
+    "",
+    response_model=TagRead,
+    status_code=status.HTTP_201_CREATED,
+    responses=FORBIDDEN_ROLE
+    | refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No household with this id that you are a member of.",
+        ),
+        (
+            status.HTTP_409_CONFLICT,
+            "That household already has a tag with this name.",
+        ),
+    ),
 )
 async def create_tag(payload: TagCreate, user: CurrentUser, session: SessionDep) -> Tag:
     household = await get_member_household(session, user.id, payload.household_id)
@@ -125,12 +150,36 @@ async def create_tag(payload: TagCreate, user: CurrentUser, session: SessionDep)
     return tag
 
 
-@router.get("/{tag_id}", response_model=TagRead, responses=FORBIDDEN_ROLE)
+@router.get(
+    "/{tag_id}",
+    response_model=TagRead,
+    responses=FORBIDDEN_ROLE
+    | refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No tag with this id in any household you belong to.",
+        ),
+    ),
+)
 async def get_tag(tag_id: int, user: CurrentUser, session: SessionDep) -> Tag:
     return await _get_organiser_tag_or_error(session, user, tag_id)
 
 
-@router.patch("/{tag_id}", response_model=TagRead, responses=FORBIDDEN_ROLE)
+@router.patch(
+    "/{tag_id}",
+    response_model=TagRead,
+    responses=FORBIDDEN_ROLE
+    | refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No tag with this id in any household you belong to.",
+        ),
+        (
+            status.HTTP_409_CONFLICT,
+            "That household already has a tag with this name.",
+        ),
+    ),
+)
 async def update_tag(
     tag_id: int, payload: TagUpdate, user: CurrentUser, session: SessionDep
 ) -> Tag:
@@ -145,7 +194,17 @@ async def update_tag(
     return tag
 
 
-@router.delete("/{tag_id}", status_code=status.HTTP_204_NO_CONTENT, responses=FORBIDDEN_ROLE)
+@router.delete(
+    "/{tag_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=FORBIDDEN_ROLE
+    | refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No tag with this id in any household you belong to.",
+        ),
+    ),
+)
 async def delete_tag(tag_id: int, user: CurrentUser, session: SessionDep) -> None:
     # Hard delete: chore_tags rows cascade, so the tag detaches from any chores.
     tag = await _get_organiser_tag_or_error(session, user, tag_id)

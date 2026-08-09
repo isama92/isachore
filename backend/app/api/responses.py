@@ -10,9 +10,21 @@ every route of that router (a route's own `responses` still wins). The grouping 
 therefore what decides which refusals an operation claims, so a router that mixes public and
 gated routes must declare per route instead - see the note at the bottom of that module.
 
-Only the CROSS-CUTTING refusals belong here: the ones a shared gate raises rather than a
-handler. A 404 for a missing chore or a 409 on a duplicate tag is a property of that one
-endpoint and stays on it.
+Only the CROSS-CUTTING refusals get a named block here: the ones a shared gate raises rather
+than a handler. A 404 for a missing chore or a 409 on a duplicate tag is a property of that
+one endpoint, so it is written at that endpoint, with `refusals()` below.
+
+**A description has to cover every branch that produces its status code, not the first one
+you find.** Many of these codes have several: `POST /admin/users` answers 400 for a missing
+password *or* unconfigured SMTP, and `PATCH /chores/{id}` answers 400 for a bad assignee *or*
+a bad tag *or* a current assignee outside the pool. Naming one of them reads as complete and
+is worse than saying nothing, because a client author has no way to discover the rest.
+
+The first draft of this paragraph illustrated the rule with a claim that was itself false -
+that the same chore route answers 404 for a missing household or tag, when both are 400s -
+which is as good a demonstration as any of why the sentence is the part to check.
+`tests/test_openapi_refusals.py` checks that each code is declared and that none is declared
+spuriously; it cannot check that the sentence is true, so that part is on the writer.
 
 One cross-cutting refusal is deliberately absent, and it is the one most likely to be
 "noticed missing": `CsrfProtectMiddleware`'s 403 on a cookie-authenticated unsafe method
@@ -29,6 +41,22 @@ from fastapi import status
 from app.schemas import ErrorDetail
 
 Responses = dict[int | str, dict[str, Any]]
+
+
+def refusals(*entries: tuple[int, str]) -> Responses:
+    """A route's own refusals, as `(status, description)` pairs.
+
+    Every one of them answers in `ErrorDetail`'s shape - that is what a hand-raised
+    `HTTPException` produces - so this fills the `model` in rather than leaving each route to
+    remember it. A block with only a `description` publishes itself as bodyless, which is
+    wrong for every refusal in this API.
+
+    Compose with the gate blocks where a route has both: `FORBIDDEN_ROLE | refusals(...)`.
+    """
+    return {
+        status_code: {"model": ErrorDetail, "description": text} for status_code, text in entries
+    }
+
 
 UNAUTHORISED: Responses = {
     status.HTTP_401_UNAUTHORIZED: {
