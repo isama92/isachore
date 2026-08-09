@@ -855,8 +855,9 @@ an administrator does, including the twenty `/admin/...` operations and their
 schemas. What it keeps out is the anonymous internet. Nothing there is secret - the
 same document is committed to a public repository - so the gate is about not
 publishing your deployment's API surface to passers-by, not about privilege. A
-refused visitor is redirected to `/login`; note they land on Home after signing in
-rather than back at `/docs`, since the redirect carries no return path.
+refused visitor is redirected to `/login?next=/docs` and lands back on the reference
+once they sign in. That parameter is a literal on the nginx side, and the login page
+validates it anyway (`safeReturnPath`), since anybody can type one.
 
 **The page is entirely first-party**: the ReDoc bundle is vendored into the backend
 image at build time, pinned by sha256, and served from this origin, and Google Fonts
@@ -1003,16 +1004,3 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
 ### Todo
 
 - [ ] Live updates when a housemate completes a chore (websocket)
-- [ ] Reconcile the one hand-raised 422. `set_household_admin` refuses a transfer to a
-      non-member with `HTTP_422_UNPROCESSABLE_CONTENT` and a plain-string `detail`, so
-      `PATCH /households/{id}` and its admin twin answer 422 in two different shapes: that
-      one, and pydantic's `HTTPValidationError` array. A client parsing the declared 422
-      breaks on the hand-raised one. `_resolve_assignees` answers **400** for the identical
-      shape of error ("must be a member of your household"), so 400 is probably the right
-      code here too - but it is an API change, and the refusal guard deliberately excludes
-      422 from both sides, so nothing will fail until somebody decides.
-- [ ] Give the sign-in redirect a return path. A colleague following a link to `/docs`
-      without a session is sent to `/login` and lands on Home after signing in, with no
-      way back but retyping the URL. `@docs_sign_in` in `docker/nginx/nginx-common.conf`
-      has `$request_uri` to hand, but `?next=` is client-controlled, so the SPA side needs
-      a same-origin allow-list before it can honour one.

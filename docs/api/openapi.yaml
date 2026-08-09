@@ -1307,6 +1307,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HouseholdListRead'
+        '400':
+          description: The account named as the new owner is not an active member of this household. Transfer only ever moves a household to somebody already in it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '401':
           description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
           content:
@@ -3577,6 +3583,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HouseholdListRead'
+        '400':
+          description: The account named as the new owner is not an active member of this household. Transfer only ever moves a household to somebody already in it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '401':
           description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
           content:

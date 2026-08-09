@@ -4,7 +4,7 @@ import { Navigate, useLocation, useSearchParams } from 'react-router'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
-import { routes } from '../lib/routes'
+import { routes, safeReturnPath } from '../lib/routes'
 import { ssoErrorKey } from '../lib/sso'
 import type { AuthMethods } from '../lib/types'
 import BrandCaption from '../components/brand/BrandCaption'
@@ -74,8 +74,35 @@ export default function Login() {
     void loadMethods()
   }, [loadMethods])
 
+  // TWO ways to arrive here with somewhere to go back to, and they are not interchangeable.
+  //
+  // `location.state.from` is set by RequireAuth on an in-app redirect, so it is ours and
+  // trusted, and react-router can honour it. `?next=` arrives on a FULL-PAGE load - the prod
+  // nginx sets it when it turns an anonymous reader away from /docs - which is precisely why
+  // it cannot use router state, and equally why it cannot be trusted: anybody can type one.
+  // `safeReturnPath` is the open-redirect guard.
+  const returnTo = safeReturnPath(searchParams.get('next'))
   const state = location.state as { from?: string } | null
-  const from = state?.from ?? routes.home
+  const from = returnTo ?? state?.from ?? routes.home
+
+  // A `next` target needs a real browser navigation, not <Navigate>. The only thing that
+  // sends one today is /docs, which is NOT an SPA route - the prod nginx answers it from the
+  // backend - and App.tsx has no catch-all, so a client-side navigation there renders a
+  // blank page. Doing it for every `next` rather than only for the paths we know are
+  // external keeps this from needing a list of which routes the SPA owns; the cost is one
+  // extra page load on a path nobody takes twice.
+  //
+  // `replace`, not `assign`, and for the same reason the branch below uses <Navigate
+  // replace>: this login page is somewhere you were sent, not somewhere you went. nginx's
+  // 302 already replaced the /docs entry, so pushing here would leave the stack as
+  // [..., prev, /login?next=/docs, /docs] - and Back would land on the login page with a
+  // live session, fire this effect again and bounce forward, stranding `prev`.
+  //
+  // In an effect because it is a side effect, and exempt from the set-state-in-effect rule
+  // because assigning location is not setState.
+  useEffect(() => {
+    if (user && returnTo) window.location.replace(returnTo)
+  }, [user, returnTo])
 
   const passwordEnabled = methods.password_enabled
   const ssoEnabled = methods.oidc_enabled
@@ -93,7 +120,9 @@ export default function Login() {
   const ssoHref = `${endpoints.auth.oidcStart}?return_to=${encodeURIComponent(from)}`
 
   if (loading) return null
-  if (user) return <Navigate to={from} replace />
+  // Nothing to render while the effect above hands the browser over; <Navigate> here would
+  // race it and land on a route the SPA does not have.
+  if (user) return returnTo ? null : <Navigate to={from} replace />
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()

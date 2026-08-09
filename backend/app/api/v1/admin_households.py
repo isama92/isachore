@@ -106,6 +106,11 @@ async def get_household(household_id: int, _: AdminUser, session: SessionDep) ->
     response_model=HouseholdListRead,
     responses=refusals(
         (
+            status.HTTP_400_BAD_REQUEST,
+            "The account named as the new owner is not an active member of this "
+            "household. Transfer only ever moves a household to somebody already in it.",
+        ),
+        (
             status.HTTP_404_NOT_FOUND,
             "No household with this id.",
         ),

@@ -193,7 +193,7 @@ pre-commit run --all-files                           # what the git hook runs
     relaxes the CSP.** It carries the shared body of the two API-reference locations
     (`/docs`, rewritten to the backend's `/redoc`, and `/openapi.json`), and it exists as
     its own file because it is *location*-context where `nginx-common.conf` is
-    server-context. Nine things to keep straight:
+    server-context. Ten things to keep straight:
     - It has to restate every inherited security header, because nginx replaces an
       inherited `add_header` set rather than merging it - the same rule as `/sw.js`, but
       here the point is to widen the CSP rather than to avoid losing it. **A new security
@@ -227,6 +227,15 @@ pre-commit run --all-files                           # what the git hook runs
       error instead of "sign in". `@docs_sign_in` also needs `absolute_redirect off`, or
       nginx builds the `Location` from its own listen scheme and downgrades an HTTPS visitor
       to plain HTTP in the http and traefik modes, where TLS is terminated upstream.
+    - **It redirects to `/login?next=/docs`, and that value is a LITERAL.** `$request_uri`
+      would be the general answer and is the wrong one: it carries the query string, nginx
+      has no urlencode, so a `?` or `&` in the path produces a mangled parameter. A literal
+      works because this named location is reached from one place - `/docs`'s own
+      `error_page`, since `/openapi.json` answers `@docs_unauthorised` instead. The SPA
+      still validates it (`safeReturnPath`), because the parameter is client-controlled
+      whatever nginx sends, and it honours it with `window.location.assign` rather than
+      react-router: `/docs` is not an SPA route and `App.tsx` has no catch-all, so a
+      client-side navigation there renders a blank page.
     - `https://cdn.redoc.ly/redoc/logo-mini.svg` stays blocked on purpose, so /docs logs
       exactly one CSP error on every load. Anything else in that console is a real finding.
     - **The page lives at the app root (`/redoc`), NOT under `/api/v1`, and that is the
@@ -1228,6 +1237,12 @@ pre-commit run --all-files                           # what the git hook runs
   (`ChoreForm`, `admin/ServerSettings`, `users/UserForm` - the last is the one where the
   checkbox is the final control before submit). Extract a `lib/` helper if a second one
   adopts it; one caller does not earn the indirection.
+- **`safeReturnPath` (`lib/routes.ts`) is a hand-mirror of `_safe_return_to`
+  (`api/v1/oidc.py`)**, and both are open-redirect guards on a post-sign-in destination -
+  the SPA's `?next=`, the backend's SSO `return_to`. Same rule (single leading slash, no
+  `//`, no backslash, length-capped) and the same discard-rather-than-correct stance; keep
+  them in step by hand, like `HOUSEHOLD_ROLES` and `_ROLE_LADDER`. The frontend needs its own
+  because the SPA is static: nothing server-side sees `?next=` before the browser acts on it.
 - **A 422 does not echo the rejected value under `input`.** Scoped deliberately, because
   the absolute version of that sentence is false: a validator writing `f"{value!r} is not a
   known timezone"` puts the value in `msg`, and `schemas/household.py` does exactly that. The

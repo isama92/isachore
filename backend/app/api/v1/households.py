@@ -218,10 +218,20 @@ async def set_household_admin(session: SessionDep, household: Household, new_adm
     refuses to touch. Hand a helper the household without this and they would own a
     household they cannot manage the chores of, with no way to fix it. The previous
     owner keeps `organiser` and becomes an ordinary one, so the new owner can demote
-    them like anybody else."""
+    them like anybody else.
+
+    **400, and it used to be a 422.** Two reasons it moved. It matches `_resolve_assignees`
+    in the chores router, which answers 400 for the identical shape of complaint ("must be a
+    member of your household") about a referenced user - so the API now gives one answer to
+    one question. And a hand-raised 422 is the one refusal this app cannot document: FastAPI
+    reserves that code for pydantic's `HTTPValidationError` array, so the operation published
+    a 422 of one shape while answering with another, and a client parsing the declared one
+    broke on the real one. Nothing in the UI notices the change - `api.ts` renders a string
+    `detail` verbatim whatever the status - so the message a user sees is what it always was.
+    """
     if not await is_active_member(session, household.id, new_admin_id):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="The new household admin must be a member of the household",
         )
     household.admin_id = new_admin_id
@@ -517,6 +527,11 @@ async def get_household(
     response_model=HouseholdListRead,
     responses=FORBIDDEN_OWNER
     | refusals(
+        (
+            status.HTTP_400_BAD_REQUEST,
+            "The account named as the new owner is not an active member of this "
+            "household. Transfer only ever moves a household to somebody already in it.",
+        ),
         (
             status.HTTP_404_NOT_FOUND,
             "No household with this id that you are a member of.",

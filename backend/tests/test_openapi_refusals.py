@@ -54,15 +54,14 @@ SHARED = [
 # FastAPI adds this to any operation taking parameters and it cannot be removed per route, so
 # it is not a raise site and is excluded from both sides of every comparison below.
 #
-# **That exclusion is a real blind spot, and the app currently occupies it.**
-# `set_household_admin` (api/v1/households.py) hand-raises a 422 for a transfer to a
-# non-member, so `PATCH /households/{id}` and its admin twin answer 422 in `ErrorDetail`
-# shape - a bare `detail` string - while the document describes that code as pydantic's
-# `HTTPValidationError` array. Nothing here reports it, in either direction. It is the only
-# hand-raised 422 in the app (`grep HTTP_422`: this and main.py's handler), it is
-# inconsistent with the 400 that `_resolve_assignees` gives for the identical shape of
-# error, and reconciling that is a README todo rather than something to paper over with a
-# per-route `responses[422]` - which would publish one of the two shapes and hide the other.
+# **The exclusion is a blind spot, and nothing occupies it - keep it that way.** A
+# hand-raised 422 would be invisible here in both directions, and it would also be
+# undocumentable: FastAPI owns that code for pydantic's `HTTPValidationError` array, so a
+# route answering it with an `ErrorDetail` string publishes one shape and sends another.
+# `set_household_admin` did exactly that until it moved to 400, which is what
+# `_resolve_assignees` already answered for the identical complaint. `grep HTTP_422` should
+# find main.py's handler and nothing else; if it ever finds a raise, move that raise rather
+# than reaching for a per-route `responses[422]`.
 AUTO_VALIDATION = "422"
 
 # Codes the walker reports for a route that genuinely cannot answer with them. Every entry
@@ -271,6 +270,33 @@ def _walked() -> dict[tuple[str, str], set[str]]:
 
 # Derived once: the walk is cheap now but every test wants the same answer.
 WALKED = _walked()
+
+
+def test_nothing_hand_raises_a_422() -> None:
+    """The blind spot above, made executable instead of a `grep` in a comment.
+
+    422 is excluded from both sides of every comparison in this file, because FastAPI adds
+    one to any operation with parameters and it cannot be removed per route. So a
+    hand-raised 422 is invisible here - and worse, undocumentable: that code already carries
+    pydantic's `HTTPValidationError` array, so a route answering it with an `ErrorDetail`
+    string publishes one shape and sends another. `set_household_admin` did exactly that
+    until it moved to 400.
+
+    A closed-set assertion rather than a behavioural one, for the same reason
+    `test_csrf.py` pins `_AUTH_COOKIES` directly: nothing observable distinguishes the
+    absence. If this fails, move the raise to the code that fits (400 for a bad reference,
+    409 for a state conflict) rather than reaching for a per-route `responses[422]`.
+    """
+    offenders = [
+        f"{path.relative_to(BACKEND)}:{number}"
+        for path in sorted((BACKEND / "app").rglob("*.py"))
+        for number, line in enumerate(path.read_text().splitlines(), start=1)
+        if "HTTP_422" in line and path.name != "main.py"
+    ]
+    assert not offenders, (
+        "a hand-raised 422 cannot be documented - the code belongs to pydantic's array-shaped "
+        f"body. Use 400 for a bad reference or 409 for a state conflict: {offenders}"
+    )
 
 
 def test_every_unreachable_entry_is_still_needed() -> None:
