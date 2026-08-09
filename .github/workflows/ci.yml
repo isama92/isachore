@@ -16,12 +16,18 @@ on:
     # all, so a hand-edited or stale spec merged green and then failed on the NEXT
     # person's backend PR, blaming them. publish.yml keeps ignoring it, because a
     # spec-only merge still cannot change either image.
+    #
+    # docs/architecture/** IS listed, as the narrow path rather than docs/**: it is
+    # hand-written prose with no check to skip, and naming it precisely is what keeps
+    # docs/api/ reaching pytest. Never widen this entry to docs/**.
     paths-ignore:
       - README.md
       - CLAUDE.md
       - CONTRIBUTING.md
       - SECURITY.md
       - COPYING
+      - guidelines.md
+      - docs/architecture/**
   workflow_call:
 
 permissions:

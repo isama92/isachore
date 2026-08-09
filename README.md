@@ -995,8 +995,9 @@ docker build -f docker/frontend.Dockerfile --target prod \
 ## Contributing
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers the process: branching, tests, and what
-CI checks. Conventions, architecture notes, and gotchas for working in this
-codebase live in [CLAUDE.md](CLAUDE.md).
+CI checks. Conventions, patterns and code standards live in
+[guidelines.md](guidelines.md); the rationale behind individual subsystems lives in
+[docs/architecture/](docs/architecture/), routed from [CLAUDE.md](CLAUDE.md).
 
 Security issues go through [SECURITY.md](SECURITY.md), privately, not a public
 issue. isachore is GPLv3, see [COPYING](COPYING).

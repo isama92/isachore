@@ -3,12 +3,16 @@
 Thanks for looking. This is a small household chore-tracking app; the aim is to
 keep it easy to read rather than to grow features quickly.
 
-Two documents do most of the work, so this file only covers the process:
+Other documents do most of the work, so this file only covers the process:
 
+- **[guidelines.md](guidelines.md)** for the stack, conventions, architecture,
+  database and frontend patterns, testing and code quality. Read it before your
+  first change. It is more specific than this file about how the code is meant to
+  fit together.
 - **[README.md](README.md)** for setup, the commands, env vars, and production.
-- **[CLAUDE.md](CLAUDE.md)** for conventions, architecture and the non-obvious
-  gotchas. Read it before your first change. It is the working guide, and it is
-  more specific than this file about how the code is meant to fit together.
+- **[docs/architecture/](docs/architecture/)** for why one particular subsystem
+  works the way it does. [CLAUDE.md](CLAUDE.md) has a table routing you to the
+  right one.
 
 ## Getting set up
 
@@ -80,22 +84,15 @@ images, so a red commit cannot become `latest`.
 
 ## House style
 
+Code standards live in **[guidelines.md](guidelines.md)** — language standards,
+database and API conventions, frontend patterns, testing discipline, and the
+security rules about secrets and personal data. One convention is process rather
+than code, so it stays here:
+
 - **Commit messages**: imperative mood, sentence case, no type prefix and no
   trailing full stop. `Add a chore change log`, not `feat: added chore change log.`
   Explain *why* in the body when the reason is not obvious from the diff. Some of
   the history predates this; do not read it as licence.
-- **Changed a model?** Generate a revision in the same change:
-  `docker compose exec backend alembic revision --autogenerate -m "describe change"`
-  (then `chown` it, see CLAUDE.md). CI's `alembic check` fails without it.
-- **Any user-facing string** needs a key in **both** `frontend/src/i18n/locales/en.json`
-  and `it.json`, with identical nested trees. Keys are typed off `en.json`, so a
-  missing English key fails the build, but nothing checks that Italian matches:
-  keep it in lockstep by hand.
-- **Colours, fonts, radii and shadows** live only in `frontend/src/index.css`.
-  Never hardcode a hex value in a component.
-- **No secrets, credentials or production hostnames** anywhere in the repo. `.env`
-  is gitignored. Of the two committed templates, `.env.example` holds placeholders
-  only; `.env.example.dev` holds the documented dev credentials and nothing real.
 
 ## Licence
 

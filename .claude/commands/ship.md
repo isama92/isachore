@@ -15,8 +15,8 @@ Do this in order:
 
 1. **Implement** (skip if already written): make the change in small steps and
    ship its tests in the same step, backend `pytest` and/or frontend `vitest`,
-   covering the negative paths, per CLAUDE.md.
-2. **Green suites:** run both affected suites (see Verification in CLAUDE.md) and
+   covering the negative paths, per guidelines.md.
+2. **Green suites:** run both affected suites (see Testing in guidelines.md) and
    get them green before going further.
 3. **Review gate:** spawn a read-only review subagent (Agent tool,
    `general-purpose`) over the uncommitted changes. Brief it explicitly, since it
@@ -24,7 +24,8 @@ Do this in order:
    - inspect the working tree with `git status`, `git diff`, and
      `git diff --staged`;
    - review against what this step should do, its acceptance criteria, and the
-     conventions in CLAUDE.md;
+     conventions in guidelines.md, plus the matching docs/architecture/ file if
+     the step touches one of the subsystems CLAUDE.md's routing table names;
    - report findings only, ordered by severity, and NOT edit any files.
    Its report comes back to you, not the user, so relay what matters.
 4. **Triage and fix:** go through the findings yourself. Fix the real issues,

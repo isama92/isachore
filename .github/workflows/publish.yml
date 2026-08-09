@@ -10,10 +10,11 @@ on:
     # tag, that silently invalidates any digest an operator recorded to roll back
     # to. Use workflow_dispatch to publish deliberately.
     #
-    # This list is one entry LONGER than ci.yml's, and the difference is load
-    # bearing: `docs/**` must be ignored here (a spec change ships no new image) and
-    # must NOT be ignored there (a spec change is exactly what pytest's
-    # test_openapi_spec.py exists to check). See the note in ci.yml.
+    # The difference from ci.yml's list is load bearing: `docs/**` must be ignored
+    # here (a spec change ships no new image) and must NOT be ignored there (a spec
+    # change is exactly what pytest's test_openapi_spec.py exists to check). ci.yml
+    # names docs/architecture/** instead, which this blanket entry already covers.
+    # See the note in ci.yml.
     #
     # It is also what keeps spec.yml's bot commit from looping: that job only ever
     # touches docs/api/openapi.yaml, so even a push that did trigger workflows could
@@ -24,6 +25,7 @@ on:
       - CONTRIBUTING.md
       - SECURITY.md
       - COPYING
+      - guidelines.md
       - docs/**
   workflow_dispatch:
 
