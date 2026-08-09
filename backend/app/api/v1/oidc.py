@@ -32,6 +32,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import delete, select
 
 from app.api.deps import RedisDep, SessionDep
+from app.api.responses import THROTTLED
 from app.api.v1.auth import mint_session, open_session
 
 # `begin` and `complete` are called through the module rather than imported by name, for
@@ -89,16 +90,7 @@ _LOCATION_HEADER = {
     }
 }
 _REFUSALS = {
-    status.HTTP_429_TOO_MANY_REQUESTS: {
-        "model": ErrorDetail,
-        "description": "Too many sign-on attempts from this address.",
-        "headers": {
-            "Retry-After": {
-                "description": "Seconds until the throttle window clears.",
-                "schema": {"type": "integer"},
-            }
-        },
-    },
+    **THROTTLED,
     status.HTTP_404_NOT_FOUND: {"model": ErrorDetail, "description": NO_OIDC_DETAIL},
 }
 

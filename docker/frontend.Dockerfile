@@ -25,8 +25,22 @@ RUN npm run build
 # beside this Dockerfile. Keeping the build context at ./frontend is what lets
 # every other COPY here stay unchanged.
 FROM nginx:stable-alpine AS prod
+# http-context variables every mode needs, and the `00-` prefix keeps them ahead of
+# default.conf in nginx's alphabetical include of conf.d/*.conf. Baked deliberately: the tls
+# mode bind-mounts its own file over default.conf, so a variable defined there would be
+# absent for any operator still holding an older copy - and an undefined variable is a
+# refusal to start, i.e. the whole site down. See nginx-maps.conf.
+COPY --from=nginxconf nginx-maps.conf /etc/nginx/conf.d/00-isachore-maps.conf
 COPY --from=nginxconf nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=nginxconf nginx-common.conf /etc/nginx/snippets/isachore-common.conf
+# The security headers that do not vary, included by BOTH of the two above so that adding
+# one reaches the ordinary responses and the API reference together. See nginx-headers.conf.
+COPY --from=nginxconf nginx-headers.conf /etc/nginx/snippets/isachore-headers.conf
+# The shared body of the two API-reference locations (/docs and /openapi.json), which
+# nginx-common.conf includes from each of them. A separate snippet rather than two copies,
+# and separate from isachore-common.conf because it is location-context (that one is
+# server-context).
+COPY --from=nginxconf nginx-docs.conf /etc/nginx/snippets/isachore-docs.conf
 # Reference copy, inert at runtime: nginx only auto-includes conf.d/*.conf, and
 # the TLS mode bind-mounts its own conf over conf.d/default.conf anyway. Baked
 # so a TLS operator can extract the conf matching the image they pulled rather

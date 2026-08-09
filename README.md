@@ -607,6 +607,16 @@ TLS-terminating modes), hides its version, and caps request bodies at 6 MB.
 Uploaded avatars live in a named `storage` volume and the database in
 `./volumes/db`, so both survive restarts.
 
+**`/docs` is reachable on a deployment**, serving ReDoc against this build's own
+schema, and `/openapi.json` beside it. Both are gated: nginx checks the session
+cookie with an `auth_request` before proxying, so an anonymous visitor gets a
+redirect to `/login` and never the API surface. They are also the one exception to
+the CSP paragraph above - those two paths carry their own, wider policy, because
+ReDoc's bundle comes from jsdelivr. If you would rather not publish a reference at
+all, delete the `/docs` and `/openapi.json` locations from
+`docker/nginx/nginx-common.conf` and rebuild the frontend image; nothing in the app
+links to them.
+
 Avatars are served unauthenticated, which is a deliberate trade rather than an
 oversight. Each file is a capability URL: the name is 128 random bits and holds
 no user id, the directory has no listing, and the name is only ever returned by
@@ -832,41 +842,84 @@ and their pydantic models, and serves it three ways while the dev stack is up:
 | http://localhost:8000/redoc        | ReDoc: better for reading the whole surface    |
 | http://localhost:8000/openapi.json | the raw document                               |
 
-All three are **dev-only in practice**: FastAPI mounts them at the root, while the
-prod nginx proxies `/api` alone, so in a deployment they fall through to the SPA.
-Nothing serves the spec in production either (the frontend image contains only the
-built SPA), so `docs/api/openapi.yaml` is a reference read from the repository
-rather than a published url.
+**In a deployment only ReDoc is exposed, at `/docs`, and only to a signed-in
+reader.** The prod nginx proxies two paths (`/docs`, which it rewrites to the
+backend's `/redoc`, and `/openapi.json`, which ReDoc fetches); Swagger UI is not
+published, and `/redoc` itself falls through to the SPA. Both proxied paths sit
+behind an nginx `auth_request` against `GET /api/v1/auth/verify`. Details, and the
+one deliberately-blocked image, are in `docker/nginx/nginx-docs.conf`.
 
-Regenerate it whenever you add or change an endpoint, from the repository root with
-the dev stack running:
+**The gate is "any active account", not "any operator"**, and that is deliberate:
+`/auth/verify` is `CurrentUser`-gated, so a household helper reads the same reference
+an administrator does, including the twenty `/admin/...` operations and their
+schemas. What it keeps out is the anonymous internet. Nothing there is secret - the
+same document is committed to a public repository - so the gate is about not
+publishing your deployment's API surface to passers-by, not about privilege. A
+refused visitor is redirected to `/login`; note they land on Home after signing in
+rather than back at `/docs`, since the redirect carries no return path.
+
+Two things follow that look like faults and are not. The page logs exactly one CSP
+error, for ReDoc's own watermark logo on `cdn.redoc.ly` - anything else in that
+console is a real finding. And those two paths are the only place in the whole
+deployment where the CSP permits third-party script (jsdelivr serves the ReDoc
+bundle), which is the price of proxying to FastAPI's own page instead of shipping a
+rendered one.
+
+Regenerate the committed document whenever you add or change an endpoint, from the
+repository root. Neither command needs the dev stack: every `Settings` field has a
+default and `app.openapi()` reads only the route table, so this works from a bare
+checkout. `spec.yml` runs the same pair (with the runner's own temp path), and the
+output is identical either way - which is the property the whole job rests on.
 
 ```bash
-npx @redocly/cli@2 bundle http://localhost:8000/openapi.json -o docs/api/openapi.yaml
-npx @redocly/cli@2 build-docs docs/api/openapi.yaml -o docs/api/openapi.html   # offline reader
+(cd backend && uv run python -c 'import json; from app.main import app; print(json.dumps(app.openapi()))') > /tmp/openapi.json
+npx @redocly/cli@2.46.0 bundle /tmp/openapi.json -o docs/api/openapi.yaml
+npx @redocly/cli@2.46.0 build-docs docs/api/openapi.yaml -o docs/api/openapi.html  # offline reader
 ```
 
-The major is pinned because a reformat from a future one would produce a
-4,000-line diff nobody can review. The YAML is committed; the HTML is a ~900 kB
-render of it and is gitignored, so build it when you want to read the reference
-without a server, or hand it to someone without a checkout.
+The version is pinned **exactly**, and `spec.yml` pins the same one: a reformat from
+any later release would produce a several-thousand-line diff nobody can review, and
+because the bot's own pull request runs no CI, one arriving that way would have
+nothing on it to explain itself. Bumping it is a deliberate edit in both places. The
+YAML is committed; the HTML is a ~900 kB render of it and is gitignored, so build it
+when you want to read the reference without a server, or hand it to someone without a
+checkout.
 
-`docs/**` sits in both workflows' `paths-ignore`, so editing the spec runs no CI.
-What keeps it in step is `backend/tests/test_openapi_spec.py`, which parses the
-committed file and compares it to the live schema, and *does* run whenever a route
-changes. If it fails, the spec is behind the code: regenerate and commit it.
+Two things keep the committed copy in step, because it is generated output that
+nothing else would notice going stale:
 
-The spec is also only as honest as the routes' annotations. A handler annotated
-`-> JSONResponse` or `-> RedirectResponse` tells the generator nothing, so it
-publishes an unconstrained 200 and silently drops the other branches: before they
-were declared, `/health` hid its 503 and both `/auth/oidc/*` endpoints claimed to
-return a JSON body when they answer 302 with a `Location` header. Anything not
-derivable from the return type needs `response_model` and `responses=` spelling it
-out, as those three now do.
+- `backend/tests/test_openapi_spec.py` parses the file and compares it to the live
+  schema. It runs on a backend change, and now on a spec-only change too - `docs/**`
+  was removed from `ci.yml`'s `paths-ignore` for exactly that (see below). If it
+  fails, the spec is behind the code: regenerate and commit.
+- `.github/workflows/spec.yml` regenerates after a merge to `main` and opens a pull
+  request if the file moved, so a forgotten regeneration costs one click rather than
+  the next person's red build.
+
+The spec is also only as honest as the routes say it is, in two ways:
+
+- **Return type.** A handler annotated `-> JSONResponse` or `-> RedirectResponse`
+  tells the generator nothing, so it publishes an unconstrained 200 and silently
+  drops the other branches: before they were declared, `/health` hid its 503 and
+  both `/auth/oidc/*` endpoints claimed to return a JSON body when they answer 302
+  with a `Location` header. Anything not derivable from the return type needs
+  `response_model` and `responses=` spelling it out.
+- **Gates.** `Depends` contributes nothing at all, so a perfectly protected route can
+  publish itself as anonymous - which every one of them used to. `securitySchemes`
+  and the per-operation `security` block are derived from the `Security(...)`
+  declarations in `app/api/deps.py`; the refusals they imply come from
+  `app/api/responses.py`, applied at the `include_router` calls where a gate is
+  uniform and per route where it is not. `backend/tests/test_openapi_security.py`
+  pins all of it, including three closed sets that will need an edit when you add a
+  route - that edit is the point.
+
+Still undeclared, and its own todo below: the per-endpoint refusals (a 404 for a
+missing chore, a 409 on a duplicate tag, login's own 401). Only the cross-cutting
+ones are documented today.
 
 ### Continuous integration
 
-Two workflows in `.github/workflows/`:
+Three workflows in `.github/workflows/`:
 
 - **`ci.yml`** runs on every pull request: ruff (`check` and `format --check`)
   plus pytest against a Postgres service container, eslint, prettier `--check`,
@@ -877,6 +930,14 @@ Two workflows in `.github/workflows/`:
 - **`publish.yml`** runs on every push to `main`: it calls `ci.yml` first and
   pushes to GHCR only if everything passed, so a red commit can never become
   `:latest`. Images are `linux/amd64`.
+- **`spec.yml`** runs on every push to `main` that touches `backend/`: it
+  regenerates `docs/api/openapi.yaml` and opens a pull request if the file moved. It
+  opens one rather than pushing because `main` is protected and `GITHUB_TOKEN` is
+  not an administrator; storing a token that could bypass the branch rules would be
+  a poor trade for a documentation file. Enabling it needed one manual repository
+  setting: **Settings > Actions > General > "Allow GitHub Actions to create and
+  approve pull requests"**, without which the last step fails with a permissions
+  error that does not mention the setting.
 
 Nothing is published from a pull request, however many times you push to it: the
 PR build is validation only, and `:latest` moves exactly once per merge.
@@ -884,6 +945,16 @@ PR build is validation only, and `:latest` moves exactly once per merge.
 `ci.yml` has no `push` trigger of its own (that would run every `main` commit
 twice, once directly and once via `publish.yml`), so pushing a branch with no open
 PR runs nothing.
+
+The two `paths-ignore` lists are **deliberately different**, and used to be
+identical. Both skip the root prose files. Only `publish.yml` also skips `docs/**`,
+because a spec change ships no new image, and skipping it there is also the second
+reason `spec.yml`'s own commit cannot loop back into a publish (the first being that
+a `GITHUB_TOKEN` push triggers no workflow at all). `ci.yml` must **not** skip it: a
+spec-only PR used to run no checks whatsoever, so a hand-edited or stale spec merged
+green and then failed `test_openapi_spec.py` on the next person's backend PR,
+blaming them for it. Note markdown under `frontend/` is on neither list, because
+prettier does check it.
 
 To reproduce the prod image builds locally, build them directly rather than
 through compose:
@@ -906,24 +977,34 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
 ### Todo
 
 - [ ] Live updates when a housemate completes a chore (websocket)
-- [ ] Document authentication in the OpenAPI spec. There is no `securitySchemes` entry
-      and not one of the 72 operations declares a 401 or 403, so a client generated from
-      `docs/api/openapi.yaml` presents every gated route as anonymous. The two halves
-      travel differently: `securitySchemes` and per-operation `security` are derived from
-      a *security* dependency, so those ride on the shared `CurrentUser` / `AdminUser`,
-      but `Depends` has no `responses`, so the refusals (400/403/409/429) need
-      `responses=` on the router or the `include_router` call, or a custom `APIRoute`.
-- [ ] Run something on a spec-only pull request. `docs/**` sits in both workflows'
-      `paths-ignore`, so a PR touching *only* prose and `docs/api/openapi.yaml` runs no
-      checks at all - the one kind of PR that changes the spec is the one kind nothing
-      guards. A hand-edited or stale spec therefore merges green and then fails
-      `test_openapi_spec.py` on the *next* person's PR, blaming them. Either narrow the
-      ignore lists or add a `redocly lint` step.
-- [ ] Regenerate the spec automatically once a PR merges, so it cannot drift while the
-      one command that updates it stays manual (README's API documentation section).
-      Needs care: `publish.yml` builds `:latest` from `main`, so a commit pushed back by
-      an action must not retrigger it.
-- [ ] Serve the rendered API reference somewhere, e.g. `/docs`. FastAPI mounts Swagger
-      and ReDoc at the root while the prod nginx proxies `/api` alone, so both fall
-      through to the SPA in a deployment and the reference is repository-only today.
-      Decide deliberately whether it is public or behind auth.
+- [ ] Declare the per-endpoint refusals in the OpenAPI spec. The cross-cutting ones are
+      done (401 wherever a gate can refuse, 403 on `/admin` and the sixteen role-gated
+      routes, 429 on the five throttled ones), but the answers belonging to one endpoint
+      are still missing: a 404 for a missing chore, a 409 on a duplicate tag, login's own
+      401 on bad credentials and its 403 under `OIDC_ONLY`. Each needs `responses=` on
+      that route. Worth doing carefully rather than quickly - a `description` that
+      overstates what an endpoint can raise is worse than no entry, and nothing in CI can
+      catch that.
+- [ ] Strip pydantic's `input` echo from 422 bodies. Its stock handler returns the
+      rejected value, so a password below `min_length=8` comes back in the response body
+      in plaintext (`POST /confirm/{token}`, `PATCH /admin/users/{id}`, the profile
+      password change). Nothing leaks in-app - `formatValidationDetail` never reads
+      `input` - so this is a wire and log-capture exposure, and one worth an AVG / ISO
+      27001 look. A `RequestValidationError` handler dropping that one key would keep the
+      array contract the frontend parser depends on.
+- [ ] Serve `/docs` from our own route rather than FastAPI's built-in `/redoc`, and close
+      the two things that proxying somebody else's page cannot. Both come from
+      `get_redoc_html`'s defaults, and both need the same small change - a local route
+      passing `redoc_js_url=` and `with_google_fonts=False`, with the bundle vendored (the
+      backend image is python-slim with no npm, so it has to be fetched at build time or
+      committed).
+      - **Supply chain.** The script URL is `redoc@2`, a floating major range resolved at
+        request time, and FastAPI emits no `integrity` attribute, so there is nothing
+        pinning what executes. It runs same-origin with the SPA, where it could call the
+        API with the reader's cookie and set `X-CSRF-Token` itself. Pinning an exact
+        version is the cheap interim step even before vendoring.
+      - **AVG / GDPR.** The page pulls Montserrat and Roboto from Google Fonts, so every
+        signed-in reader's IP goes to Google for typography alone. The app loads nothing
+        else third-party, and Dutch and German case law has treated exactly this embed as
+        a transfer needing a basis. Narrow: an authenticated internal page, no personal
+        data in the request beyond the IP. Worth closing anyway.

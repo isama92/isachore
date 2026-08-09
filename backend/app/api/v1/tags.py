@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, SessionDep, get_current_household
+from app.api.responses import FORBIDDEN_ROLE
 from app.api.v1.households import SortDir
 from app.core.households import get_member_household, require_role
 from app.models import Household, HouseholdRole, Tag, User, household_members
@@ -106,7 +107,9 @@ async def list_tags(
     return Page[TagRead](items=items, total=total, page=page, page_size=page_size)
 
 
-@router.post("", response_model=TagRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", response_model=TagRead, status_code=status.HTTP_201_CREATED, responses=FORBIDDEN_ROLE
+)
 async def create_tag(payload: TagCreate, user: CurrentUser, session: SessionDep) -> Tag:
     household = await get_member_household(session, user.id, payload.household_id)
     if household is None:
@@ -122,12 +125,12 @@ async def create_tag(payload: TagCreate, user: CurrentUser, session: SessionDep)
     return tag
 
 
-@router.get("/{tag_id}", response_model=TagRead)
+@router.get("/{tag_id}", response_model=TagRead, responses=FORBIDDEN_ROLE)
 async def get_tag(tag_id: int, user: CurrentUser, session: SessionDep) -> Tag:
     return await _get_organiser_tag_or_error(session, user, tag_id)
 
 
-@router.patch("/{tag_id}", response_model=TagRead)
+@router.patch("/{tag_id}", response_model=TagRead, responses=FORBIDDEN_ROLE)
 async def update_tag(
     tag_id: int, payload: TagUpdate, user: CurrentUser, session: SessionDep
 ) -> Tag:
@@ -142,7 +145,7 @@ async def update_tag(
     return tag
 
 
-@router.delete("/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{tag_id}", status_code=status.HTTP_204_NO_CONTENT, responses=FORBIDDEN_ROLE)
 async def delete_tag(tag_id: int, user: CurrentUser, session: SessionDep) -> None:
     # Hard delete: chore_tags rows cascade, so the tag detaches from any chores.
     tag = await _get_organiser_tag_or_error(session, user, tag_id)

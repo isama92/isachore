@@ -1,0 +1,138 @@
+name: API spec
+
+# docs/api/openapi.yaml is generated output under version control, and the command that
+# updates it is manual. pytest's test_openapi_spec.py already refuses a backend PR whose spec
+# is stale, so drift is caught - but it is caught by failing somebody's build, and the fix is
+# still a person remembering two commands. This job does the remembering.
+#
+# It opens a PULL REQUEST rather than pushing. `main` is protected (locked, one approving
+# review required) and GITHUB_TOKEN is not an administrator, so a direct push is refused
+# outright; the alternative would be storing a token that can bypass every branch rule, which
+# is a poor trade for a documentation file.
+#
+# Two independent reasons this cannot loop back into publish.yml, which builds :latest from
+# main: a push made with GITHUB_TOKEN triggers no workflow at all, and publish.yml ignores
+# `docs/**` anyway. Neither alone would be something to rely on; together they are.
+#
+# THE FLIP SIDE OF THAT FIRST REASON: the PR this opens gets no CI either, so
+# test_openapi_spec.py - the guard `docs/**` was taken off ci.yml's paths-ignore to reach -
+# does not run on it. Accepted, because the diff is output of the very commands that test
+# compares against, and `main` currently requires no status checks (only a review). If
+# required checks are ever added, these PRs become unmergeable without a manual empty commit,
+# and the fix at that point is a PAT or GitHub App token rather than GITHUB_TOKEN.
+#
+# ONE-TIME REPOSITORY SETTING, not scriptable: Settings > Actions > General > "Allow GitHub
+# Actions to create and approve pull requests" must be on, or the last step fails with a
+# permissions error that does not mention the setting. Same class of manual step as flipping
+# the GHCR packages public (see README).
+on:
+  push:
+    branches: [main]
+    # Only the backend can move the spec: it is derived from the routes and their pydantic
+    # models and from nothing else.
+    paths:
+      - backend/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spec-main
+  # Never abandon a half-opened PR; a superseded commit simply regenerates on top.
+  cancel-in-progress: false
+
+jobs:
+  regenerate:
+    name: Regenerate the committed spec
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+
+      # Derived from the Dockerfile rather than restated, exactly as ci.yml does it: a
+      # base-image bump has to reach every job on its own, or CI ends up testing a different
+      # interpreter from the one the published image ships.
+      - id: toolchain
+        run: |
+          {
+            echo "python=$(sed -n 's|^FROM python:\([0-9.]*\)-slim.*|\1|p' docker/backend.Dockerfile | head -1)"
+            echo "uv=$(sed -n 's|^COPY --from=ghcr.io/astral-sh/uv:\([0-9.]*\) .*|\1|p' docker/backend.Dockerfile | head -1)"
+            echo "node=$(sed -n 's|^FROM node:\([0-9]*\)-alpine.*|\1|p' docker/frontend.Dockerfile | head -1)"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ steps.toolchain.outputs.uv }}
+          python-version: ${{ steps.toolchain.outputs.python }}
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      # node is pinned for the same reason python and uv are, and it matters MORE here than
+      # in ci.yml: this job's whole premise is that regeneration is byte-reproducible, so a
+      # serialisation difference from whatever node a runner image happens to ship would
+      # open a formatting-only PR after every backend merge - and that PR gets no CI to
+      # explain itself. Left to the runner, nothing would record the change.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ steps.toolchain.outputs.node }}
+
+      - run: uv sync --frozen
+        working-directory: backend
+
+      # No database, no Redis and no running server: every Settings field has a default and
+      # app.openapi() reads only the route table. That is what lets this job be three steps
+      # instead of a compose stack, and it is why the README documents the same pair of
+      # commands - what CI runs here has to be what a person can run by hand.
+      #
+      # redocly is pinned EXACTLY, not to the major, for the same reason node is above and
+      # the reasoning is the same sentence: this job rests on regeneration being
+      # byte-reproducible, and `@2` resolves the newest 2.x at run time, so the first release
+      # that changes quoting or wrapping opens a several-thousand-line formatting PR with no
+      # CI on it to explain itself. Bumping is manual and deliberate. Keep it identical to
+      # README.md's copy of the same command.
+      - name: Regenerate docs/api/openapi.yaml
+        run: |
+          (cd backend && uv run python -c 'import json; from app.main import app; print(json.dumps(app.openapi()))') > "$RUNNER_TEMP/openapi.json"
+          npx --yes @redocly/cli@2.46.0 bundle "$RUNNER_TEMP/openapi.json" -o docs/api/openapi.yaml
+
+      # Check our own output before offering it to anybody. The PR this job opens gets no CI
+      # (a GITHUB_TOKEN push raises no workflow events), so without this the one automated
+      # producer of spec-only PRs is the one thing `docs/**` came off ci.yml's paths-ignore
+      # to catch. If redocly ever emits YAML that parses to something other than
+      # app.openapi(), this fails here rather than becoming a PR somebody waves through and
+      # a failure on the next person's build - which is the exact blame-shifting this whole
+      # feature exists to stop.
+      - name: The regenerated spec still round-trips
+        run: uv run pytest tests/test_openapi_spec.py -q
+        working-directory: backend
+
+      - id: drift
+        run: |
+          if git diff --quiet -- docs/api/openapi.yaml; then
+            echo "The committed spec is already current."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git diff --stat -- docs/api/openapi.yaml
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # A fixed branch, so a second drift amends the open PR rather than opening a queue of
+      # them. Every string below is a literal: nothing from the triggering event reaches a
+      # `run:` or a title, so there is no injection surface here.
+      - if: steps.drift.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          branch: chore/regenerate-openapi
+          delete-branch: true
+          add-paths: docs/api/openapi.yaml
+          commit-message: Regenerate the committed OpenAPI spec
+          title: Regenerate the committed OpenAPI spec
+          body: |
+            `docs/api/openapi.yaml` had fallen behind the routes. Regenerated by
+            `.github/workflows/spec.yml` with the same two commands the README documents.
+
+            Generated output only - review the diff, not the wording. If it is large and
+            unexpected, check that the redocly major has not moved.

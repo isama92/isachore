@@ -8,13 +8,20 @@ on:
     # Nothing in CI lints these: the prettier hook is scoped `^frontend/` and
     # `npm run format:check` runs with cwd=frontend, so root prose has no check to
     # skip. Markdown under frontend/ is NOT listed, because prettier does cover it.
+    #
+    # `docs/**` is deliberately NOT here, and this list is therefore NOT the same as
+    # publish.yml's. docs/api/openapi.yaml is generated output under version control,
+    # and the only thing that notices it going stale is pytest's
+    # test_openapi_spec.py. Ignoring docs/ here meant a spec-only PR ran nothing at
+    # all, so a hand-edited or stale spec merged green and then failed on the NEXT
+    # person's backend PR, blaming them. publish.yml keeps ignoring it, because a
+    # spec-only merge still cannot change either image.
     paths-ignore:
       - README.md
       - CLAUDE.md
       - CONTRIBUTING.md
       - SECURITY.md
       - COPYING
-      - docs/**
   workflow_call:
 
 permissions:

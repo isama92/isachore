@@ -3,6 +3,7 @@ import logging
 from fastapi import APIRouter, HTTPException, status
 
 from app.api.deps import AdminUser, RedisDep, SessionDep
+from app.api.responses import THROTTLED
 from app.api.v1.auth import DEFAULT_PROVIDER_NAME
 from app.core.app_settings import get_app_settings
 from app.core.config import settings
@@ -58,7 +59,9 @@ async def update_settings(
     return _read(app_settings)
 
 
-@router.post("/test-email", status_code=status.HTTP_204_NO_CONTENT)
+# Its own cooldown, so its own 429 - the /admin block on the include_router call carries
+# only the 401 and 403 every admin route shares.
+@router.post("/test-email", status_code=status.HTTP_204_NO_CONTENT, responses=THROTTLED)
 async def send_test_email(admin: AdminUser, redis: RedisDep) -> None:
     if not smtp_configured():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=NO_SMTP_DETAIL)

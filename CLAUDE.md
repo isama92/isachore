@@ -56,21 +56,49 @@ and the non-obvious gotchas.
 - **Docker** (`docker/`): everything Docker-related except the dev compose file,
   which stays at the root as `compose.yml` because it is the everyday entry point.
   `docker/` holds `backend.Dockerfile` and `frontend.Dockerfile` (multi-stage),
-  `nginx/` (the three nginx configs), and one self-contained
+  `nginx/` (six nginx configs: two mode files, three baked snippets and a baked
+  http-context map file), and one self-contained
   `compose.prod.<mode>.yml` per prod deployment mode: http / tls / traefik.
 - **CI** (`.github/workflows/`): `ci.yml` (ruff + pytest + eslint + prettier +
   `tsc -b` + vitest, plus a no-push build of both prod images that runs on pull
   requests ONLY, since on the merge path publish.yml's own build is the gate)
   runs on pull requests and is *called* by `publish.yml`, which on push to `main` pushes
   `ghcr.io/isama92/isachore-{backend,frontend}:latest`. `ci.yml` deliberately has
-  no `push` trigger, or every `main` commit would run it twice. Both carry the same
-  `paths-ignore` list (root prose + `docs/**`) so a documentation change runs
-  nothing and does not churn `:latest`; keep the two lists identical, and do NOT
-  add `**.md`, since prettier does check markdown under `frontend/`. One-time manual
-  step, not scriptable: GHCR packages are created **private** on first publish and
+  no `push` trigger, or every `main` commit would run it twice. `spec.yml` is the third,
+  on push to `main` under `paths: backend/**`.
+
+  **The two `paths-ignore` lists are deliberately NOT identical, and this rule used to say
+  the opposite.** Both skip the root prose files. Only `publish.yml` also skips `docs/**`
+  (a spec change ships no new image). `ci.yml` must not, because
+  `tests/test_openapi_spec.py` is the only guard on the committed spec and a spec-only PR
+  would otherwise run nothing at all - merging green and then failing on the *next*
+  person's backend PR. Do NOT add `**.md` to either, since prettier does check markdown
+  under `frontend/`.
+
+  Two one-time manual steps, neither scriptable, both of which fail with an error that
+  does not name the setting: GHCR packages are created **private** on first publish and
   inherit nothing from repo visibility, so both must be flipped to public
   (Packages > package > settings) or every `docker compose pull` in README.md's
-  Production section fails with `denied`.
+  Production section fails with `denied`; and `spec.yml` needs Settings > Actions >
+  General > "Allow GitHub Actions to create and approve pull requests".
+
+  **`spec.yml` opens a PR rather than pushing**, because `main` is protected
+  (`lock_branch`, one approving review, `enforce_admins: false`) and `GITHUB_TOKEN` is not
+  an admin, so a direct push is refused outright. It cannot loop into `publish.yml` for two
+  independent reasons - a `GITHUB_TOKEN` push triggers no workflow, and `publish.yml`
+  ignores `docs/**` - and it needs no database, because every `Settings` field has a
+  default and `app.openapi()` reads only the route table. That last fact is what lets the
+  README document one regeneration command that works from a bare checkout and produces
+  byte-identical output to CI's (the commands differ only in the temp path). `redocly
+  bundle` was measured to emit identical YAML from a dumped file and from the live URL,
+  which is the property the whole job rests on: were it not so, the bot would open a
+  formatting-only PR after every backend merge.
+
+  **A bot PR triggers no CI**, because GitHub raises no workflow events for `GITHUB_TOKEN`
+  actions - the same rule the anti-loop argument relies on. So `test_openapi_spec.py` does
+  not run on the one PR that only ever changes the spec. Tolerable today: that diff is
+  output of the very commands the test compares against, and `main` has no required status
+  checks. Add one and these PRs become unmergeable without a manual commit.
 
 ## Commands
 
@@ -161,6 +189,47 @@ pre-commit run --all-files                           # what the git hook runs
     from beside the compose file. The baked copy exists so an operator can extract
     the version matching their image; if you change that conf, keep both the
     Dockerfile path and the compose bind mount in step.
+  - **`nginx-docs.conf` is a second baked snippet, and the only place the deployment
+    relaxes the CSP.** It carries the shared body of the two API-reference locations
+    (`/docs`, rewritten to the backend's `/redoc`, and `/openapi.json`), and it exists as
+    its own file because it is *location*-context where `nginx-common.conf` is
+    server-context. Seven things to keep straight:
+    - It has to restate every inherited security header, because nginx replaces an
+      inherited `add_header` set rather than merging it - the same rule as `/sw.js`, but
+      here the point is to widen the CSP rather than to avoid losing it. **A new security
+      header therefore goes in `nginx-headers.conf` and nowhere else**: that third snippet
+      is included at server level from `nginx-common.conf` and again at location level from
+      `nginx-docs.conf`, so one edit reaches both. It exists because the hand-written
+      second copy this feature shipped with restated five where six were inherited and
+      silently dropped HSTS in the tls mode - the one mode that has it. Only CSP and HSTS
+      stay out of the shared file, and both for stated reasons.
+    - The CSP relaxations were each measured in a browser against what ReDoc actually
+      requests; `'unsafe-inline'` is deliberately **absent** from `script-src`, since
+      ReDoc's page carries no inline script (Swagger UI's does, which is a second reason
+      only one reader is exposed).
+    - **HSTS reaches it through `$hsts`, which is baked, and that is a deployment-safety
+      rule rather than a style one.** The map lives in `nginx-maps.conf` ->
+      `conf.d/00-isachore-maps.conf` because the tls mode bind-mounts an *operator's own*
+      copy of `nginx.tls.conf` over `conf.d/default.conf`: defining the variable in a mode
+      file meant that anybody upgrading with the copy they already had got
+      `nginx: [emerg] unknown "hsts" variable` and a container that would not start - the
+      whole site, not just the reference. Nothing the baked snippets reference may be
+      defined in a mode file. The map keys on `$scheme`, so HSTS is sent exactly where nginx
+      itself terminated TLS.
+    - **The refusal is not shared, so `error_page` sits at the call site** beside
+      `proxy_pass`: `/docs` redirects a person to `/login`, `/openapi.json` answers a plain
+      401 in the API's own `ErrorDetail` shape. Giving both the redirect meant a client
+      generator fetching the spec followed it to 200 OK of SPA HTML and reported a parse
+      error instead of "sign in". `@docs_sign_in` also needs `absolute_redirect off`, or
+      nginx builds the `Location` from its own listen scheme and downgrades an HTTPS visitor
+      to plain HTTP in the http and traefik modes, where TLS is terminated upstream.
+    - `https://cdn.redoc.ly/redoc/logo-mini.svg` stays blocked on purpose, so /docs logs
+      exactly one CSP error on every load. Anything else in that console is a real finding.
+    - The gate is `auth_request` against `GET /api/v1/auth/verify`, a 204-or-401 route that
+      exists for nothing else. Its only caller is a conf file, so it reads as dead code from
+      inside Python - hence the docstring. The subrequest is a GET, so CSRF exempts it.
+    - `proxy_pass` is at the call site, not in the snippet, because the two locations differ
+      in exactly that. `/redoc` itself is NOT proxied and falls through to the SPA.
 - Relative paths in a prod mode file (`.env`, `./volumes/db`, `./nginx.tls.conf`)
   resolve against **the compose file's own directory**, not the repo root. Running
   one from the repo therefore wants a `docker/.env` (already gitignored) and
@@ -1197,10 +1266,17 @@ pre-commit run --all-files                           # what the git hook runs
     also registers immediately when `document.readyState === 'complete'` rather
     than only on `load`: `main.tsx` is a deferred module, so `load` may already
     have fired, and waiting for it would mean never registering.
-  - **`sw.js` must never cache `/api/`** (nor anything non-GET). Those responses
-    are authenticated household data and the app has no offline write model, so
-    caching them would put personal data on the device for nothing. It also means
-    logging out leaves nothing behind. Bump `CACHE` when editing the worker, but
+  - **`sw.js` must never cache `/api/`** (nor anything non-GET), **nor `/docs`**. The
+    first: those responses are authenticated household data and the app has no offline
+    write model, so caching them would put personal data on the device for nothing, and it
+    also means logging out leaves nothing behind. The second is a different failure - the
+    prod nginx answers `/docs` from the backend (ReDoc), and it is a same-origin `text/html`
+    navigation, so the navigate branch would store the API reference as the *offline app
+    shell* and every later offline navigation would render the docs instead of isachore.
+    `NOT_THE_APP` is that guard. It lists the HTML one only: `/openapi.json` is proxied
+    beside it but ReDoc fetches it with `fetch()` (mode `cors`), which reaches no branch at
+    all, so listing it would pin a fall-through rather than a guard. Bump `CACHE` when
+    editing the worker, but
     note that does not prune anything on an ordinary deploy: the worker is
     byte-identical across them, so none activates and each deploy's hashed
     `/assets/` accumulate, which is left to the browser's storage eviction.
@@ -1695,11 +1771,51 @@ the negative paths (401/403/400/404/409), not just the happy one.
   *inferred* code 307, so declaring a 302 by hand without `status_code=` publishes
   both, and the auto-generated 422 on any route with parameters cannot be removed
   per-route, so `/auth/oidc/*` document one they can never raise.
-- **`docs/api/openapi.yaml` is committed generated output**, regenerated by hand with
-  the pinned `npx @redocly/cli@2` commands in README.md. `docs/**` is in both
-  workflows' `paths-ignore`, so editing it runs nothing; `tests/test_openapi_spec.py`
-  is the guard, comparing the committed file to `app.openapi()` on every backend
-  change. It reaches outside `backend/`, which the dev container cannot normally see,
+- **A gate contributes nothing to the spec either, and that is a second, separate way the
+  document lies.** `securitySchemes` and per-operation `security` come only from
+  `SecurityBase` dependencies, and `Depends` carries no `responses` at all, so before
+  `app/api/responses.py` existed every gated route published itself as anonymous with no
+  refusals. Six things to keep straight:
+  - The schemes are three `Security(...)` declarations in `api/deps.py`
+    (`sessionCookie`, `bearerToken`, `parkedAdminCookie`), all `auto_error=False` and all
+    **ignored parameters**. They are documentation: the token read stays in
+    `get_request_token`, because four routes call that helper outside the dependency system.
+    Deleting them is silent at runtime and fails four tests (three in
+    `test_openapi_security.py`, plus `test_openapi_spec.py` on the resulting drift).
+  - **`X-CSRF-Token` is deliberately not a scheme.** FastAPI emits one `security` entry per
+    scheme and OpenAPI reads separate entries as *alternatives*, so it would publish
+    "cookie OR csrf header" where `core/csrf.py` requires both. It lives in
+    `main.py`'s `API_DESCRIPTION` instead, and the scheme set is asserted closed because
+    nothing in behaviour can distinguish the omission.
+  - **401 goes on the `include_router` call, 403 mostly does not.** Every route in a gated
+    router needs a session, so the 401 is uniform. The 403 is not: `households`, `chores`,
+    `tags` and `completions` each mix `require_role` routes with routes open to any member,
+    so a router-level `FORBIDDEN_ROLE` would put a 403 on `POST /households`,
+    `GET /completions/filters` and `GET /chores/{id}` - 12 of those 28 operations, the same
+    defect in the opposite direction. It is per route on the 16 that can raise it.
+    `auth` and `invitations` are mixed for the 401 too and declare per route.
+  - **There are THREE 403 blocks, because the status code is shared and the reasons are
+    not.** `FORBIDDEN_ADMIN` (not a site admin), `FORBIDDEN_ROLE` (`require_role`; a
+    promotion would fix it) and `FORBIDDEN_OWNER` (`_get_owned_household`; a promotion would
+    NOT - ownership is off the ladder, so only a transfer helps). Three routes take the
+    last: `PATCH`/`DELETE /households/{id}` and `DELETE /households/{id}/members/{user_id}`.
+    Swapping two of these blocks changes no status code and no test that only counts codes,
+    so `test_the_owner_gate_and_the_role_gate_say_different_things` reads the descriptions.
+    A fourth 403 exists and is deliberately undocumented per route: `CsrfProtectMiddleware`,
+    which is transport-level and lives in `main.py`'s `API_DESCRIPTION`.
+  - **`security` and the 401 are asserted to be the same set** in
+    `tests/test_openapi_security.py`. That single equality catches both drift directions,
+    because one side is derived and the other hand-written: a new gated route in an
+    unblocked router declares no 401, and a block on a public router declares one nothing
+    raises.
+  - Regenerate `docs/api/openapi.yaml` after any of this, or `test_openapi_spec.py` fails.
+- **`docs/api/openapi.yaml` is committed generated output**, regenerated with the pinned
+  `npx @redocly/cli@2` command in README.md - by hand, or by `spec.yml` after a merge.
+  `tests/test_openapi_spec.py` is the guard, comparing the committed file to
+  `app.openapi()`. It runs on a backend change, and (since `docs/**` came off `ci.yml`'s
+  `paths-ignore`, see the CI section) on a spec-only change too, which is what stopped a
+  hand-edited spec merging green and failing on the next person's PR.
+  It reaches outside `backend/`, which the dev container cannot normally see,
   hence the read-only `./docs:/docs:ro` mount on the backend service in `compose.yml` -
   a container predating that mount fails the test with a message saying so. **At `/docs`,
   never `/app/docs`**: nested inside the `./backend:/app` bind, Docker has to materialise

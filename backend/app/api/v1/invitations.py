@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
 from app.api.deps import CurrentUser, SessionDep
+from app.api.responses import UNAUTHORISED
 from app.core.households import add_member, is_active_member
 from app.models import HouseholdInvitation, HouseholdInvitationStatus, HouseholdRole
 from app.schemas import HouseholdInvitationInfo, HouseholdMemberRead
@@ -52,7 +53,10 @@ async def invitation_info(token: str, session: SessionDep) -> HouseholdInvitatio
     )
 
 
-@router.post("/{token}/accept", status_code=status.HTTP_204_NO_CONTENT)
+# This router is mixed - reading an invitation is public, so whoever follows the link can be
+# told what they are being invited to before signing in - so the 401 is declared here rather
+# than on the include_router call.
+@router.post("/{token}/accept", status_code=status.HTTP_204_NO_CONTENT, responses=UNAUTHORISED)
 async def accept_invitation(token: str, user: CurrentUser, session: SessionDep) -> None:
     """The logged-in recipient joins the household; the invite is single-use."""
     invitation = await _resolve_token(session, token)

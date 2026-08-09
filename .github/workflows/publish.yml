@@ -5,10 +5,19 @@ name: Publish images
 on:
   push:
     branches: [main]
-    # A prose-only merge cannot change either image, so republishing would just
-    # move :latest to a new digest for nothing - and with :latest as the only tag,
-    # that silently invalidates any digest an operator recorded to roll back to.
-    # Same list as ci.yml. Use workflow_dispatch to publish deliberately.
+    # A documentation-only merge cannot change either image, so republishing would
+    # just move :latest to a new digest for nothing - and with :latest as the only
+    # tag, that silently invalidates any digest an operator recorded to roll back
+    # to. Use workflow_dispatch to publish deliberately.
+    #
+    # This list is one entry LONGER than ci.yml's, and the difference is load
+    # bearing: `docs/**` must be ignored here (a spec change ships no new image) and
+    # must NOT be ignored there (a spec change is exactly what pytest's
+    # test_openapi_spec.py exists to check). See the note in ci.yml.
+    #
+    # It is also what keeps spec.yml's bot commit from looping: that job only ever
+    # touches docs/api/openapi.yaml, so even a push that did trigger workflows could
+    # not reach this one.
     paths-ignore:
       - README.md
       - CLAUDE.md

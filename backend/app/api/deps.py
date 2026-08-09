@@ -1,7 +1,9 @@
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, Security, status
+from fastapi.security import APIKeyCookie, HTTPBearer
+from fastapi.security.http import HTTPAuthorizationCredentials
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +20,52 @@ RedisDep = Annotated[Redis, Depends(get_redis)]
 
 _credentials_exc = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated"
+)
+
+# The two transports get_request_token accepts, declared as OpenAPI security schemes. They
+# are the only way the generator learns a route is gated: FastAPI derives securitySchemes and
+# per-operation `security` from SecurityBase dependencies alone, and without them every gated
+# operation publishes itself as anonymous, so a client generated from docs/api/openapi.yaml
+# sends no credentials at all.
+#
+# Both are auto_error=False, which is what makes them inert: they are read for the document,
+# never for the decision. Deciding stays in get_request_token, because four routes call it
+# outside the dependency system (auth.py, profile.py, admin_users.py) and the
+# cookie-before-bearer precedence has to be written down exactly once.
+#
+# X-CSRF-Token is deliberately NOT one of these. FastAPI emits one `security` entry per
+# scheme and OpenAPI reads separate entries as alternatives, so adding it would publish
+# "session cookie OR csrf header" - the opposite of what core/csrf.py enforces, which is both
+# together. It is described in the API description (main.py) instead, and
+# tests/test_openapi_security.py pins this scheme set closed so it cannot drift back in.
+session_cookie_scheme = APIKeyCookie(
+    name=COOKIE_NAME,
+    scheme_name="sessionCookie",
+    auto_error=False,
+    description=(
+        "The httpOnly session cookie, set by `POST /api/v1/auth/login` or by the single "
+        "sign-on callback. A browser sends it automatically; an unsafe method additionally "
+        "needs the `X-CSRF-Token` header."
+    ),
+)
+bearer_scheme = HTTPBearer(
+    scheme_name="bearerToken",
+    auto_error=False,
+    description=(
+        "The same opaque session token as an `Authorization: Bearer` header, for clients "
+        "with no cookie jar. Exempt from the `X-CSRF-Token` requirement."
+    ),
+)
+admin_cookie_scheme = APIKeyCookie(
+    name=ADMIN_COOKIE_NAME,
+    scheme_name="parkedAdminCookie",
+    auto_error=False,
+    description=(
+        "An impersonating administrator's own session, parked while they act as somebody "
+        "else. `POST /api/v1/auth/stop-impersonating` is the only route it *authenticates* "
+        "- several others read it to attribute an action to the real operator, and logout "
+        "reads it to end both sessions."
+    ),
 )
 
 
@@ -49,7 +97,16 @@ async def get_user_by_token(session: AsyncSession, token: str) -> User | None:
     return auth_token.user
 
 
-async def get_current_user(request: Request, session: SessionDep) -> User:
+async def get_current_user(
+    request: Request,
+    session: SessionDep,
+    _cookie: Annotated[str | None, Security(session_cookie_scheme)] = None,
+    _bearer: Annotated[HTTPAuthorizationCredentials | None, Security(bearer_scheme)] = None,
+) -> User:
+    # _cookie and _bearer are documentation, not input: they put the two schemes into this
+    # route's dependency tree, which is the whole mechanism behind the `security` block on
+    # every gated operation. Both are auto_error=False, so neither can refuse anything, and
+    # the read below stays the only one that decides.
     token = get_request_token(request)
     user = await get_user_by_token(session, token) if token else None
     if user is None:

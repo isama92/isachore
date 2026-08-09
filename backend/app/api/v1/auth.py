@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, HTTPException, Request, Response, Security, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import delete, select
 from sqlalchemy.orm import joinedload
@@ -9,10 +10,12 @@ from app.api.deps import (
     CurrentUser,
     RedisDep,
     SessionDep,
+    admin_cookie_scheme,
     get_impersonator,
     get_request_token,
     get_user_by_token,
 )
+from app.api.responses import THROTTLED, UNAUTHORISED
 from app.core.app_settings import get_app_settings
 from app.core.audit import record_event
 from app.core.config import settings
@@ -46,6 +49,7 @@ from app.core.two_factor import consume_valid_code
 from app.models import AuditAction, AuthToken, TwoFactorChallenge, User, UserStatus
 from app.schemas import (
     AuthMethodsRead,
+    ErrorDetail,
     LoginRequest,
     LoginResponse,
     MeRead,
@@ -156,7 +160,11 @@ async def _me_read(session: SessionDep, user: User, *, impersonating: bool = Fal
     )
 
 
-@router.post("/login", response_model=LoginResponse)
+# This router is mixed, so it carries no block from router.py and each gated or throttled
+# route declares its own. Only the cross-cutting refusals are here: login's own 401 on bad
+# credentials, its 403 under OIDC_ONLY and its 503 with 2FA unavailable are endpoint answers,
+# and documenting those across the API is its own README todo.
+@router.post("/login", response_model=LoginResponse, responses=THROTTLED)
 async def login(
     payload: LoginRequest,
     session: SessionDep,
@@ -237,7 +245,7 @@ async def login(
     return LoginResponse(user=await _me_read(session, user))
 
 
-@router.post("/verify-2fa", response_model=MeRead)
+@router.post("/verify-2fa", response_model=MeRead, responses=THROTTLED)
 async def verify_two_factor(
     payload: TwoFactorVerifyRequest,
     session: SessionDep,
@@ -352,15 +360,47 @@ async def auth_methods() -> AuthMethodsRead:
     )
 
 
-@router.get("/me", response_model=MeRead)
+@router.get("/verify", status_code=status.HTTP_204_NO_CONTENT, responses=UNAUTHORISED)
+async def verify_session(user: CurrentUser) -> None:
+    """204 if this request carries a live session, 401 if it does not. No body.
+
+    Not for the SPA, which uses `/me`: this exists for the prod nginx `auth_request`
+    subrequest that gates the API reference at `/docs` (docker/nginx/nginx-docs.conf).
+    nginx reads only the status and discards the body, and `/me` would pay a memberships
+    query per docs request to have it thrown away. Being a GET, the subrequest is exempt
+    from CsrfProtectMiddleware on method alone, which is what lets it work with no header.
+
+    So it looks unused from inside the Python: nothing in `frontend/` calls it, and grep
+    will not find a caller. The caller is a conf file.
+    """
+    return None
+
+
+@router.get("/me", response_model=MeRead, responses=UNAUTHORISED)
 async def me(request: Request, user: CurrentUser, session: SessionDep) -> MeRead:
     impersonating = await get_impersonator(request, session) is not None
     return await _me_read(session, user, impersonating=impersonating)
 
 
-@router.post("/stop-impersonating", response_model=UserRead)
+@router.post(
+    "/stop-impersonating",
+    response_model=UserRead,
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {
+            "model": ErrorDetail,
+            "description": "No impersonation in progress: the parked admin cookie is absent.",
+        }
+    },
+)
 async def stop_impersonating(
-    request: Request, session: SessionDep, response: Response
+    request: Request,
+    session: SessionDep,
+    response: Response,
+    # Documentation only, like the pair on get_current_user: it is what stops the one route
+    # authenticated by the parked admin cookie publishing itself as anonymous. The cookie is
+    # still read inline below, because this route deliberately takes no user dependency (see
+    # the router docstring), and auto_error=False means this cannot refuse anything.
+    _admin_cookie: Annotated[str | None, Security(admin_cookie_scheme)] = None,
 ) -> User | Response:
     admin_token = request.cookies.get(ADMIN_COOKIE_NAME)
     if admin_token is None:
