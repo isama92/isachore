@@ -43,8 +43,9 @@ session_cookie_scheme = APIKeyCookie(
     scheme_name="sessionCookie",
     auto_error=False,
     description=(
-        "The httpOnly session cookie set by `POST /api/v1/auth/login`. A browser sends it "
-        "automatically; an unsafe method additionally needs the `X-CSRF-Token` header."
+        "The httpOnly session cookie, set by `POST /api/v1/auth/login` or by the single "
+        "sign-on callback. A browser sends it automatically; an unsafe method additionally "
+        "needs the `X-CSRF-Token` header."
     ),
 )
 bearer_scheme = HTTPBearer(
@@ -61,7 +62,9 @@ admin_cookie_scheme = APIKeyCookie(
     auto_error=False,
     description=(
         "An impersonating administrator's own session, parked while they act as somebody "
-        "else. Only `POST /api/v1/auth/stop-impersonating` reads it."
+        "else. `POST /api/v1/auth/stop-impersonating` is the only route it *authenticates* "
+        "- several others read it to attribute an action to the real operator, and logout "
+        "reads it to end both sessions."
     ),
 )
 

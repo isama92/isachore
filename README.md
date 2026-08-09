@@ -981,8 +981,19 @@ issue. isachore is GPLv3, see [COPYING](COPYING).
       `input` - so this is a wire and log-capture exposure, and one worth an AVG / ISO
       27001 look. A `RequestValidationError` handler dropping that one key would keep the
       array contract the frontend parser depends on.
-- [ ] Self-host the ReDoc bundle. `/docs` loads it from jsdelivr, which makes those paths
-      the only place in the deployment whose CSP permits third-party script, and FastAPI's
-      helper emits no SRI attribute to pin it with. `get_redoc_html(redoc_js_url=...)`
-      against a vendored copy would close it; the awkward part is that the backend image
-      is python-slim with no npm, so the file has to be fetched at build time or committed.
+- [ ] Serve `/docs` from our own route rather than FastAPI's built-in `/redoc`, and close
+      the two things that proxying somebody else's page cannot. Both come from
+      `get_redoc_html`'s defaults, and both need the same small change - a local route
+      passing `redoc_js_url=` and `with_google_fonts=False`, with the bundle vendored (the
+      backend image is python-slim with no npm, so it has to be fetched at build time or
+      committed).
+      - **Supply chain.** The script URL is `redoc@2`, a floating major range resolved at
+        request time, and FastAPI emits no `integrity` attribute, so there is nothing
+        pinning what executes. It runs same-origin with the SPA, where it could call the
+        API with the reader's cookie and set `X-CSRF-Token` itself. Pinning an exact
+        version is the cheap interim step even before vendoring.
+      - **AVG / GDPR.** The page pulls Montserrat and Roboto from Google Fonts, so every
+        signed-in reader's IP goes to Google for typography alone. The app loads nothing
+        else third-party, and Dutch and German case law has treated exactly this embed as
+        a transfer needing a basis. Narrow: an authenticated internal page, no personal
+        data in the request beyond the IP. Worth closing anyway.

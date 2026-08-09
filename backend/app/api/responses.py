@@ -77,6 +77,22 @@ FORBIDDEN_OWNER: Responses = {
     }
 }
 
+# One route refuses BOTH ways and so can take neither block: setting a member's role needs
+# organiser (the ladder), but *granting* organiser, or touching a row that already holds it,
+# needs ownership. Publishing either block alone would be half true, and the half it left
+# out is the one a reader would act on - organiser is already the top rung, so "obtain a
+# stronger role" is advice nobody can follow.
+FORBIDDEN_ROLE_OR_OWNER: Responses = {
+    status.HTTP_403_FORBIDDEN: {
+        "model": ErrorDetail,
+        "description": (
+            "Either the role held in this household does not reach organiser, or the change "
+            "involves the organiser role itself, which only the household's owner may grant "
+            "or alter. The second cannot be cleared by a promotion, only by a transfer."
+        ),
+    }
+}
+
 THROTTLED: Responses = {
     status.HTTP_429_TOO_MANY_REQUESTS: {
         "model": ErrorDetail,

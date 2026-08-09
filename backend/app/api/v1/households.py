@@ -7,7 +7,7 @@ from sqlalchemy import ColumnElement, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, SessionDep
-from app.api.responses import FORBIDDEN_OWNER, FORBIDDEN_ROLE
+from app.api.responses import FORBIDDEN_OWNER, FORBIDDEN_ROLE, FORBIDDEN_ROLE_OR_OWNER
 from app.core import clock
 from app.core.config import settings
 from app.core.households import (
@@ -552,7 +552,8 @@ async def list_household_members(
 @router.patch(
     "/{household_id}/members/{user_id}",
     response_model=HouseholdMemberRoleRead,
-    responses=FORBIDDEN_ROLE,
+    # Both, because this handler refuses both ways - see the block's own comment.
+    responses=FORBIDDEN_ROLE_OR_OWNER,
 )
 async def update_household_member(
     household_id: int,

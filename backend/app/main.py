@@ -44,10 +44,17 @@ Chore management for households.
 
 ## Authenticating
 
-Two transports, either of which opens a session created by `POST /api/v1/auth/login`:
+Two transports, either of which carries a session:
 
 - the httpOnly `isachore_token` cookie, which a browser sends on its own, and
 - the same opaque token as an `Authorization: Bearer` header, for clients with no cookie jar.
+
+Two ways to open one, and nothing downstream can tell them apart. `POST /api/v1/auth/login`
+takes an email and password, and answers `two_factor_required` instead of a session when the
+account has TOTP enabled - finish that with `POST /api/v1/auth/verify-2fa`. Where single
+sign-on is configured, `GET /api/v1/auth/oidc/start` is the other way in, and on a server
+with `OIDC_ONLY` set it is the only one: password login answers 403 there.
+`GET /api/v1/auth/methods` says which of the two this server offers, without a session.
 
 There is no self-registration: administrators create accounts, and the first administrator
 comes from the `init` CLI command.

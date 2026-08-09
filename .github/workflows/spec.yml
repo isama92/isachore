@@ -60,6 +60,7 @@ jobs:
           {
             echo "python=$(sed -n 's|^FROM python:\([0-9.]*\)-slim.*|\1|p' docker/backend.Dockerfile | head -1)"
             echo "uv=$(sed -n 's|^COPY --from=ghcr.io/astral-sh/uv:\([0-9.]*\) .*|\1|p' docker/backend.Dockerfile | head -1)"
+            echo "node=$(sed -n 's|^FROM node:\([0-9]*\)-alpine.*|\1|p' docker/frontend.Dockerfile | head -1)"
           } >> "$GITHUB_OUTPUT"
 
       - uses: astral-sh/setup-uv@v7
@@ -68,6 +69,15 @@ jobs:
           python-version: ${{ steps.toolchain.outputs.python }}
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
+
+      # node is pinned for the same reason python and uv are, and it matters MORE here than
+      # in ci.yml: this job's whole premise is that regeneration is byte-reproducible, so a
+      # serialisation difference from whatever node a runner image happens to ship would
+      # open a formatting-only PR after every backend merge - and that PR gets no CI to
+      # explain itself. Left to the runner, nothing would record the change.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ steps.toolchain.outputs.node }}
 
       - run: uv sync --frozen
         working-directory: backend

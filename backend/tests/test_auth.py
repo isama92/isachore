@@ -234,6 +234,51 @@ async def test_me_via_bearer_header(
     assert resp.json()["email"] == "alice@example.com"
 
 
+# /auth/verify has no caller anywhere in this repository's Python or TypeScript: the only
+# thing that calls it is docker/nginx/nginx-docs.conf's auth_request, gating /docs on a live
+# session. So nothing else fails if it breaks, and these two cases are the whole safety net.
+# What nginx reads is the STATUS, which is why the body being empty is asserted too - a
+# future change returning 200 with a payload would still open the gate and would still pass
+# a status-only check.
+async def test_verify_returns_204_for_a_live_session(
+    make_user: Login, auth_client: Callable[[User], Awaitable[AsyncClient]]
+) -> None:
+    user = await make_user(email="alice@example.com")
+    client = await auth_client(user)
+
+    resp = await client.get("/api/v1/auth/verify")
+
+    assert resp.status_code == 204
+    assert resp.content == b""
+
+
+async def test_verify_refuses_an_anonymous_request(client: AsyncClient) -> None:
+    # The refusal nginx turns into a redirect to /login. Anything other than a 4xx here
+    # would open the API reference to the internet.
+    resp = await client.get("/api/v1/auth/verify")
+
+    assert resp.status_code == 401
+    assert resp.json()["detail"] == "Not authenticated"
+
+
+async def test_verify_refuses_a_disabled_users_session(
+    make_user: Login,
+    auth_client: Callable[[User], Awaitable[AsyncClient]],
+    db_session: AsyncSession,
+) -> None:
+    # A live token whose user has since been deactivated. `get_current_user` already refuses
+    # this, but the gate is the one place a stale session would hand out a surface nobody
+    # else re-checks, so it is pinned here rather than assumed from the shared dependency.
+    user = await make_user(email="alice@example.com")
+    client = await auth_client(user)
+    user.status = UserStatus.disabled
+    await db_session.commit()
+
+    resp = await client.get("/api/v1/auth/verify")
+
+    assert resp.status_code == 401
+
+
 async def test_logout(client: AsyncClient, make_user: Login, db_session: AsyncSession) -> None:
     await make_user(email="alice@example.com", password="password12345")
     await client.post(

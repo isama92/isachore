@@ -12,6 +12,8 @@ notices, so the useful assertion is "these and no others" - the same shape as
 edit whenever a route is added, and that edit is the review prompt they exist to force.
 """
 
+import ast
+from pathlib import Path
 from typing import Any
 
 from app.main import app
@@ -45,7 +47,6 @@ ROLE_GATED_OPERATIONS = {
     ("PATCH", "/api/v1/tags/{tag_id}"),
     ("DELETE", "/api/v1/tags/{tag_id}"),
     ("DELETE", "/api/v1/completions/{completion_id}"),
-    ("PATCH", "/api/v1/households/{household_id}/members/{user_id}"),
     ("GET", "/api/v1/households/{household_id}/invitations"),
     ("POST", "/api/v1/households/{household_id}/invitations"),
     ("POST", "/api/v1/households/{household_id}/invitations/{invitation_id}/revoke"),
@@ -63,16 +64,29 @@ OWNER_GATED_OPERATIONS = {
     ("DELETE", "/api/v1/households/{household_id}/members/{user_id}"),
 }
 
-# Every route that answers 429, which is every route behind a core/rate_limit.py counter.
+# Setting a member's role refuses both ways in one handler - organiser for the change
+# itself, ownership for anything involving the organiser role - so it belongs to neither set
+# above and carries a description covering both branches.
+BOTH_GATES_OPERATIONS = {
+    ("PATCH", "/api/v1/households/{household_id}/members/{user_id}"),
+}
+
+# Every route behind a core/rate_limit.py counter. Hand-written like the sets above, but
+# unlike them it has a derived counterpart below - this one was written with four entries
+# and the fifth, the test-email cooldown, went unnoticed precisely because a closed set
+# compared against the document passes when BOTH sides omit something.
 THROTTLED_OPERATIONS = {
     ("POST", "/api/v1/auth/login"),
     ("POST", "/api/v1/auth/verify-2fa"),
     ("GET", "/api/v1/auth/oidc/start"),
     ("GET", "/api/v1/auth/oidc/callback"),
+    ("POST", "/api/v1/admin/settings/test-email"),
 }
 
+ROUTERS_DIR = Path(__file__).resolve().parents[1] / "app" / "api" / "v1"
 
-def operations() -> dict[tuple[str, str], dict[str, Any]]:
+
+def _operations() -> dict[tuple[str, str], dict[str, Any]]:
     return {
         (method.upper(), path): operation
         for path, item in SPEC["paths"].items()
@@ -80,8 +94,55 @@ def operations() -> dict[tuple[str, str], dict[str, Any]]:
     }
 
 
+# Derived once, like SPEC: every test below walks it, and the 429 test walks it per entry.
+OPERATIONS = _operations()
+
+
+def operations() -> dict[tuple[str, str], dict[str, Any]]:
+    return OPERATIONS
+
+
 def declaring(code: str) -> set[tuple[str, str]]:
-    return {key for key, op in operations().items() if code in op["responses"]}
+    return {key for key, op in OPERATIONS.items() if code in op["responses"]}
+
+
+def handlers_calling(prefix: str) -> set[str]:
+    """Names of the route handlers in api/v1 whose body calls a function starting with
+    `prefix`, read from the source with `ast`.
+
+    This is the antidote to a hand-written closed set that is only closed against the
+    document: comparing one list of paths with another passes happily when both sides are
+    missing the same route, which is exactly how the test-email cooldown stayed undocumented.
+    Reading the *call sites* instead means a new throttle shows up whether or not anybody
+    remembered this file.
+    """
+    found: set[str] = set()
+    for module in ROUTERS_DIR.glob("*.py"):
+        for node in ast.parse(module.read_text()).body:
+            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            decorated = any(
+                isinstance(d, ast.Call)
+                and isinstance(d.func, ast.Attribute)
+                and getattr(d.func.value, "id", "") == "router"
+                for d in node.decorator_list
+            )
+            if not decorated:
+                continue
+            for inner in ast.walk(node):
+                if (
+                    isinstance(inner, ast.Call)
+                    and isinstance(inner.func, ast.Name)
+                    and inner.func.id.startswith(prefix)
+                ):
+                    found.add(node.name)
+    return found
+
+
+def handler_name(key: tuple[str, str]) -> str:
+    """The endpoint function behind an operation. FastAPI builds the default operationId as
+    `{function}_{path}_{method}`, and every path here carries the /api/v1 prefix."""
+    return OPERATIONS[key]["operationId"].split("_api_v1_")[0]
 
 
 def test_the_security_schemes_are_exactly_the_three_transports() -> None:
@@ -150,25 +211,45 @@ def test_a_403_is_declared_only_where_a_gate_can_raise_one() -> None:
     would bury the two gates this test is about.
     """
     non_admin = {key for key in declaring("403") if not key[1].startswith("/api/v1/admin/")}
-    assert non_admin == ROLE_GATED_OPERATIONS | OWNER_GATED_OPERATIONS
+    assert non_admin == ROLE_GATED_OPERATIONS | OWNER_GATED_OPERATIONS | BOTH_GATES_OPERATIONS
 
 
 def test_the_owner_gate_and_the_role_gate_say_different_things() -> None:
-    """The two share a status code and would read as interchangeable. They are not: a role
+    """The gates share a status code and would read as interchangeable. They are not: a role
     403 tells the caller a promotion would help and an ownership 403 tells them it would not,
-    so swapping the blocks is a silent documentation bug that no status-code check finds."""
-    ops = operations()
+    so swapping the blocks is a silent documentation bug that no status-code check finds.
+
+    Asserting the ABSENCE of the other word is what makes this bite. Checking only that an
+    owner-gated route says "owner" passed happily while one route said "role" and meant
+    ownership, because a description can contain both words while describing one gate.
+    """
     for key in OWNER_GATED_OPERATIONS:
-        assert "owner" in ops[key]["responses"]["403"]["description"].lower(), key
+        description = OPERATIONS[key]["responses"]["403"]["description"].lower()
+        assert "owner" in description and "role held" not in description, key
     for key in ROLE_GATED_OPERATIONS:
-        assert "role" in ops[key]["responses"]["403"]["description"].lower(), key
+        description = OPERATIONS[key]["responses"]["403"]["description"].lower()
+        assert "role held" in description and "owner" not in description, key
+    for key in BOTH_GATES_OPERATIONS:
+        description = OPERATIONS[key]["responses"]["403"]["description"].lower()
+        assert "owner" in description and "role" in description, key
 
 
 def test_the_throttled_operations_declare_a_429_carrying_retry_after() -> None:
     assert declaring("429") == THROTTLED_OPERATIONS
     for key in THROTTLED_OPERATIONS:
-        headers = operations()[key]["responses"]["429"]["headers"]
+        headers = OPERATIONS[key]["responses"]["429"]["headers"]
         assert "Retry-After" in headers, key
+
+
+def test_every_handler_behind_a_throttle_declares_a_429() -> None:
+    """The derived half, and the one that would have caught the miss.
+
+    The set above compares two hand-maintained lists of paths, so it passes when both omit
+    the same route. This reads the `enforce_*` call sites out of the router sources instead,
+    so adding a throttle to a handler and forgetting its `responses=` fails here even though
+    nobody touched this file.
+    """
+    assert handlers_calling("enforce_") == {handler_name(key) for key in THROTTLED_OPERATIONS}
 
 
 def test_every_declared_refusal_carries_its_explanation() -> None:

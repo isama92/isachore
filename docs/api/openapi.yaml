@@ -6,10 +6,17 @@ info:
 
     ## Authenticating
 
-    Two transports, either of which opens a session created by `POST /api/v1/auth/login`:
+    Two transports, either of which carries a session:
 
     - the httpOnly `isachore_token` cookie, which a browser sends on its own, and
     - the same opaque token as an `Authorization: Bearer` header, for clients with no cookie jar.
+
+    Two ways to open one, and nothing downstream can tell them apart. `POST /api/v1/auth/login`
+    takes an email and password, and answers `two_factor_required` instead of a session when the
+    account has TOTP enabled - finish that with `POST /api/v1/auth/verify-2fa`. Where single
+    sign-on is configured, `GET /api/v1/auth/oidc/start` is the other way in, and on a server
+    with `OIDC_ONLY` set it is the only one: password login answers 403 there.
+    `GET /api/v1/auth/methods` says which of the two this server offers, without a session.
 
     There is no self-registration: administrators create accounts, and the first administrator
     comes from the `init` CLI command.
@@ -1358,7 +1365,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorDetail'
         '403':
-          description: A member of the household, but the role held there does not reach what this route requires.
+          description: Either the role held in this household does not reach organiser, or the change involves the organiser role itself, which only the household's owner may grant or alter. The second cannot be cleared by a promotion, only by a transfer.
           content:
             application/json:
               schema:
@@ -2883,6 +2890,17 @@ paths:
                 $ref: '#/components/schemas/ErrorDetail'
         '403':
           description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '429':
+          description: Too many attempts. `Retry-After` carries the seconds still to run.
+          headers:
+            Retry-After:
+              description: Seconds until the throttle window clears.
+              schema:
+                type: integer
           content:
             application/json:
               schema:
@@ -5494,7 +5512,7 @@ components:
   securitySchemes:
     sessionCookie:
       type: apiKey
-      description: The httpOnly session cookie set by `POST /api/v1/auth/login`. A browser sends it automatically; an unsafe method additionally needs the `X-CSRF-Token` header.
+      description: The httpOnly session cookie, set by `POST /api/v1/auth/login` or by the single sign-on callback. A browser sends it automatically; an unsafe method additionally needs the `X-CSRF-Token` header.
       in: cookie
       name: isachore_token
     bearerToken:
@@ -5503,6 +5521,6 @@ components:
       scheme: bearer
     parkedAdminCookie:
       type: apiKey
-      description: An impersonating administrator's own session, parked while they act as somebody else. Only `POST /api/v1/auth/stop-impersonating` reads it.
+      description: An impersonating administrator's own session, parked while they act as somebody else. `POST /api/v1/auth/stop-impersonating` is the only route it *authenticates* - several others read it to attribute an action to the real operator, and logout reads it to end both sessions.
       in: cookie
       name: isachore_admin_token

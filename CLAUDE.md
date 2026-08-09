@@ -56,7 +56,8 @@ and the non-obvious gotchas.
 - **Docker** (`docker/`): everything Docker-related except the dev compose file,
   which stays at the root as `compose.yml` because it is the everyday entry point.
   `docker/` holds `backend.Dockerfile` and `frontend.Dockerfile` (multi-stage),
-  `nginx/` (the three nginx configs), and one self-contained
+  `nginx/` (five nginx configs: two mode files, two baked snippets and a baked
+  http-context map file), and one self-contained
   `compose.prod.<mode>.yml` per prod deployment mode: http / tls / traefik.
 - **CI** (`.github/workflows/`): `ci.yml` (ruff + pytest + eslint + prettier +
   `tsc -b` + vitest, plus a no-push build of both prod images that runs on pull
@@ -193,12 +194,30 @@ pre-commit run --all-files                           # what the git hook runs
     (`/docs`, rewritten to the backend's `/redoc`, and `/openapi.json`), and it exists as
     its own file because it is *location*-context where `nginx-common.conf` is
     server-context. Four things to keep straight:
-    - It restates all five security headers, because nginx replaces inherited `add_header`
+    - It restates **six** security headers, because nginx replaces inherited `add_header`
       directives rather than merging them - the same rule as `/sw.js`, but here the point
-      is to widen the CSP rather than to avoid losing it. Every relaxation was measured in
-      a browser against what ReDoc actually requests; `'unsafe-inline'` is deliberately
-      **absent** from `script-src`, since ReDoc's page carries no inline script (Swagger
-      UI's does, which is a second reason only one reader is exposed).
+      is to widen the CSP rather than to avoid losing it. Count them if you touch it: an
+      earlier draft of this very feature restated five and silently dropped HSTS from these
+      two responses in the tls mode, which is the mode that has it. Every relaxation was
+      measured in a browser against what ReDoc actually requests; `'unsafe-inline'` is
+      deliberately **absent** from `script-src`, since ReDoc's page carries no inline script
+      (Swagger UI's does, which is a second reason only one reader is exposed).
+    - **HSTS reaches it through `$hsts`, which is baked, and that is a deployment-safety
+      rule rather than a style one.** The map lives in `nginx-maps.conf` ->
+      `conf.d/00-isachore-maps.conf` because the tls mode bind-mounts an *operator's own*
+      copy of `nginx.tls.conf` over `conf.d/default.conf`: defining the variable in a mode
+      file meant that anybody upgrading with the copy they already had got
+      `nginx: [emerg] unknown "hsts" variable` and a container that would not start - the
+      whole site, not just the reference. Nothing the baked snippets reference may be
+      defined in a mode file. The map keys on `$scheme`, so HSTS is sent exactly where nginx
+      itself terminated TLS.
+    - **The refusal is not shared, so `error_page` sits at the call site** beside
+      `proxy_pass`: `/docs` redirects a person to `/login`, `/openapi.json` answers a plain
+      401 in the API's own `ErrorDetail` shape. Giving both the redirect meant a client
+      generator fetching the spec followed it to 200 OK of SPA HTML and reported a parse
+      error instead of "sign in". `@docs_sign_in` also needs `absolute_redirect off`, or
+      nginx builds the `Location` from its own listen scheme and downgrades an HTTPS visitor
+      to plain HTTP in the http and traefik modes, where TLS is terminated upstream.
     - `https://cdn.redoc.ly/redoc/logo-mini.svg` stays blocked on purpose, so /docs logs
       exactly one CSP error on every load. Anything else in that console is a real finding.
     - The gate is `auth_request` against `GET /api/v1/auth/verify`, a 204-or-401 route that
