@@ -7,6 +7,7 @@ from sqlalchemy import ColumnElement, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, SessionDep
+from app.api.responses import FORBIDDEN_OWNER, FORBIDDEN_ROLE
 from app.core import clock
 from app.core.config import settings
 from app.core.households import (
@@ -502,7 +503,7 @@ async def get_household(
     )
 
 
-@router.patch("/{household_id}", response_model=HouseholdListRead)
+@router.patch("/{household_id}", response_model=HouseholdListRead, responses=FORBIDDEN_OWNER)
 async def update_household(
     household_id: int, payload: HouseholdUpdate, user: CurrentUser, session: SessionDep
 ) -> HouseholdListRead:
@@ -515,7 +516,7 @@ async def update_household(
     return await load_household_read(session, household.id)
 
 
-@router.delete("/{household_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{household_id}", status_code=status.HTTP_204_NO_CONTENT, responses=FORBIDDEN_OWNER)
 async def delete_household(household_id: int, user: CurrentUser, session: SessionDep) -> None:
     household = await _get_owned_household(session, user.id, household_id)
     # Soft delete: hide the household but leave its chores untouched.
@@ -548,7 +549,11 @@ async def list_household_members(
     )
 
 
-@router.patch("/{household_id}/members/{user_id}", response_model=HouseholdMemberRoleRead)
+@router.patch(
+    "/{household_id}/members/{user_id}",
+    response_model=HouseholdMemberRoleRead,
+    responses=FORBIDDEN_ROLE,
+)
 async def update_household_member(
     household_id: int,
     user_id: int,
@@ -582,7 +587,11 @@ async def update_household_member(
     return await set_member_role(session, household, user_id, payload.role)
 
 
-@router.delete("/{household_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{household_id}/members/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=FORBIDDEN_OWNER,
+)
 async def remove_household_member(
     household_id: int, user_id: int, user: CurrentUser, session: SessionDep
 ) -> None:
@@ -644,6 +653,7 @@ async def _get_invitation_or_404(
     "/{household_id}/invitations",
     response_model=HouseholdInvitationRead,
     status_code=status.HTTP_201_CREATED,
+    responses=FORBIDDEN_ROLE,
 )
 async def create_invitation(
     household_id: int, user: CurrentUser, session: SessionDep
@@ -697,7 +707,11 @@ async def create_invitation(
     return _invitation_read(invitation)
 
 
-@router.get("/{household_id}/invitations", response_model=list[HouseholdInvitationRead])
+@router.get(
+    "/{household_id}/invitations",
+    response_model=list[HouseholdInvitationRead],
+    responses=FORBIDDEN_ROLE,
+)
 async def list_invitations(
     household_id: int, user: CurrentUser, session: SessionDep
 ) -> list[HouseholdInvitationRead]:
@@ -712,7 +726,9 @@ async def list_invitations(
 
 
 @router.post(
-    "/{household_id}/invitations/{invitation_id}/revoke", response_model=HouseholdInvitationRead
+    "/{household_id}/invitations/{invitation_id}/revoke",
+    response_model=HouseholdInvitationRead,
+    responses=FORBIDDEN_ROLE,
 )
 async def revoke_invitation(
     household_id: int, invitation_id: int, user: CurrentUser, session: SessionDep
@@ -731,7 +747,9 @@ async def revoke_invitation(
 
 
 @router.delete(
-    "/{household_id}/invitations/{invitation_id}", status_code=status.HTTP_204_NO_CONTENT
+    "/{household_id}/invitations/{invitation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=FORBIDDEN_ROLE,
 )
 async def delete_invitation(
     household_id: int, invitation_id: int, user: CurrentUser, session: SessionDep

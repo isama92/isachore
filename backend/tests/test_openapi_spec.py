@@ -1,10 +1,14 @@
 """The committed API reference has to still describe the app.
 
 `docs/api/openapi.yaml` is generated output kept under version control, and nothing else
-would notice it going stale: `docs/**` sits in both workflows' `paths-ignore`, so editing
-the spec runs no CI, and a backend change runs CI that passes whether or not anybody
-regenerated the file. So the guard has to live here, on the backend side, where a route
-change does run it.
+would notice it going stale: a backend change runs CI that would otherwise pass whether or
+not anybody regenerated the file. So the guard lives here, on the backend side, where a
+route change runs it.
+
+It also runs on a spec-only pull request, because `docs/**` was taken off `ci.yml`'s
+`paths-ignore` for exactly that (it stays on `publish.yml`'s, where a spec change ships no
+image). Before that, the one kind of PR that changes this file was the one kind nothing
+checked: a hand-edited spec merged green and failed here on the *next* person's PR.
 
 Failing this means the spec is behind the code, not that the code is wrong. Regenerate it
 (the command is in README.md's "API documentation" section) and commit the result.

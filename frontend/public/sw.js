@@ -18,8 +18,18 @@
 // browser's storage eviction on purpose: it is roughly a megabyte per deploy
 // against an origin quota in the hundreds, and pruning it properly needs the
 // build integration this worker exists to avoid.
-const CACHE = 'isachore-shell-v1'
+const CACHE = 'isachore-shell-v2'
 const SHELL = '/index.html'
+
+// Same-origin paths the prod nginx answers from the backend with HTML that is not the app:
+// the API reference. Without this the navigate branch below would happily store it as the
+// offline app shell, and the next offline visit to any app route would render the API
+// reference instead of isachore.
+//
+// Only the HTML one. `/openapi.json` is proxied beside it and is deliberately absent: it
+// serves application/json, which the content-type check in the navigate branch already
+// refuses to cache as the shell, so listing it would suppress a `respondWith` for no gain.
+const NOT_THE_APP = ['/docs']
 
 // Cache writes are fire-and-forget as far as the response is concerned, but they
 // still have to be handed to waitUntil, or the worker can be terminated before
@@ -61,6 +71,7 @@ self.addEventListener('fetch', (event) => {
   // network, untouched and uncached.
   if (request.method !== 'GET' || url.origin !== self.location.origin) return
   if (url.pathname.startsWith('/api/')) return
+  if (NOT_THE_APP.includes(url.pathname)) return
 
   // Navigations: network first, so a deployed update is picked up as soon as the
   // device is online, with the cached shell as the offline fallback.

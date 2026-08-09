@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import and_, func, or_, select
 
 from app.api.deps import CurrentUser, Impersonator, SessionDep
+from app.api.responses import FORBIDDEN_ROLE
 from app.api.v1.households import SortDir
 from app.core.chores import days_late
 from app.core.household_log import record_log_entry
@@ -200,7 +201,7 @@ async def list_completions(
     return Page[HistoryEntryRead](items=items, total=total, page=page, page_size=page_size)
 
 
-@router.delete("/{completion_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{completion_id}", status_code=status.HTTP_204_NO_CONTENT, responses=FORBIDDEN_ROLE)
 async def undo_completion(
     completion_id: int, user: CurrentUser, session: SessionDep, impersonator: Impersonator
 ) -> None:

@@ -1,0 +1,113 @@
+name: API spec
+
+# docs/api/openapi.yaml is generated output under version control, and the command that
+# updates it is manual. pytest's test_openapi_spec.py already refuses a backend PR whose spec
+# is stale, so drift is caught - but it is caught by failing somebody's build, and the fix is
+# still a person remembering two commands. This job does the remembering.
+#
+# It opens a PULL REQUEST rather than pushing. `main` is protected (locked, one approving
+# review required) and GITHUB_TOKEN is not an administrator, so a direct push is refused
+# outright; the alternative would be storing a token that can bypass every branch rule, which
+# is a poor trade for a documentation file.
+#
+# Two independent reasons this cannot loop back into publish.yml, which builds :latest from
+# main: a push made with GITHUB_TOKEN triggers no workflow at all, and publish.yml ignores
+# `docs/**` anyway. Neither alone would be something to rely on; together they are.
+#
+# THE FLIP SIDE OF THAT FIRST REASON: the PR this opens gets no CI either, so
+# test_openapi_spec.py - the guard `docs/**` was taken off ci.yml's paths-ignore to reach -
+# does not run on it. Accepted, because the diff is output of the very commands that test
+# compares against, and `main` currently requires no status checks (only a review). If
+# required checks are ever added, these PRs become unmergeable without a manual empty commit,
+# and the fix at that point is a PAT or GitHub App token rather than GITHUB_TOKEN.
+#
+# ONE-TIME REPOSITORY SETTING, not scriptable: Settings > Actions > General > "Allow GitHub
+# Actions to create and approve pull requests" must be on, or the last step fails with a
+# permissions error that does not mention the setting. Same class of manual step as flipping
+# the GHCR packages public (see README).
+on:
+  push:
+    branches: [main]
+    # Only the backend can move the spec: it is derived from the routes and their pydantic
+    # models and from nothing else.
+    paths:
+      - backend/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spec-main
+  # Never abandon a half-opened PR; a superseded commit simply regenerates on top.
+  cancel-in-progress: false
+
+jobs:
+  regenerate:
+    name: Regenerate the committed spec
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+
+      # Derived from the Dockerfile rather than restated, exactly as ci.yml does it: a
+      # base-image bump has to reach every job on its own, or CI ends up testing a different
+      # interpreter from the one the published image ships.
+      - id: toolchain
+        run: |
+          {
+            echo "python=$(sed -n 's|^FROM python:\([0-9.]*\)-slim.*|\1|p' docker/backend.Dockerfile | head -1)"
+            echo "uv=$(sed -n 's|^COPY --from=ghcr.io/astral-sh/uv:\([0-9.]*\) .*|\1|p' docker/backend.Dockerfile | head -1)"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ steps.toolchain.outputs.uv }}
+          python-version: ${{ steps.toolchain.outputs.python }}
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - run: uv sync --frozen
+        working-directory: backend
+
+      # No database, no Redis and no running server: every Settings field has a default and
+      # app.openapi() reads only the route table. That is what lets this job be three steps
+      # instead of a compose stack, and it is why the README documents the same pair of
+      # commands - what CI runs here has to be what a person can run by hand.
+      #
+      # The redocly major is pinned for the same reason the README pins it: a reformat from a
+      # future one would open a PR with a 4,000-line diff nobody can review.
+      - name: Regenerate docs/api/openapi.yaml
+        run: |
+          (cd backend && uv run python -c 'import json; from app.main import app; print(json.dumps(app.openapi()))') > "$RUNNER_TEMP/openapi.json"
+          npx --yes @redocly/cli@2 bundle "$RUNNER_TEMP/openapi.json" -o docs/api/openapi.yaml
+
+      - id: drift
+        run: |
+          if git diff --quiet -- docs/api/openapi.yaml; then
+            echo "The committed spec is already current."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git diff --stat -- docs/api/openapi.yaml
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # A fixed branch, so a second drift amends the open PR rather than opening a queue of
+      # them. Every string below is a literal: nothing from the triggering event reaches a
+      # `run:` or a title, so there is no injection surface here.
+      - if: steps.drift.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          branch: chore/regenerate-openapi
+          delete-branch: true
+          add-paths: docs/api/openapi.yaml
+          commit-message: Regenerate the committed OpenAPI spec
+          title: Regenerate the committed OpenAPI spec
+          body: |
+            `docs/api/openapi.yaml` had fallen behind the routes. Regenerated by
+            `.github/workflows/spec.yml` with the same two commands the README documents.
+
+            Generated output only - review the diff, not the wording. If it is large and
+            unexpected, check that the redocly major has not moved.

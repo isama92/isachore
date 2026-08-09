@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import contains_eager, defer, selectinload
 
 from app.api.deps import CurrentUser, Impersonator, SessionDep
+from app.api.responses import FORBIDDEN_ROLE
 from app.api.v1.households import SortDir
 from app.core import clock
 from app.core.assignment import initial_assignee, next_assignee, should_reassign
@@ -471,7 +472,9 @@ async def _reconcile_open_occurrence(
         occ.scheduled_for = await free_slot_from(session, chore.id, candidate, rule, tz)
 
 
-@router.post("", response_model=ChoreRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", response_model=ChoreRead, status_code=status.HTTP_201_CREATED, responses=FORBIDDEN_ROLE
+)
 async def create_chore(
     payload: ChoreCreate, user: CurrentUser, session: SessionDep, impersonator: Impersonator
 ) -> Chore:
@@ -602,7 +605,7 @@ async def get_chore(chore_id: int, user: CurrentUser, session: SessionDep) -> Ch
     return chore
 
 
-@router.patch("/{chore_id}", response_model=ChoreRead)
+@router.patch("/{chore_id}", response_model=ChoreRead, responses=FORBIDDEN_ROLE)
 async def update_chore(
     chore_id: int,
     payload: ChoreUpdate,
@@ -665,7 +668,7 @@ async def update_chore(
     return await _load_chore(session, chore.id)
 
 
-@router.delete("/{chore_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{chore_id}", status_code=status.HTTP_204_NO_CONTENT, responses=FORBIDDEN_ROLE)
 async def delete_chore(
     chore_id: int, user: CurrentUser, session: SessionDep, impersonator: Impersonator
 ) -> None:

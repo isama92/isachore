@@ -27,6 +27,11 @@ RUN npm run build
 FROM nginx:stable-alpine AS prod
 COPY --from=nginxconf nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=nginxconf nginx-common.conf /etc/nginx/snippets/isachore-common.conf
+# The shared body of the two API-reference locations (/docs and /openapi.json), which
+# nginx-common.conf includes from each of them. A separate snippet rather than two copies,
+# and separate from isachore-common.conf because it is location-context (that one is
+# server-context).
+COPY --from=nginxconf nginx-docs.conf /etc/nginx/snippets/isachore-docs.conf
 # Reference copy, inert at runtime: nginx only auto-includes conf.d/*.conf, and
 # the TLS mode bind-mounts its own conf over conf.d/default.conf anyway. Baked
 # so a TLS operator can extract the conf matching the image they pulled rather

@@ -174,6 +174,25 @@ describe('the service worker leaves alone what it must not touch', () => {
 
     expect(event.responded).toBeUndefined()
   })
+
+  // /docs is a same-origin HTML navigation that the prod nginx answers from the backend, so
+  // it DOES reach the navigate branch below -- which caches any good HTML navigation as the
+  // offline app shell. Without the guard the first visit to the API reference replaces the
+  // app: go offline afterwards and /home renders ReDoc. That is also what makes this case
+  // pin something, unlike the fall-through ones above: remove the guard and both assertions
+  // fail, because the branch does intercept.
+  it('never intercepts /docs, so the API reference cannot become the app shell', async () => {
+    const fresh = response({ body: 'the API reference' })
+    const { handlers, store } = await boot(vi.fn(async () => fresh))
+    const event = fetchEvent(request('/docs', { mode: 'navigate' }))
+
+    handlers.fetch(event)
+    await event.settle()
+
+    expect(event.responded).toBeUndefined()
+    // Still the shell `install` cached, not the page just fetched.
+    expect(shellIn(store)?.body).toBe('shell')
+  })
 })
 
 describe('the service worker, on a navigation', () => {

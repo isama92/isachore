@@ -34,7 +34,35 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await redis_client.aclose()
 
 
-app = FastAPI(title="isachore API", version="0.1.0", lifespan=lifespan)
+# The description carries the one authentication rule the generated document cannot state
+# for itself. FastAPI emits one `security` entry per scheme and OpenAPI reads separate
+# entries as ALTERNATIVES, so declaring X-CSRF-Token as a scheme alongside `sessionCookie`
+# would publish "cookie or header" - the opposite of what CsrfProtectMiddleware enforces,
+# which is both together. Prose here rather than a scheme that lies; see api/deps.py.
+API_DESCRIPTION = """\
+Chore management for households.
+
+## Authenticating
+
+Two transports, either of which opens a session created by `POST /api/v1/auth/login`:
+
+- the httpOnly `isachore_token` cookie, which a browser sends on its own, and
+- the same opaque token as an `Authorization: Bearer` header, for clients with no cookie jar.
+
+There is no self-registration: administrators create accounts, and the first administrator
+comes from the `init` CLI command.
+
+## The CSRF header
+
+A request authenticated **by cookie** that uses an unsafe method (POST, PATCH, PUT, DELETE)
+must also carry a non-empty `X-CSRF-Token` header, or it is refused with 403 before it
+reaches the route. Any value will do: this is a custom-header defence over `SameSite=Lax`,
+so what matters is that a cross-site form cannot set the header at all.
+
+`Authorization: Bearer` requests are exempt, as are requests carrying no auth cookie.
+"""
+
+app = FastAPI(title="isachore API", version="0.1.0", description=API_DESCRIPTION, lifespan=lifespan)
 # Transport-level request body cap (max_request_bytes); defence in depth behind
 # the prod nginx client_max_body_size for deployments without a proxy in front.
 app.add_middleware(BodySizeLimitMiddleware)

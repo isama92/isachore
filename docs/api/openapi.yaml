@@ -1,6 +1,27 @@
 openapi: 3.1.0
 info:
   title: isachore API
+  description: |
+    Chore management for households.
+
+    ## Authenticating
+
+    Two transports, either of which opens a session created by `POST /api/v1/auth/login`:
+
+    - the httpOnly `isachore_token` cookie, which a browser sends on its own, and
+    - the same opaque token as an `Authorization: Bearer` header, for clients with no cookie jar.
+
+    There is no self-registration: administrators create accounts, and the first administrator
+    comes from the `init` CLI command.
+
+    ## The CSRF header
+
+    A request authenticated **by cookie** that uses an unsafe method (POST, PATCH, PUT, DELETE)
+    must also carry a non-empty `X-CSRF-Token` header, or it is refused with 403 before it
+    reaches the route. Any value will do: this is a custom-header defence over `SameSite=Lax`,
+    so what matters is that a cross-site form cannot set the header at all.
+
+    `Authorization: Bearer` requests are exempt, as are requests carrying no auth cookie.
   version: 0.1.0
 paths:
   /api/v1/health:
@@ -22,114 +43,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthRead'
-  /api/v1/auth/login:
-    post:
-      tags:
-        - auth
-      summary: Login
-      operationId: login_api_v1_auth_login_post
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/LoginRequest'
-        required: true
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/LoginResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/v1/auth/verify-2fa:
-    post:
-      tags:
-        - auth
-      summary: Verify Two Factor
-      description: |-
-        Second step of a two-step login: verify the TOTP (or recovery) code
-        against the challenge parked by /login, then mint the real session.
-      operationId: verify_two_factor_api_v1_auth_verify_2fa_post
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TwoFactorVerifyRequest'
-        required: true
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MeRead'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/v1/auth/logout:
-    post:
-      tags:
-        - auth
-      summary: Logout
-      operationId: logout_api_v1_auth_logout_post
-      responses:
-        '204':
-          description: Successful Response
-  /api/v1/auth/methods:
-    get:
-      tags:
-        - auth
-      summary: Auth Methods
-      description: |-
-        Which ways in the login page should offer. Public: the page that asks has nobody
-        signed in yet, by definition.
-
-        `password_enabled` reads the same condition as the 403 in `login` above, so the two
-        cannot disagree - the form is never hidden while the endpoint works, nor offered
-        while it refuses.
-      operationId: auth_methods_api_v1_auth_methods_get
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AuthMethodsRead'
-  /api/v1/auth/me:
-    get:
-      tags:
-        - auth
-      summary: Me
-      operationId: me_api_v1_auth_me_get
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MeRead'
-  /api/v1/auth/stop-impersonating:
-    post:
-      tags:
-        - auth
-      summary: Stop Impersonating
-      operationId: stop_impersonating_api_v1_auth_stop_impersonating_post
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UserRead'
   /api/v1/auth/oidc/start:
     get:
       tags:
@@ -168,7 +81,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
-          description: Too many sign-on attempts from this address.
+          description: Too many attempts. `Retry-After` carries the seconds still to run.
           headers:
             Retry-After:
               description: Seconds until the throttle window clears.
@@ -232,7 +145,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
-          description: Too many sign-on attempts from this address.
+          description: Too many attempts. `Retry-After` carries the seconds still to run.
           headers:
             Retry-After:
               description: Seconds until the throttle window clears.
@@ -305,6 +218,241 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/auth/login:
+    post:
+      tags:
+        - auth
+      summary: Login
+      operationId: login_api_v1_auth_login_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          description: Too many attempts. `Retry-After` carries the seconds still to run.
+          headers:
+            Retry-After:
+              description: Seconds until the throttle window clears.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+  /api/v1/auth/verify-2fa:
+    post:
+      tags:
+        - auth
+      summary: Verify Two Factor
+      description: |-
+        Second step of a two-step login: verify the TOTP (or recovery) code
+        against the challenge parked by /login, then mint the real session.
+      operationId: verify_two_factor_api_v1_auth_verify_2fa_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TwoFactorVerifyRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          description: Too many attempts. `Retry-After` carries the seconds still to run.
+          headers:
+            Retry-After:
+              description: Seconds until the throttle window clears.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+  /api/v1/auth/logout:
+    post:
+      tags:
+        - auth
+      summary: Logout
+      operationId: logout_api_v1_auth_logout_post
+      responses:
+        '204':
+          description: Successful Response
+  /api/v1/auth/methods:
+    get:
+      tags:
+        - auth
+      summary: Auth Methods
+      description: |-
+        Which ways in the login page should offer. Public: the page that asks has nobody
+        signed in yet, by definition.
+
+        `password_enabled` reads the same condition as the 403 in `login` above, so the two
+        cannot disagree - the form is never hidden while the endpoint works, nor offered
+        while it refuses.
+      operationId: auth_methods_api_v1_auth_methods_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthMethodsRead'
+  /api/v1/auth/verify:
+    get:
+      tags:
+        - auth
+      summary: Verify Session
+      description: |-
+        204 if this request carries a live session, 401 if it does not. No body.
+
+        Not for the SPA, which uses `/me`: this exists for the prod nginx `auth_request`
+        subrequest that gates the API reference at `/docs` (docker/nginx/nginx-docs.conf).
+        nginx reads only the status and discards the body, and `/me` would pay a memberships
+        query per docs request to have it thrown away. Being a GET, the subrequest is exempt
+        from CsrfProtectMiddleware on method alone, which is what lets it work with no header.
+
+        So it looks unused from inside the Python: nothing in `frontend/` calls it, and grep
+        will not find a caller. The caller is a conf file.
+      operationId: verify_session_api_v1_auth_verify_get
+      responses:
+        '204':
+          description: Successful Response
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+      security:
+        - sessionCookie: []
+        - bearerToken: []
+  /api/v1/auth/me:
+    get:
+      tags:
+        - auth
+      summary: Me
+      operationId: me_api_v1_auth_me_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+      security:
+        - sessionCookie: []
+        - bearerToken: []
+  /api/v1/auth/stop-impersonating:
+    post:
+      tags:
+        - auth
+      summary: Stop Impersonating
+      operationId: stop_impersonating_api_v1_auth_stop_impersonating_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserRead'
+        '401':
+          description: 'No impersonation in progress: the parked admin cookie is absent.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+      security:
+        - parkedAdminCookie: []
+  /api/v1/invitations/{token}:
+    get:
+      tags:
+        - invitations
+      summary: Invitation Info
+      description: 'Public: what the accept page shows before the recipient joins.'
+      operationId: invitation_info_api_v1_invitations__token__get
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Token
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdInvitationInfo'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/invitations/{token}/accept:
+    post:
+      tags:
+        - invitations
+      summary: Accept Invitation
+      description: The logged-in recipient joins the household; the invite is single-use.
+      operationId: accept_invitation_api_v1_invitations__token__accept_post
+      security:
+        - sessionCookie: []
+        - bearerToken: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Token
+      responses:
+        '204':
+          description: Successful Response
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/profile:
     patch:
       tags:
@@ -329,12 +477,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+        - sessionCookie: []
+        - bearerToken: []
   /api/v1/profile/avatar:
     put:
       tags:
@@ -357,12 +514,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+        - sessionCookie: []
+        - bearerToken: []
     delete:
       tags:
         - profile
@@ -376,6 +542,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+      security:
+        - sessionCookie: []
+        - bearerToken: []
   /api/v1/profile/2fa/setup:
     post:
       tags:
@@ -392,6 +567,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TwoFactorSetupRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+      security:
+        - sessionCookie: []
+        - bearerToken: []
   /api/v1/profile/2fa/confirm:
     post:
       tags:
@@ -414,12 +598,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RecoveryCodesRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+        - sessionCookie: []
+        - bearerToken: []
   /api/v1/profile/2fa/recovery-codes:
     post:
       tags:
@@ -442,12 +635,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RecoveryCodesRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+        - sessionCookie: []
+        - bearerToken: []
   /api/v1/profile/2fa/disable:
     post:
       tags:
@@ -470,12 +672,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+        - sessionCookie: []
+        - bearerToken: []
   /api/v1/home:
     get:
       tags:
@@ -496,6 +707,9 @@ paths:
         filtered scope. A household or member id the user can't see just yields an
         empty scope, like the chores list.
       operationId: get_home_api_v1_home_get
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: household_id
           in: query
@@ -523,6 +737,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HomeRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -545,6 +765,9 @@ paths:
         match the due view: `household_id` narrows to one household, `assignee_id` (repeatable)
         keeps those members' chores plus unassigned/shared ones. Unpaginated, like the due view.
       operationId: get_unscheduled_api_v1_unscheduled_get
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: household_id
           in: query
@@ -572,6 +795,201 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UnscheduledRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/stats:
+    get:
+      tags:
+        - stats
+      summary: Get Stats
+      description: |-
+        Aggregated completion and overdue statistics across the active households where the
+        caller is at least a deputy (so housemates' work is included), for the Statistics page.
+
+        `range` (7d/30d/90d) windows the completion-based metrics; the overdue snapshot
+        (`status_breakdown`, `currently_overdue`, `active_chores`) is always live. Optional
+        `household_id` narrows to one household; `user_id` narrows completions to that
+        person's credited completions and the live snapshot to occurrences currently on
+        their plate. A household/person the user can't see just yields empty scope, and so does a
+        household they are only a helper in - a helper is not shown other people's numbers, and
+        the page spans every household at once, so narrowing the scope is what enforces that
+        rather than a 403.
+
+        Unscheduled chores have no deadline, so they are counted where the question is "how much
+        got done, and by whom" (`completed_in_range`, `completions_over_time`, `per_person`) and
+        excluded where the answer needs a due date (`currently_overdue`, `status_breakdown`,
+        `active_chores`, `punctuality`, `on_time_rate`). One consequence to keep in mind:
+        `punctuality` therefore does not sum to `completed_in_range`.
+
+        Skipped occurrences are closures that produced no work, so every "work done" metric here
+        excludes them and they are reported alongside instead: `skipped_in_range`, a per-bucket
+        `skipped` on `completions_over_time`, and a fourth `punctuality` bucket. Two notes on that
+        last one. It is the one place the two exclusions meet, and it is not a special case: skips
+        are counted inside the same `repeats != manual` branch as the three due-date buckets, so
+        the four together are exactly the scheduled occurrences that closed in the range. And
+        `on_time_rate` deliberately does NOT count skips in its denominator, staying "of the work
+        that was done, how much was punctual" - so the four buckets do not add up to that rate's
+        base either.
+
+        `most_skipped` is the one skip figure here that answers *which* chore rather than how
+        many, so it is also the one that drops soft-deleted chores: it is a shortlist to act on,
+        and a deleted chore cannot be. Their skips do still count in `skipped_in_range`, so the
+        ranking deliberately does not sum to that KPI.
+      operationId: get_stats_api_v1_stats_get
+      security:
+        - sessionCookie: []
+        - bearerToken: []
+      parameters:
+        - name: range
+          in: query
+          required: false
+          schema:
+            enum:
+              - 7d
+              - 30d
+              - 90d
+            type: string
+            default: 30d
+            title: Range
+        - name: household_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: integer
+                minimum: 1
+              - type: 'null'
+            title: Household Id
+        - name: user_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: integer
+                minimum: 1
+              - type: 'null'
+            title: User Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatsRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/logs:
+    get:
+      tags:
+        - logs
+      summary: List Log Entries
+      description: |-
+        The activity log of every active household the caller OWNS, newest first.
+
+        Ownership rather than a role: an organiser manages the chores, and this is the record of
+        that management, so it answers to whoever the household belongs to. A non-owner - organiser
+        included - gets an empty page rather than a 403, because the list spans several households
+        at once and narrowing is what that surface does. Same for `household_id` naming a household
+        they do not own, and `user_id` narrows by the *actor*.
+      operationId: list_log_entries_api_v1_logs_get
+      security:
+        - sessionCookie: []
+        - bearerToken: []
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+            title: Page
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+            minimum: 1
+            default: 20
+            title: Page Size
+        - name: sort_by
+          in: query
+          required: false
+          schema:
+            const: created_at
+            type: string
+            default: created_at
+            title: Sort By
+        - name: sort_dir
+          in: query
+          required: false
+          schema:
+            enum:
+              - asc
+              - desc
+            type: string
+            default: desc
+            title: Sort Dir
+        - name: household_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: integer
+                minimum: 1
+              - type: 'null'
+            title: Household Id
+        - name: user_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: integer
+                minimum: 1
+              - type: 'null'
+            title: User Id
+        - name: action
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - $ref: '#/components/schemas/HouseholdLogAction'
+              - type: 'null'
+            title: Action
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Page_LogEntryRead_'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -584,6 +1002,9 @@ paths:
         - households
       summary: List Households
       operationId: list_households_api_v1_households_get
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: page
           in: query
@@ -639,6 +1060,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Page_HouseholdListRead_'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -650,6 +1077,9 @@ paths:
         - households
       summary: Create Household
       operationId: create_household_api_v1_households_post
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       requestBody:
         required: true
         content:
@@ -663,6 +1093,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HouseholdListRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -675,6 +1111,9 @@ paths:
         - households
       summary: Get Household
       operationId: get_household_api_v1_households__household_id__get
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: household_id
           in: path
@@ -689,6 +1128,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HouseholdListRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -700,6 +1145,9 @@ paths:
         - households
       summary: Update Household
       operationId: update_household_api_v1_households__household_id__patch
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: household_id
           in: path
@@ -720,6 +1168,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HouseholdListRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: Only the household's owner may do this. Being an organiser is not enough, and no role change grants it - ownership has to be transferred.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -731,6 +1191,9 @@ paths:
         - households
       summary: Delete Household
       operationId: delete_household_api_v1_households__household_id__delete
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: household_id
           in: path
@@ -741,6 +1204,18 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: Only the household's owner may do this. Being an organiser is not enough, and no role change grants it - ownership has to be transferred.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -753,6 +1228,9 @@ paths:
         - households
       summary: List Household Members
       operationId: list_household_members_api_v1_households__household_id__members_get
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: household_id
           in: path
@@ -813,6 +1291,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Page_HouseholdMemberRoleRead_'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -838,6 +1322,9 @@ paths:
         target: everyone gets the same actionable answer (transfer ownership, which promotes the
         new owner) instead of an organiser getting a 403 about a rule that is not the real reason.
       operationId: update_household_member_api_v1_households__household_id__members__user_id__patch
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: household_id
           in: path
@@ -864,6 +1351,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HouseholdMemberRoleRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: A member of the household, but the role held there does not reach what this route requires.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -875,6 +1374,9 @@ paths:
         - households
       summary: Remove Household Member
       operationId: remove_household_member_api_v1_households__household_id__members__user_id__delete
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: household_id
           in: path
@@ -891,6 +1393,18 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: Only the household's owner may do this. Being an organiser is not enough, and no role change grants it - ownership has to be transferred.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -903,6 +1417,9 @@ paths:
         - households
       summary: Leave Household
       operationId: leave_household_api_v1_households__household_id__leave_post
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: household_id
           in: path
@@ -913,6 +1430,12 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -925,6 +1448,9 @@ paths:
         - households
       summary: Create Invitation
       operationId: create_invitation_api_v1_households__household_id__invitations_post
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: household_id
           in: path
@@ -939,6 +1465,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HouseholdInvitationRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: A member of the household, but the role held there does not reach what this route requires.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -950,6 +1488,9 @@ paths:
         - households
       summary: List Invitations
       operationId: list_invitations_api_v1_households__household_id__invitations_get
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: household_id
           in: path
@@ -967,6 +1508,18 @@ paths:
                 items:
                   $ref: '#/components/schemas/HouseholdInvitationRead'
                 title: Response List Invitations Api V1 Households  Household Id  Invitations Get
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: A member of the household, but the role held there does not reach what this route requires.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -979,6 +1532,9 @@ paths:
         - households
       summary: Revoke Invitation
       operationId: revoke_invitation_api_v1_households__household_id__invitations__invitation_id__revoke_post
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: household_id
           in: path
@@ -999,6 +1555,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HouseholdInvitationRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: A member of the household, but the role held there does not reach what this route requires.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1011,6 +1579,9 @@ paths:
         - households
       summary: Delete Invitation
       operationId: delete_invitation_api_v1_households__household_id__invitations__invitation_id__delete
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: household_id
           in: path
@@ -1027,56 +1598,18 @@ paths:
       responses:
         '204':
           description: Successful Response
-        '422':
-          description: Validation Error
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/v1/invitations/{token}:
-    get:
-      tags:
-        - invitations
-      summary: Invitation Info
-      description: 'Public: what the accept page shows before the recipient joins.'
-      operationId: invitation_info_api_v1_invitations__token__get
-      parameters:
-        - name: token
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Token
-      responses:
-        '200':
-          description: Successful Response
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: A member of the household, but the role held there does not reach what this route requires.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HouseholdInvitationInfo'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/v1/invitations/{token}/accept:
-    post:
-      tags:
-        - invitations
-      summary: Accept Invitation
-      description: The logged-in recipient joins the household; the invite is single-use.
-      operationId: accept_invitation_api_v1_invitations__token__accept_post
-      parameters:
-        - name: token
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Token
-      responses:
-        '204':
-          description: Successful Response
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1089,6 +1622,9 @@ paths:
         - tags
       summary: List Tags
       operationId: list_tags_api_v1_tags_get
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: page
           in: query
@@ -1144,6 +1680,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Page_TagRead_'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1155,6 +1697,9 @@ paths:
         - tags
       summary: Create Tag
       operationId: create_tag_api_v1_tags_post
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       requestBody:
         required: true
         content:
@@ -1168,6 +1713,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TagRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: A member of the household, but the role held there does not reach what this route requires.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1180,6 +1737,9 @@ paths:
         - tags
       summary: Get Tag
       operationId: get_tag_api_v1_tags__tag_id__get
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: tag_id
           in: path
@@ -1194,6 +1754,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TagRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: A member of the household, but the role held there does not reach what this route requires.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1205,6 +1777,9 @@ paths:
         - tags
       summary: Update Tag
       operationId: update_tag_api_v1_tags__tag_id__patch
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: tag_id
           in: path
@@ -1225,6 +1800,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TagRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: A member of the household, but the role held there does not reach what this route requires.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1236,6 +1823,9 @@ paths:
         - tags
       summary: Delete Tag
       operationId: delete_tag_api_v1_tags__tag_id__delete
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: tag_id
           in: path
@@ -1246,6 +1836,18 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: A member of the household, but the role held there does not reach what this route requires.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1258,6 +1860,9 @@ paths:
         - chores
       summary: Create Chore
       operationId: create_chore_api_v1_chores_post
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       requestBody:
         required: true
         content:
@@ -1271,6 +1876,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ChoreRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: A member of the household, but the role held there does not reach what this route requires.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1282,6 +1899,9 @@ paths:
         - chores
       summary: List Chores
       operationId: list_chores_api_v1_chores_get
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: page
           in: query
@@ -1348,6 +1968,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Page_ChoreListRead_'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1360,6 +1986,9 @@ paths:
         - chores
       summary: Get Chore
       operationId: get_chore_api_v1_chores__chore_id__get
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: chore_id
           in: path
@@ -1374,6 +2003,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ChoreRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1385,6 +2020,9 @@ paths:
         - chores
       summary: Update Chore
       operationId: update_chore_api_v1_chores__chore_id__patch
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: chore_id
           in: path
@@ -1405,6 +2043,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ChoreRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: A member of the household, but the role held there does not reach what this route requires.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1416,6 +2066,9 @@ paths:
         - chores
       summary: Delete Chore
       operationId: delete_chore_api_v1_chores__chore_id__delete
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: chore_id
           in: path
@@ -1426,6 +2079,18 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: A member of the household, but the role held there does not reach what this route requires.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1454,6 +2119,9 @@ paths:
         successor advances one slot rather than jumping past everything that was missed, so a
         backlog is walked one completion at a time. Refused for an unscheduled chore, below.
       operationId: complete_chore_api_v1_chores__chore_id__complete_post
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: chore_id
           in: path
@@ -1476,6 +2144,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CompletionRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1508,6 +2182,9 @@ paths:
         view. Bounding it would need a notion of "too early" that the completion path does not
         have; if that is ever wanted, both paths should get it together.
       operationId: skip_chore_api_v1_chores__chore_id__skip_post
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: chore_id
           in: path
@@ -1522,6 +2199,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CompletionRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1553,6 +2236,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HistoryFilterOptions'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+      security:
+        - sessionCookie: []
+        - bearerToken: []
   /api/v1/completions:
     get:
       tags:
@@ -1570,6 +2262,9 @@ paths:
         soft-deleted chores is kept (the title is snapshotted for exactly this and the chore row
         still resolves the join).
       operationId: list_completions_api_v1_completions_get
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: page
           in: query
@@ -1644,6 +2339,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Page_HistoryEntryRead_'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1670,6 +2371,9 @@ paths:
         chore's turn back, so an organiser undoing a housemate's closure can move work between
         people - deliberately, since fixing a mis-skip is the point.
       operationId: undo_completion_api_v1_completions__completion_id__delete
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: completion_id
           in: path
@@ -1680,177 +2384,18 @@ paths:
       responses:
         '204':
           description: Successful Response
-        '422':
-          description: Validation Error
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/v1/stats:
-    get:
-      tags:
-        - stats
-      summary: Get Stats
-      description: |-
-        Aggregated completion and overdue statistics across the active households where the
-        caller is at least a deputy (so housemates' work is included), for the Statistics page.
-
-        `range` (7d/30d/90d) windows the completion-based metrics; the overdue snapshot
-        (`status_breakdown`, `currently_overdue`, `active_chores`) is always live. Optional
-        `household_id` narrows to one household; `user_id` narrows completions to that
-        person's credited completions and the live snapshot to occurrences currently on
-        their plate. A household/person the user can't see just yields empty scope, and so does a
-        household they are only a helper in - a helper is not shown other people's numbers, and
-        the page spans every household at once, so narrowing the scope is what enforces that
-        rather than a 403.
-
-        Unscheduled chores have no deadline, so they are counted where the question is "how much
-        got done, and by whom" (`completed_in_range`, `completions_over_time`, `per_person`) and
-        excluded where the answer needs a due date (`currently_overdue`, `status_breakdown`,
-        `active_chores`, `punctuality`, `on_time_rate`). One consequence to keep in mind:
-        `punctuality` therefore does not sum to `completed_in_range`.
-
-        Skipped occurrences are closures that produced no work, so every "work done" metric here
-        excludes them and they are reported alongside instead: `skipped_in_range`, a per-bucket
-        `skipped` on `completions_over_time`, and a fourth `punctuality` bucket. Two notes on that
-        last one. It is the one place the two exclusions meet, and it is not a special case: skips
-        are counted inside the same `repeats != manual` branch as the three due-date buckets, so
-        the four together are exactly the scheduled occurrences that closed in the range. And
-        `on_time_rate` deliberately does NOT count skips in its denominator, staying "of the work
-        that was done, how much was punctual" - so the four buckets do not add up to that rate's
-        base either.
-
-        `most_skipped` is the one skip figure here that answers *which* chore rather than how
-        many, so it is also the one that drops soft-deleted chores: it is a shortlist to act on,
-        and a deleted chore cannot be. Their skips do still count in `skipped_in_range`, so the
-        ranking deliberately does not sum to that KPI.
-      operationId: get_stats_api_v1_stats_get
-      parameters:
-        - name: range
-          in: query
-          required: false
-          schema:
-            enum:
-              - 7d
-              - 30d
-              - 90d
-            type: string
-            default: 30d
-            title: Range
-        - name: household_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: integer
-                minimum: 1
-              - type: 'null'
-            title: Household Id
-        - name: user_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: integer
-                minimum: 1
-              - type: 'null'
-            title: User Id
-      responses:
-        '200':
-          description: Successful Response
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: A member of the household, but the role held there does not reach what this route requires.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StatsRead'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/v1/logs:
-    get:
-      tags:
-        - logs
-      summary: List Log Entries
-      description: |-
-        The activity log of every active household the caller OWNS, newest first.
-
-        Ownership rather than a role: an organiser manages the chores, and this is the record of
-        that management, so it answers to whoever the household belongs to. A non-owner - organiser
-        included - gets an empty page rather than a 403, because the list spans several households
-        at once and narrowing is what that surface does. Same for `household_id` naming a household
-        they do not own, and `user_id` narrows by the *actor*.
-      operationId: list_log_entries_api_v1_logs_get
-      parameters:
-        - name: page
-          in: query
-          required: false
-          schema:
-            type: integer
-            minimum: 1
-            default: 1
-            title: Page
-        - name: page_size
-          in: query
-          required: false
-          schema:
-            type: integer
-            maximum: 100
-            minimum: 1
-            default: 20
-            title: Page Size
-        - name: sort_by
-          in: query
-          required: false
-          schema:
-            const: created_at
-            type: string
-            default: created_at
-            title: Sort By
-        - name: sort_dir
-          in: query
-          required: false
-          schema:
-            enum:
-              - asc
-              - desc
-            type: string
-            default: desc
-            title: Sort Dir
-        - name: household_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: integer
-                minimum: 1
-              - type: 'null'
-            title: Household Id
-        - name: user_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: integer
-                minimum: 1
-              - type: 'null'
-            title: User Id
-        - name: action
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - $ref: '#/components/schemas/HouseholdLogAction'
-              - type: 'null'
-            title: Action
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Page_LogEntryRead_'
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1863,6 +2408,9 @@ paths:
         - admin-users
       summary: List Users
       operationId: list_users_api_v1_admin_users_get
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: page
           in: query
@@ -1947,6 +2495,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Page_UserRead_'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1958,6 +2518,9 @@ paths:
         - admin-users
       summary: Create User
       operationId: create_user_api_v1_admin_users_post
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       requestBody:
         required: true
         content:
@@ -1971,6 +2534,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -1983,6 +2558,9 @@ paths:
         - admin-users
       summary: Get User
       operationId: get_user_api_v1_admin_users__user_id__get
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: user_id
           in: path
@@ -1997,6 +2575,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -2008,6 +2598,9 @@ paths:
         - admin-users
       summary: Update User
       operationId: update_user_api_v1_admin_users__user_id__patch
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: user_id
           in: path
@@ -2028,6 +2621,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -2039,6 +2644,9 @@ paths:
         - admin-users
       summary: Deactivate User
       operationId: deactivate_user_api_v1_admin_users__user_id__delete
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: user_id
           in: path
@@ -2049,6 +2657,18 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -2061,6 +2681,9 @@ paths:
         - admin-users
       summary: Impersonate User
       operationId: impersonate_user_api_v1_admin_users__user_id__impersonate_post
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: user_id
           in: path
@@ -2075,6 +2698,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -2092,6 +2727,9 @@ paths:
         Deliberately does NOT revoke the user's sessions: 2FA reset is about future
         logins, and a locked-out user usually has no live session anyway. Idempotent.
       operationId: reset_two_factor_api_v1_admin_users__user_id__reset_2fa_post
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: user_id
           in: path
@@ -2106,6 +2744,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -2118,6 +2768,9 @@ paths:
         - admin-users
       summary: Resend Confirmation
       operationId: resend_confirmation_api_v1_admin_users__user_id__resend_confirmation_post
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: user_id
           in: path
@@ -2128,6 +2781,18 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -2147,6 +2812,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServerSettingsRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+      security:
+        - sessionCookie: []
+        - bearerToken: []
     patch:
       tags:
         - admin-settings
@@ -2165,12 +2845,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServerSettingsRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+        - sessionCookie: []
+        - bearerToken: []
   /api/v1/admin/settings/test-email:
     post:
       tags:
@@ -2180,12 +2875,30 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+      security:
+        - sessionCookie: []
+        - bearerToken: []
   /api/v1/admin/households:
     get:
       tags:
         - admin-households
       summary: List Households
       operationId: list_households_api_v1_admin_households_get
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: page
           in: query
@@ -2252,6 +2965,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Page_HouseholdListRead_'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -2263,6 +2988,9 @@ paths:
         - admin-households
       summary: Create Household
       operationId: create_household_api_v1_admin_households_post
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       requestBody:
         required: true
         content:
@@ -2276,6 +3004,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HouseholdListRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -2288,6 +3028,9 @@ paths:
         - admin-households
       summary: Get Household
       operationId: get_household_api_v1_admin_households__household_id__get
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: household_id
           in: path
@@ -2302,6 +3045,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HouseholdListRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -2313,6 +3068,9 @@ paths:
         - admin-households
       summary: Update Household
       operationId: update_household_api_v1_admin_households__household_id__patch
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: household_id
           in: path
@@ -2333,6 +3091,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HouseholdListRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -2344,6 +3114,9 @@ paths:
         - admin-households
       summary: Delete Household
       operationId: delete_household_api_v1_admin_households__household_id__delete
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: household_id
           in: path
@@ -2354,6 +3127,18 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -2366,6 +3151,9 @@ paths:
         - admin-households
       summary: Restore Household
       operationId: restore_household_api_v1_admin_households__household_id__restore_post
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: household_id
           in: path
@@ -2380,6 +3168,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HouseholdListRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -2392,6 +3192,9 @@ paths:
         - admin-households
       summary: List Household Members
       operationId: list_household_members_api_v1_admin_households__household_id__members_get
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: household_id
           in: path
@@ -2452,6 +3255,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Page_HouseholdMemberRoleRead_'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -2474,6 +3289,9 @@ paths:
         Resolves through `_get_household_or_404`, so it reaches soft-deleted households like the
         other routes here - a role is worth fixing before restoring one.
       operationId: update_household_member_api_v1_admin_households__household_id__members__user_id__patch
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: household_id
           in: path
@@ -2500,6 +3318,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HouseholdMemberRoleRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -2511,6 +3341,9 @@ paths:
         - admin-households
       summary: Remove Household Member
       operationId: remove_household_member_api_v1_admin_households__household_id__members__user_id__delete
+      security:
+        - sessionCookie: []
+        - bearerToken: []
       parameters:
         - name: household_id
           in: path
@@ -2527,6 +3360,18 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
         '422':
           description: Validation Error
           content:
@@ -4646,3 +5491,18 @@ components:
         - msg
         - type
       title: ValidationError
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      description: The httpOnly session cookie set by `POST /api/v1/auth/login`. A browser sends it automatically; an unsafe method additionally needs the `X-CSRF-Token` header.
+      in: cookie
+      name: isachore_token
+    bearerToken:
+      type: http
+      description: 'The same opaque session token as an `Authorization: Bearer` header, for clients with no cookie jar. Exempt from the `X-CSRF-Token` requirement.'
+      scheme: bearer
+    parkedAdminCookie:
+      type: apiKey
+      description: An impersonating administrator's own session, parked while they act as somebody else. Only `POST /api/v1/auth/stop-impersonating` reads it.
+      in: cookie
+      name: isachore_admin_token
