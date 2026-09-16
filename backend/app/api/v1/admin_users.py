@@ -7,7 +7,7 @@ from sqlalchemy import delete, func, or_, select
 
 from app.api.deps import AdminUser, Impersonator, SessionDep, get_request_token
 from app.api.responses import refusals
-from app.core.api_tokens import load_api_token, revoke_api_token
+from app.core.api_tokens import api_token_status, revoke_api_token
 from app.core.app_settings import get_app_settings
 from app.core.audit import record_event
 from app.core.email import NO_SMTP_DETAIL, send_confirmation_email, smtp_configured
@@ -31,7 +31,6 @@ from app.models import (
     UserStatus,
 )
 from app.schemas import (
-    ApiTokenRead,
     ApiTokenStatusRead,
     Page,
     UserCreate,
@@ -553,10 +552,7 @@ async def get_user_api_token(user_id: int, _: AdminUser, session: SessionDep) ->
     the token: only its hash is stored, so an administrator cannot read one out any
     more than the owner can."""
     user = await _get_user_or_404(session, user_id)
-    api_token = await load_api_token(session, user.id)
-    return ApiTokenStatusRead(
-        token=ApiTokenRead.model_validate(api_token) if api_token is not None else None
-    )
+    return await api_token_status(session, user.id)
 
 
 @router.delete(

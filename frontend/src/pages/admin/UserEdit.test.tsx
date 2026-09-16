@@ -132,6 +132,17 @@ describe('UserEdit', () => {
     expect(screen.queryByRole('button', { name: 'Revoke token' })).not.toBeInTheDocument()
   })
 
+  it('says the token check failed rather than hiding the panel', async () => {
+    // Hiding it would read as "this user holds no token", which is the one wrong answer
+    // that looks like a right one to an administrator offboarding an integration.
+    renderEdit(stubFetch({ user: member }))
+
+    expect(
+      await screen.findByText('Could not check whether this user holds an access token.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('This user has no access token.')).not.toBeInTheDocument()
+  })
+
   it('revokes a user access token after confirming, leaving the account alone', async () => {
     const fetchMock = stubFetch({
       user: member,

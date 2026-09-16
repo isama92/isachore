@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { api, ApiError } from '../lib/api'
+import { copyToClipboard } from '../lib/clipboard'
 import { endpoints } from '../lib/endpoints'
 import { formatDateTime } from '../lib/format'
 import type { ApiTokenCreated, ApiTokenStatus } from '../lib/types'
@@ -33,12 +34,15 @@ import { Label } from '@/components/ui/label'
 // over a secret it will never show again.
 function GeneratedToken({ token }: { token: string }) {
   const { t } = useTranslation()
+  const [copyError, setCopyError] = useState<string | null>(null)
   async function copy() {
-    try {
-      await navigator.clipboard?.writeText(token)
+    // Reported rather than swallowed. This token is on screen once, so "it looks like it
+    // copied" is the one outcome that costs the user something they cannot get back.
+    if (await copyToClipboard(token)) {
+      setCopyError(null)
       toast.success(t('profile.apiTokenCopied'))
-    } catch {
-      // Clipboard access can be denied; the token is still on screen to copy by hand.
+    } else {
+      setCopyError(t('profile.apiTokenCopyError'))
     }
   }
   return (
@@ -60,6 +64,7 @@ function GeneratedToken({ token }: { token: string }) {
       >
         {t('profile.apiTokenCopy')}
       </Button>
+      {copyError && <p className="text-[13px] font-bold text-danger">{copyError}</p>}
     </div>
   )
 }
@@ -68,7 +73,12 @@ export default function ApiTokenSettings() {
   const { t } = useTranslation()
 
   const [status, setStatus] = useState<ApiTokenStatus | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
+  // Two pieces, so the effect below needs no `t` and can depend on nothing: the server's
+  // sentence when it gave one, and a flag for "the read failed" that renders a translated
+  // fallback at render time instead. With `t` in the deps the status was refetched every
+  // time the user switched language, which this same page hosts the control for.
+  const [loadFailed, setLoadFailed] = useState(false)
+  const [loadDetail, setLoadDetail] = useState<string | null>(null)
 
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
@@ -86,12 +96,14 @@ export default function ApiTokenSettings() {
         if (!cancelled) setStatus(loaded)
       })
       .catch((err: unknown) => {
-        if (!cancelled) setLoadError(err instanceof ApiError ? err.message : t('profile.apiError'))
+        if (cancelled) return
+        setLoadFailed(true)
+        setLoadDetail(err instanceof ApiError ? err.message : null)
       })
     return () => {
       cancelled = true
     }
-  }, [t])
+  }, [])
 
   async function onGenerate(e: FormEvent) {
     e.preventDefault()
@@ -107,6 +119,13 @@ export default function ApiTokenSettings() {
       toast.success(t('profile.apiTokenCreated'))
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t('profile.apiError'))
+      // Re-read, because the refusal may mean this panel is out of date rather than that
+      // the request was wrong: a token minted in another tab answers 409, and without this
+      // the form goes on offering Generate for an account that already has one, failing
+      // identically until the page is reloaded. A wrong password is not that case.
+      if (!(err instanceof ApiError) || err.status !== 400) {
+        setStatus(await api.get<ApiTokenStatus>(endpoints.profile.apiToken).catch(() => status))
+      }
     } finally {
       setBusy(false)
     }
@@ -124,14 +143,10 @@ export default function ApiTokenSettings() {
   }
 
   if (status === null) {
-    return (
-      <p
-        className={
-          loadError ? 'text-[13px] font-bold text-danger' : 'text-sm text-muted-foreground'
-        }
-      >
-        {loadError ?? t('common.loading')}
-      </p>
+    return loadFailed ? (
+      <p className="text-[13px] font-bold text-danger">{loadDetail ?? t('profile.apiError')}</p>
+    ) : (
+      <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
     )
   }
 

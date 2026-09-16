@@ -16,8 +16,7 @@ from httpx import AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.api_tokens import API_TOKEN_PREFIX
-from app.core.security import hash_token
+from app.core.security import API_TOKEN_PREFIX, generate_token, hash_token
 from app.models import ApiToken, AuditAction, AuditEvent, AuthToken, Household, User, UserStatus
 
 Login = Callable[..., Awaitable[User]]
@@ -468,6 +467,41 @@ async def test_a_token_in_the_session_cookie_authenticates_nobody(
     client.headers.pop("Authorization", None)
 
     assert (await client.get("/api/v1/home")).status_code == 401
+
+
+async def test_a_session_cookie_wins_over_an_access_token_header_on_every_route(
+    make_user: Login,
+    auth_client: AuthClient,
+    make_api_token: MakeApiToken,
+    make_household: MakeHousehold,
+) -> None:
+    """One precedence rule for both gates: the cookie wins everywhere.
+
+    Before resolve_credential existed, get_current_user preferred the cookie and get_api_user
+    preferred the header, so this request was Bob on /home and Alice on /auth/me. Asserting
+    BOTH routes is the point - either alone passes under the split rule.
+    """
+    alice = await make_user(email="alice@example.com")
+    bob = await make_user(email="bob@example.com")
+    await make_household(members=[alice])
+    bobs_token = await make_api_token(bob)
+    client = await auth_client(alice)
+    client.headers["Authorization"] = f"Bearer {bobs_token}"
+
+    assert (await client.get("/api/v1/auth/me")).json()["email"] == "alice@example.com"
+    # An allowlisted route, where the access token would otherwise have been honoured.
+    assert (await client.get("/api/v1/home")).status_code == 200
+    assert (await client.get("/api/v1/households")).json()["total"] == 1
+
+
+async def test_a_session_token_is_never_minted_with_the_access_token_prefix() -> None:
+    """What makes is_api_token exact rather than probabilistic.
+
+    Without the exclusion in generate_token, roughly one session token in 64**5 would be
+    routed to the api_tokens table, miss, and answer 401 for its whole 30-day life with
+    nothing to explain it. Sampled rather than proved, which is all a random source allows.
+    """
+    assert not any(generate_token().startswith(API_TOKEN_PREFIX) for _ in range(20_000))
 
 
 # --------------------------------------------------------------------- lifecycle

@@ -16,13 +16,9 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from app.core.security import hash_token
+from app.core.security import API_TOKEN_PREFIX, hash_token
 from app.models import ApiToken, User, UserStatus
-
-# Two jobs, both worth the five characters: it routes a presented credential to the
-# right table in one query rather than two, and it makes the token greppable by a
-# secret scanner. `hash_token` covers the whole string, prefix included.
-API_TOKEN_PREFIX = "isac_"
+from app.schemas import ApiTokenRead, ApiTokenStatusRead
 
 
 def new_api_token() -> str:
@@ -31,8 +27,12 @@ def new_api_token() -> str:
 
 
 def is_api_token(token: str) -> bool:
-    """Whether a presented credential is a personal access token rather than a session
-    one. A true answer says nothing about whether it is valid."""
+    """Whether a presented credential is a personal access token rather than a session one.
+
+    Exact, not a guess: generate_token refuses to mint a session token with this prefix, so
+    a true answer means the caller presented something only new_api_token can produce. It
+    still says nothing about whether that something is valid.
+    """
     return token.startswith(API_TOKEN_PREFIX)
 
 
@@ -64,6 +64,18 @@ async def load_api_token(session: AsyncSession, user_id: int) -> ApiToken | None
     hash is stored, so the plaintext exists nowhere after creation answers."""
     result = await session.execute(select(ApiToken).where(ApiToken.user_id == user_id))
     return result.scalar_one_or_none()
+
+
+async def api_token_status(session: AsyncSession, user_id: int) -> ApiTokenStatusRead:
+    """What an owner or an administrator may learn about a token: that it exists, and when.
+
+    One function for both, so the two answers cannot drift. They are the same question asked
+    by different people, and the admin view is exactly where a divergence would go unnoticed.
+    """
+    api_token = await load_api_token(session, user_id)
+    return ApiTokenStatusRead(
+        token=ApiTokenRead.model_validate(api_token) if api_token is not None else None
+    )
 
 
 async def revoke_api_token(session: AsyncSession, user_id: int) -> bool:

@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import APIKeyCookie, HTTPBearer
@@ -95,14 +95,29 @@ api_token_scheme = HTTPBearer(
 
 
 def bearer_token(request: Request) -> str | None:
-    """The `Authorization: Bearer` value, ignoring cookies entirely.
-
-    Separate from get_request_token because a personal access token is a HEADER
-    credential by construction: the same string in a cookie must authenticate nobody,
-    which is what keeps core/csrf.py's reasoning intact.
-    """
+    """The `Authorization: Bearer` value, ignoring cookies entirely."""
     scheme, _, param = request.headers.get("Authorization", "").partition(" ")
     return param if scheme.lower() == "bearer" and param else None
+
+
+def resolve_credential(request: Request) -> tuple[Literal["cookie", "header"], str] | None:
+    """The one credential this request presents, and where it came from.
+
+    WHERE it came from is half the answer, not a detail: a personal access token is a header
+    credential by construction, so the same string in a cookie must authenticate nobody, and
+    that is what keeps core/csrf.py's reasoning intact. Returning the source makes that one
+    comparison instead of re-deriving the header separately and inferring it.
+
+    Cookie before header, once, for both gates. An earlier version had get_current_user
+    prefer the cookie and get_api_user prefer the header, which meant a request carrying a
+    session cookie for one account and an access token for another authenticated as two
+    different people depending on the route.
+    """
+    cookie = request.cookies.get(COOKIE_NAME)
+    if cookie:
+        return "cookie", cookie
+    header = bearer_token(request)
+    return ("header", header) if header else None
 
 
 def get_request_token(request: Request) -> str | None:
@@ -114,10 +129,8 @@ def get_request_token(request: Request) -> str | None:
     out here instead would turn the first into a 401 and, because logout reads this
     function directly, would change what an access token does there as well.
     """
-    token = request.cookies.get(COOKIE_NAME)
-    if token:
-        return token
-    return bearer_token(request)
+    credential = resolve_credential(request)
+    return credential[1] if credential else None
 
 
 async def get_user_by_token(session: AsyncSession, token: str) -> User | None:
@@ -151,22 +164,17 @@ async def get_current_user(
     # route's dependency tree, which is the whole mechanism behind the `security` block on
     # every gated operation. Both are auto_error=False, so neither can refuse anything, and
     # the read below stays the only one that decides.
-    token = get_request_token(request)
-    if token is not None and is_api_token(token):
-        # A real credential in the wrong place is 403, not 401: presenting different
-        # credentials of the same kind is not the fix, so saying "not authenticated"
-        # would send the caller round a loop. A string that merely looks like one falls
-        # through to the 401 below.
-        #
-        # The equality asks "did this arrive in the header?", because a token in a cookie
-        # authenticates nobody anywhere. It holds when the header was the only source, and
-        # also when cookie and header carry the SAME string - which is fine, since 403 and
-        # 401 both refuse. It fails, giving the 401, when a cookie holds some other
-        # isac_ value, because get_request_token prefers the cookie.
-        if bearer_token(request) == token and await api_token_user(session, token):
+    credential = resolve_credential(request)
+    if credential is not None and is_api_token(credential[1]):
+        source, token = credential
+        # A real credential in the wrong place is 403, not 401: presenting a different
+        # access token is not the fix, so "not authenticated" would send the caller round a
+        # loop. Two things fall through to the 401 instead - a string that merely looks like
+        # a token, and one that arrived by cookie, which authenticates nobody anywhere.
+        if source == "header" and await api_token_user(session, token):
             raise _api_token_exc
         raise _credentials_exc
-    user = await get_user_by_token(session, token) if token else None
+    user = await get_user_by_token(session, credential[1]) if credential else None
     if user is None:
         raise _credentials_exc
     return user
@@ -189,19 +197,17 @@ async def get_api_user(
     lost the two session ones would publish itself as reachable by access token alone
     while still accepting a session. tests/test_openapi_security.py pins all three.
 
-    The access-token branch reads the HEADER only, so a token in the session cookie
-    authenticates nobody here either - and note that this branch therefore prefers the header
-    where get_current_user prefers the cookie. A request carrying a session cookie for one
-    account and an access token for another is that asymmetry made visible: it acts as the
-    token's owner here and as the cookie's owner everywhere else. Harmless (no CORS, and a
-    cross-site request cannot set Authorization), but it is why the two are not the same rule.
+    One precedence rule, shared with get_current_user through resolve_credential: the cookie
+    wins, and an access token is honoured only when it arrived in the header. So a request
+    carrying both a session cookie and an access token is the cookie's owner on every route,
+    here included, rather than one person here and another elsewhere.
 
-    Everything that is NOT an access token - both session transports, their
-    cookie-before-bearer precedence, the 401 - is get_current_user's, unduplicated.
+    Everything that is NOT an access token - both session transports, the 401 - is
+    get_current_user's, unduplicated.
     """
-    token = bearer_token(request)
-    if token is not None and is_api_token(token):
-        user = await api_token_user(session, token)
+    credential = resolve_credential(request)
+    if credential is not None and credential[0] == "header" and is_api_token(credential[1]):
+        user = await api_token_user(session, credential[1])
         if user is None:
             raise _credentials_exc
         return user

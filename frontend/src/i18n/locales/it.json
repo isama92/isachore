@@ -708,7 +708,9 @@
     "apiTokenDeleteConfirmBody": "Tutto ciò che lo utilizza non potrà più raggiungere l'API da subito. Potrai generarne uno nuovo, ma sarà un token diverso.",
     "apiTokenDeleteConfirmAction": "Elimina",
     "apiTokenDeleted": "Token di accesso eliminato",
-    "apiError": "Si è verificato un problema con il tuo token di accesso"
+    "apiError": "Si è verificato un problema con il tuo token di accesso",
+    "apiTokenCopyError": "Copia non riuscita. Seleziona il token qui sopra e copialo a mano.",
+    "recoveryCodesCopyError": "Copia non riuscita. Seleziona i codici qui sopra e copiali a mano."
   },
   "users": {
     "loadError": "Impossibile caricare gli utenti",
@@ -774,7 +776,8 @@
     "apiTokenRevokeConfirmBody": "Tutto ciò che lo utilizza non potrà più raggiungere l'API da subito. L'account non viene toccato e l'utente può generare un nuovo token da solo.",
     "apiTokenRevokeConfirmAction": "Revoca",
     "apiTokenRevoked": "Token di accesso revocato",
-    "apiTokenError": "Si è verificato un problema con questo token di accesso"
+    "apiTokenError": "Si è verificato un problema con questo token di accesso",
+    "apiTokenLoadError": "Non è stato possibile verificare se questo utente ha un token di accesso."
   },
   "serverSettings": {
     "title": "Impostazioni server",

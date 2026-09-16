@@ -9,12 +9,12 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, Impersonator, SessionDep
 from app.api.responses import refusals
-from app.core.api_tokens import load_api_token, new_api_token, revoke_api_token
+from app.core.api_tokens import api_token_status, new_api_token, revoke_api_token
 from app.core.audit import record_event
 from app.core.rate_limit import client_ip
 from app.core.security import hash_token, verify_password
 from app.models import ApiToken, AuditAction
-from app.schemas import ApiTokenCreate, ApiTokenCreated, ApiTokenRead, ApiTokenStatusRead
+from app.schemas import ApiTokenCreate, ApiTokenCreated, ApiTokenStatusRead
 
 router = APIRouter()
 
@@ -28,10 +28,7 @@ _already_exists_exc = HTTPException(
 async def read_api_token(user: CurrentUser, session: SessionDep) -> ApiTokenStatusRead:
     """Whether this account holds an access token, and when it was made. Never the
     token: only its hash is stored, so there is nothing to return."""
-    api_token = await load_api_token(session, user.id)
-    return ApiTokenStatusRead(
-        token=ApiTokenRead.model_validate(api_token) if api_token is not None else None
-    )
+    return await api_token_status(session, user.id)
 
 
 @router.post(

@@ -99,6 +99,69 @@ describe('ApiTokenSettings', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(TOKEN))
   })
 
+  it('says so when the token could not be copied, rather than claiming it was', async () => {
+    // jsdom leaves navigator.clipboard undefined, which is also what a browser does in any
+    // non-secure context. The old `navigator.clipboard?.writeText(...)` resolved to
+    // undefined there and fired the success toast having copied nothing - on a secret shown
+    // exactly once. See lib/clipboard.ts.
+    mockFetch([
+      { path: URL, body: { token: null } },
+      { path: URL, method: 'POST', status: 201, body: { token: TOKEN, created_at: CREATED_AT } },
+    ])
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    render()
+
+    await user.type(await screen.findByLabelText('Current password'), 'password12345')
+    await user.click(screen.getByRole('button', { name: 'Generate token' }))
+    const dialog = within(await screen.findByRole('dialog'))
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
+    fireEvent.click(dialog.getByRole('button', { name: 'Copy token' }))
+
+    expect(await dialog.findByText(/Could not copy/i)).toBeInTheDocument()
+    // The token is still on screen to copy by hand, which is what the message tells them.
+    expect(dialog.getByLabelText('Access token')).toHaveValue(TOKEN)
+  })
+
+  it('reports a failed load instead of loading forever', async () => {
+    mockFetch([{ path: URL, status: 500, body: { detail: 'Something broke' } }])
+    render()
+
+    expect(await screen.findByText('Something broke')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Generate token' })).not.toBeInTheDocument()
+  })
+
+  it('resolves to the real state when generating loses a race', async () => {
+    // A token minted in another tab answers 409. Without the refetch the panel kept
+    // offering Generate for an account that already had one, failing identically until
+    // the page was reloaded.
+    let created = false
+    mockFetch([
+      {
+        path: URL,
+        body: () => (created ? { token: { created_at: CREATED_AT } } : { token: null }),
+      },
+      {
+        path: URL,
+        method: 'POST',
+        status: 409,
+        body: () => {
+          created = true
+          return {
+            detail: 'You already have an access token. Delete it before generating a new one.',
+          }
+        },
+      },
+    ])
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    render()
+
+    await user.type(await screen.findByLabelText('Current password'), 'password12345')
+    await user.click(screen.getByRole('button', { name: 'Generate token' }))
+
+    expect(await screen.findByText('Active')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Delete token' })).toBeInTheDocument()
+  })
+
   it('shows a wrong password inline and reveals nothing', async () => {
     mockFetch([
       { path: URL, body: { token: null } },

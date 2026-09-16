@@ -31,7 +31,10 @@ export default function UserEdit() {
 
   const [user, setUser] = useState<User | null>(null)
   const [settings, setSettings] = useState<ServerSettings | null>(null)
-  const [apiToken, setApiToken] = useState<ApiTokenStatus | null>(null)
+  // 'failed' rather than null: hiding the panel on a failed read would tell an
+  // administrator offboarding an integration that the user holds no token, which is the
+  // one wrong answer that looks like a right one.
+  const [apiToken, setApiToken] = useState<ApiTokenStatus | 'failed' | null>(null)
   const [apiTokenError, setApiTokenError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -43,7 +46,7 @@ export default function UserEdit() {
     Promise.all([
       api.get<ServerSettings>(endpoints.adminSettings.root).catch(() => null),
       api.get<User>(endpoints.adminUsers.byId(id)),
-      api.get<ApiTokenStatus>(endpoints.adminUsers.apiToken(id)).catch(() => null),
+      api.get<ApiTokenStatus>(endpoints.adminUsers.apiToken(id)).catch(() => 'failed' as const),
     ])
       .then(([serverSettings, loaded, token]) => {
         if (cancelled) return
@@ -111,7 +114,9 @@ export default function UserEdit() {
               There is no way back from here to the token's value, and no admin way to
               mint one - that needs the owner's own password. */}
           <p className="mb-4 text-sm text-muted-foreground">{t('users.apiTokenDescription')}</p>
-          {apiToken.token ? (
+          {apiToken === 'failed' ? (
+            <p className="text-[13px] font-bold text-danger">{t('users.apiTokenLoadError')}</p>
+          ) : apiToken.token ? (
             <div className="flex flex-wrap items-center gap-3">
               <p className="text-sm text-muted-foreground">
                 {t('users.apiTokenActiveSince', {
