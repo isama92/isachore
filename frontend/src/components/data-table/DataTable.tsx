@@ -1,13 +1,19 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
+  columnVisibilityFeature,
+  createCoreRowModel,
   flexRender,
-  getCoreRowModel,
-  useReactTable,
+  rowPaginationFeature,
+  rowSortingFeature,
+  tableFeatures,
+  useTable,
+  type CellData,
   type ColumnDef,
   type OnChangeFn,
   type PaginationState,
   type RowData,
   type SortingState,
+  type TableFeatures,
 } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
 import {
@@ -38,18 +44,45 @@ import type { FilterSet, UseServerTableResult } from './useServerTable'
 
 // Per-column presentation hooks, set on a column's `meta`. Keeps the generic
 // table free of any column-specific styling.
+//
+// The parameter list has to match table-core's own `ColumnMeta` declaration
+// exactly, variance annotations included, or the merge is rejected outright
+// rather than merely losing these two fields.
 declare module '@tanstack/react-table' {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  interface ColumnMeta<TData extends RowData, TValue> {
+  /* eslint-disable @typescript-eslint/no-unused-vars */
+  interface ColumnMeta<
+    in out TFeatures extends TableFeatures,
+    in out TData extends RowData,
+    TValue extends CellData = CellData,
+  > {
     headClassName?: string
     cellClassName?: string
   }
+  /* eslint-enable @typescript-eslint/no-unused-vars */
 }
+
+// Features are opt-in, and a method a feature owns does not exist on the table
+// without it: `getVisibleCells` comes from column visibility, the sort handlers
+// from row sorting. The row models are deliberately absent — the server sorts
+// and paginates, so a client-side model here would reorder the page it was
+// handed. Filtering has no feature at all: it lives entirely in the URL and the
+// request, and never reaches the table.
+const dataTableFeatures = tableFeatures({
+  columnVisibilityFeature,
+  rowPaginationFeature,
+  rowSortingFeature,
+  coreRowModel: createCoreRowModel(),
+})
+
+// Pages declare their own columns, so they need the feature set the table is
+// actually built with; spelling the generic out at each call site would leak
+// this module's internals into all eight of them.
+export type DataTableColumn<Row extends RowData> = ColumnDef<typeof dataTableFeatures, Row>
 
 const DEFAULT_PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 
-type DataTableProps<Row, Filters extends FilterSet> = {
-  columns: ColumnDef<Row>[]
+type DataTableProps<Row extends RowData, Filters extends FilterSet> = {
+  columns: DataTableColumn<Row>[]
   table: UseServerTableResult<Row, Filters>
   pageSizeOptions?: number[]
   // A node, not just a string, so a first-run empty state can be more than one
@@ -60,7 +93,7 @@ type DataTableProps<Row, Filters extends FilterSet> = {
   minWidthClassName?: string
 }
 
-export function DataTable<Row, Filters extends FilterSet>({
+export function DataTable<Row extends RowData, Filters extends FilterSet>({
   columns,
   table: controller,
   pageSizeOptions = DEFAULT_PAGE_SIZE_OPTIONS,
@@ -81,16 +114,12 @@ export function DataTable<Row, Filters extends FilterSet>({
     if (first) controller.setSort(first.id, first.desc ? 'desc' : 'asc')
   }
 
-  // TanStack Table returns non-memoizable functions; the React Compiler lint
-  // rule flags that, but the table is driven by controlled state so it is safe.
-  // eslint-disable-next-line react-hooks/incompatible-library
-  const table = useReactTable({
+  const table = useTable({
+    features: dataTableFeatures,
     data: controller.rows,
     columns,
-    getCoreRowModel: getCoreRowModel(),
     manualPagination: true,
     manualSorting: true,
-    manualFiltering: true,
     enableSortingRemoval: false,
     pageCount: controller.pageCount,
     state: { sorting, pagination },

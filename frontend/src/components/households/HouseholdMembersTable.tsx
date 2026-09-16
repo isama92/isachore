@@ -1,14 +1,13 @@
 import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import type { ColumnDef } from '@tanstack/react-table'
 import { Trash2Icon } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { householdResource } from '@/lib/endpoints'
 import { fullName } from '@/lib/user'
 import { assignableRoles } from '@/lib/permissions'
 import type { HouseholdMemberWithRole, HouseholdRole } from '@/lib/types'
-import { DataTable } from '@/components/data-table/DataTable'
+import { DataTable, type DataTableColumn } from '@/components/data-table/DataTable'
 import { useServerTable } from '@/components/data-table/useServerTable'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -196,7 +195,7 @@ export function HouseholdMembersTable({
     )
   }
 
-  const columns: ColumnDef<HouseholdMemberWithRole>[] = [
+  const columns: DataTableColumn<HouseholdMemberWithRole>[] = [
     {
       accessorKey: 'id',
       header: t('households.membersHeaders.id'),

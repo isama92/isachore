@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router'
 import { toast } from 'sonner'
-import type { ColumnDef } from '@tanstack/react-table'
 import { CopyPlusIcon, SquarePenIcon, Trash2Icon } from 'lucide-react'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
@@ -11,7 +10,7 @@ import { endpoints } from '../lib/endpoints'
 import { routes } from '../lib/routes'
 import { formatDate, formatDateTime, repeatLabel } from '../lib/chores'
 import type { Chore, ChoreCloneState, ChoreListRow, Household, Page } from '../lib/types'
-import { DataTable } from '@/components/data-table/DataTable'
+import { DataTable, type DataTableColumn } from '@/components/data-table/DataTable'
 import { useServerTable } from '@/components/data-table/useServerTable'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -305,7 +304,7 @@ export default function Chores() {
     )
   }
 
-  const columns: ColumnDef<ChoreListRow>[] = [
+  const columns: DataTableColumn<ChoreListRow>[] = [
     {
       accessorKey: 'title',
       header: t('chores.headers.title'),

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import type { ColumnDef } from '@tanstack/react-table'
 import { Undo2Icon } from 'lucide-react'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
@@ -10,7 +9,7 @@ import { endpoints } from '../lib/endpoints'
 import { formatDateTime } from '../lib/chores'
 import { fullName } from '../lib/user'
 import type { HistoryEntry, HistoryFilterOptions } from '../lib/types'
-import { DataTable } from '@/components/data-table/DataTable'
+import { DataTable, type DataTableColumn } from '@/components/data-table/DataTable'
 import { useServerTable } from '@/components/data-table/useServerTable'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -215,7 +214,7 @@ export default function History() {
     )
   }
 
-  const columns: ColumnDef<HistoryEntry>[] = [
+  const columns: DataTableColumn<HistoryEntry>[] = [
     {
       accessorKey: 'title',
       header: t('history.headers.title'),

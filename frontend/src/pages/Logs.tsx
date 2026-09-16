@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { ColumnDef } from '@tanstack/react-table'
 import { useAuth } from '../auth/useAuth'
 import { api } from '../lib/api'
 import { ownedHouseholdIds } from '../lib/permissions'
@@ -9,7 +8,7 @@ import { formatDateTime } from '../lib/chores'
 import { isLogAction, logActionLabel, logFieldLabel } from '../lib/logs'
 import { fullName } from '../lib/user'
 import { LOG_ACTIONS, type HistoryFilterOptions, type LogEntry } from '../lib/types'
-import { DataTable } from '@/components/data-table/DataTable'
+import { DataTable, type DataTableColumn } from '@/components/data-table/DataTable'
 import { useServerTable } from '@/components/data-table/useServerTable'
 import {
   Select,
@@ -101,7 +100,7 @@ export default function Logs() {
     }
   }, [owned])
 
-  const columns: ColumnDef<LogEntry>[] = [
+  const columns: DataTableColumn<LogEntry>[] = [
     {
       // The only sortable column, and its id IS the server's sort key. The rest are joins or
       // off the endpoint's whitelist, so a sortable header there would push a key the server
