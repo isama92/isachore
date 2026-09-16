@@ -1,14 +1,13 @@
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import type { ColumnDef } from '@tanstack/react-table'
 import { renderWithProviders } from '../../test/utils'
-import { DataTable } from './DataTable'
+import { DataTable, type DataTableColumn } from './DataTable'
 import type { UseServerTableResult } from './useServerTable'
 
 type Row = { id: number; name: string; role: string }
 
-const columns: ColumnDef<Row>[] = [
+const columns: DataTableColumn<Row>[] = [
   { accessorKey: 'name', header: 'Name' },
   { accessorKey: 'role', header: 'Role', enableSorting: false },
 ]
@@ -91,6 +90,25 @@ describe('DataTable', () => {
     await user.click(select)
     await user.click(await screen.findByRole('option', { name: '50' }))
     expect(controller.setPageSize).toHaveBeenCalledWith(50)
+  })
+
+  it('applies a column meta className to that column only, on header and cells', () => {
+    const metaColumns: DataTableColumn<Row>[] = [
+      {
+        accessorKey: 'name',
+        header: 'Name',
+        meta: { headClassName: 'text-right', cellClassName: 'tabular-nums' },
+      },
+      { accessorKey: 'role', header: 'Role' },
+    ]
+    renderWithProviders(<DataTable columns={metaColumns} table={makeController()} />)
+
+    expect(screen.getByRole('columnheader', { name: /name/i })).toHaveClass('text-right')
+    expect(screen.getByRole('cell', { name: 'Alice' })).toHaveClass('tabular-nums')
+    // The column that set no meta must stay untouched, or the classes are
+    // being applied to the table rather than to the column that asked.
+    expect(screen.getByRole('columnheader', { name: /role/i })).not.toHaveClass('text-right')
+    expect(screen.getByRole('cell', { name: 'Admin' })).not.toHaveClass('tabular-nums')
   })
 
   it('shows the empty message when there are no rows', () => {

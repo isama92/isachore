@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router'
 import { toast } from 'sonner'
-import type { ColumnDef } from '@tanstack/react-table'
 import { LogInIcon, SendIcon, SquarePenIcon, UserCheckIcon, UserXIcon } from 'lucide-react'
 import { useAuth } from '../../auth/useAuth'
 import { api, ApiError } from '../../lib/api'
@@ -11,7 +10,7 @@ import { routes } from '../../lib/routes'
 import { formatDateTime, formatDateTimeFull } from '../../lib/format'
 import { fullName } from '../../lib/user'
 import type { ServerSettings, User, UserStatus } from '../../lib/types'
-import { DataTable } from '@/components/data-table/DataTable'
+import { DataTable, type DataTableColumn } from '@/components/data-table/DataTable'
 import { useServerTable } from '@/components/data-table/useServerTable'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -255,7 +254,7 @@ export default function Users() {
     )
   }
 
-  const columns: ColumnDef<User>[] = [
+  const columns: DataTableColumn<User>[] = [
     {
       accessorKey: 'id',
       header: t('users.headers.id'),

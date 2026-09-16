@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
+  columnVisibilityFeature,
   flexRender,
-  getCoreRowModel,
-  useReactTable,
+  rowSortingFeature,
+  tableFeatures,
+  useTable,
   type ColumnDef,
   type OnChangeFn,
-  type PaginationState,
   type RowData,
   type SortingState,
 } from '@tanstack/react-table'
@@ -36,20 +37,32 @@ import {
 import { cn } from '@/lib/utils'
 import type { FilterSet, UseServerTableResult } from './useServerTable'
 
-// Per-column presentation hooks, set on a column's `meta`. Keeps the generic
-// table free of any column-specific styling.
-declare module '@tanstack/react-table' {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  interface ColumnMeta<TData extends RowData, TValue> {
-    headClassName?: string
-    cellClassName?: string
-  }
-}
+// Features are opt-in, and a method a feature owns does not exist on the table
+// without it: `getVisibleCells` comes from column visibility and the sort
+// handlers from row sorting, which is the whole of what this component calls.
+// The server sorts, filters and paginates, so the derived row models stay out —
+// one here would reorder the page the API just returned — and the core model is
+// the library's own default.
+//
+// `columnMeta` types `columnDef.meta` for this table's columns, which is where
+// per-column presentation hooks live; it keeps the generic table free of any
+// column-specific styling without declaring them on the library's global
+// `ColumnMeta` interface, where they would apply to every table everywhere.
+const dataTableFeatures = tableFeatures({
+  columnVisibilityFeature,
+  rowSortingFeature,
+  columnMeta: {} as { headClassName?: string; cellClassName?: string },
+})
+
+// Pages declare their own columns, so they need the feature set the table is
+// actually built with; spelling the generic out at each call site would leak
+// this module's internals into all eight of them.
+export type DataTableColumn<Row extends RowData> = ColumnDef<typeof dataTableFeatures, Row>
 
 const DEFAULT_PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 
-type DataTableProps<Row, Filters extends FilterSet> = {
-  columns: ColumnDef<Row>[]
+type DataTableProps<Row extends RowData, Filters extends FilterSet> = {
+  columns: DataTableColumn<Row>[]
   table: UseServerTableResult<Row, Filters>
   pageSizeOptions?: number[]
   // A node, not just a string, so a first-run empty state can be more than one
@@ -60,7 +73,7 @@ type DataTableProps<Row, Filters extends FilterSet> = {
   minWidthClassName?: string
 }
 
-export function DataTable<Row, Filters extends FilterSet>({
+export function DataTable<Row extends RowData, Filters extends FilterSet>({
   columns,
   table: controller,
   pageSizeOptions = DEFAULT_PAGE_SIZE_OPTIONS,
@@ -70,10 +83,6 @@ export function DataTable<Row, Filters extends FilterSet>({
   const { t } = useTranslation()
 
   const sorting: SortingState = [{ id: controller.sortBy, desc: controller.sortDir === 'desc' }]
-  const pagination: PaginationState = {
-    pageIndex: controller.page - 1,
-    pageSize: controller.pageSize,
-  }
 
   const onSortingChange: OnChangeFn<SortingState> = (updater) => {
     const next = typeof updater === 'function' ? updater(sorting) : updater
@@ -81,19 +90,13 @@ export function DataTable<Row, Filters extends FilterSet>({
     if (first) controller.setSort(first.id, first.desc ? 'desc' : 'asc')
   }
 
-  // TanStack Table returns non-memoizable functions; the React Compiler lint
-  // rule flags that, but the table is driven by controlled state so it is safe.
-  // eslint-disable-next-line react-hooks/incompatible-library
-  const table = useReactTable({
+  const table = useTable({
+    features: dataTableFeatures,
     data: controller.rows,
     columns,
-    getCoreRowModel: getCoreRowModel(),
-    manualPagination: true,
     manualSorting: true,
-    manualFiltering: true,
     enableSortingRemoval: false,
-    pageCount: controller.pageCount,
-    state: { sorting, pagination },
+    state: { sorting },
     onSortingChange,
   })
 

@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
-import type { ColumnDef } from '@tanstack/react-table'
 import { SquarePenIcon, Trash2Icon } from 'lucide-react'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
@@ -10,7 +9,7 @@ import { householdIdsWithRole } from '../lib/permissions'
 import { endpoints } from '../lib/endpoints'
 import { routes } from '../lib/routes'
 import type { Household, Page, Tag } from '../lib/types'
-import { DataTable } from '@/components/data-table/DataTable'
+import { DataTable, type DataTableColumn } from '@/components/data-table/DataTable'
 import { useServerTable } from '@/components/data-table/useServerTable'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -162,7 +161,7 @@ export default function Tags() {
     )
   }
 
-  const columns: ColumnDef<Tag>[] = [
+  const columns: DataTableColumn<Tag>[] = [
     {
       accessorKey: 'name',
       header: t('tags.headers.name'),

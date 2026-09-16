@@ -367,6 +367,23 @@ describe('Chores', () => {
     expect(lastChoresGet(fetchMock)).toContain('sort_by=created_at')
   })
 
+  it('sorts Start ascending on first click even when no row on the page has a start date', async () => {
+    const fetchMock = stubFetch({
+      chores: [
+        makeChoreRow({ id: 1, title: 'Water the plants', start_date: null }),
+        makeChoreRow({ id: 2, title: 'Scrub the tub', start_date: null }),
+      ],
+    })
+    renderWithProviders(<Chores />, { authValue: { user: me } })
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    await screen.findByText('Water the plants')
+    await user.click(screen.getByRole('button', { name: /Start/ }))
+
+    await waitFor(() => expect(lastChoresGet(fetchMock)).toContain('sort_by=start_date'))
+    expect(lastChoresGet(fetchMock)).toContain('sort_dir=asc')
+  })
+
   it('pre-fills the title input from a remembered text filter and keeps it', async () => {
     localStorage.setItem(
       'isachore-table-chores',
