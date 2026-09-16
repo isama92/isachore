@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
-from app.api.deps import CurrentUser, SessionDep, get_current_household
+from app.api.deps import ApiUser, SessionDep, get_current_household
 from app.api.responses import FORBIDDEN_ROLE, refusals
 from app.api.v1.households import SortDir
 from app.core.households import get_member_household, require_role
@@ -74,7 +74,7 @@ async def _get_organiser_tag_or_error(session: SessionDep, user: User, tag_id: i
     ),
 )
 async def list_tags(
-    user: CurrentUser,
+    user: ApiUser,
     session: SessionDep,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -135,7 +135,7 @@ async def list_tags(
         ),
     ),
 )
-async def create_tag(payload: TagCreate, user: CurrentUser, session: SessionDep) -> Tag:
+async def create_tag(payload: TagCreate, user: ApiUser, session: SessionDep) -> Tag:
     household = await get_member_household(session, user.id, payload.household_id)
     if household is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Household not found")
@@ -161,7 +161,7 @@ async def create_tag(payload: TagCreate, user: CurrentUser, session: SessionDep)
         ),
     ),
 )
-async def get_tag(tag_id: int, user: CurrentUser, session: SessionDep) -> Tag:
+async def get_tag(tag_id: int, user: ApiUser, session: SessionDep) -> Tag:
     return await _get_organiser_tag_or_error(session, user, tag_id)
 
 
@@ -180,9 +180,7 @@ async def get_tag(tag_id: int, user: CurrentUser, session: SessionDep) -> Tag:
         ),
     ),
 )
-async def update_tag(
-    tag_id: int, payload: TagUpdate, user: CurrentUser, session: SessionDep
-) -> Tag:
+async def update_tag(tag_id: int, payload: TagUpdate, user: ApiUser, session: SessionDep) -> Tag:
     tag = await _get_organiser_tag_or_error(session, user, tag_id)
     tag.name = payload.name
     tag.color = payload.color
@@ -205,7 +203,7 @@ async def update_tag(
         ),
     ),
 )
-async def delete_tag(tag_id: int, user: CurrentUser, session: SessionDep) -> None:
+async def delete_tag(tag_id: int, user: ApiUser, session: SessionDep) -> None:
     # Hard delete: chore_tags rows cascade, so the tag detaches from any chores.
     tag = await _get_organiser_tag_or_error(session, user, tag_id)
     await session.delete(tag)

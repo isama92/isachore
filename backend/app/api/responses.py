@@ -26,12 +26,19 @@ which is as good a demonstration as any of why the sentence is the part to check
 `tests/test_openapi_refusals.py` checks that each code is declared and that none is declared
 spuriously; it cannot check that the sentence is true, so that part is on the writer.
 
-One cross-cutting refusal is deliberately absent, and it is the one most likely to be
-"noticed missing": `CsrfProtectMiddleware`'s 403 on a cookie-authenticated unsafe method
-with no `X-CSRF-Token`. It applies to roughly two dozen operations across every router,
-public ones included, and it is a property of the transport rather than of any route - so
-it is stated once in `main.py`'s `API_DESCRIPTION` instead of being stamped onto half the
-document, where it would bury the gate refusals these blocks exist to make visible.
+TWO cross-cutting refusals are deliberately absent, and they are the ones most likely to be
+"noticed missing". Both answer 403, both are a property of the CREDENTIAL or the transport
+rather than of any route, and both are stated once in `main.py`'s `API_DESCRIPTION` instead
+of being stamped onto most of the document, where they would bury the gate refusals these
+blocks exist to make visible:
+
+- `CsrfProtectMiddleware`, on a cookie-authenticated unsafe method with no `X-CSRF-Token`.
+  Roughly two dozen operations across every router, public ones included.
+- `get_current_user`, when a personal access token is presented to a gated operation outside
+  the `apiToken` allowlist - which is most of the gated document.
+
+Neither is visible to `tests/test_openapi_refusals.py` (one is middleware, the other a
+dependency), so declaring either per route fails that file rather than satisfying it.
 """
 
 from typing import Any

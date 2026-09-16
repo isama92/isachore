@@ -73,7 +73,7 @@ subsystem has non-obvious constraints that a reasonable change breaks silently.
 | Anything with a date, a due calculation or a day boundary | [docs/architecture/timezones.md](docs/architecture/timezones.md) |
 | Chores, occurrences, assignment, completion, skipping, rich text | [docs/architecture/chores.md](docs/architecture/chores.md) |
 | Households, roles, members, invitations, the household log | [docs/architecture/households.md](docs/architecture/households.md) |
-| Login, sessions, CSRF, 2FA, SSO, impersonation, confirmation | [docs/architecture/auth.md](docs/architecture/auth.md) |
+| Login, sessions, CSRF, 2FA, SSO, impersonation, confirmation, access tokens | [docs/architecture/auth.md](docs/architecture/auth.md) |
 | Tables, theme, i18n, PWA, shadcn, the rich text editor | [docs/architecture/frontend.md](docs/architecture/frontend.md) |
 | Docker, nginx, CI workflows, the committed OpenAPI spec | [docs/architecture/deployment.md](docs/architecture/deployment.md) |
 | Adding a route, model, page or test; anything not above | [guidelines.md](guidelines.md) |
