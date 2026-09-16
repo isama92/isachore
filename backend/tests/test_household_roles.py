@@ -9,10 +9,12 @@ only by reading five files.
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import clock
 from app.core.households import _ROLE_LADDER, roles_at_least
 from app.core.security import generate_token
 from app.models import (
@@ -917,13 +919,29 @@ async def test_tags_are_organiser_only(
     assert resp.json()["detail"] == "You are not a household organiser anywhere"
 
 
+# Every fixture below that reads /stats dates its completions here, so the clock is pinned
+# inside that window. Without it the 30-day default range walks away from the fixtures as
+# real time passes and `completed_in_range` answers 0 - which is a test about role narrowing
+# failing for a reason that has nothing to do with roles.
+STATS_FIXTURE_DAY = datetime(2026, 7, 20, tzinfo=UTC)
+WITHIN_RANGE = datetime(2026, 7, 21, 12, tzinfo=UTC)
+
+
+def pin_clock(monkeypatch: pytest.MonkeyPatch, moment: datetime = WITHIN_RANGE) -> None:
+    """Freeze `clock.now()`. Patches the module attribute, which is the only thing that
+    works: the endpoints call `clock.now()` rather than importing the name."""
+    monkeypatch.setattr(clock, "now", lambda: moment)
+
+
 async def test_history_narrows_for_a_helper_and_stats_still_needs_a_deputy(
     make_user: MakeUser,
     make_household: MakeHousehold,
     make_chore: MakeChore,
     make_occurrence: MakeOccurrence,
     auth_client: AuthClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    pin_clock(monkeypatch)
     owner = await make_user(email="owner@example.com")
     deputy = await make_user(email="deputy@example.com")
     helper = await make_user(email="helper@example.com")
@@ -1389,7 +1407,9 @@ async def test_mixed_roles_narrow_history_per_household_but_stats_by_role(
     make_chore: MakeChore,
     make_occurrence: MakeOccurrence,
     auth_client: AuthClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    pin_clock(monkeypatch)
     # The cross-household case the "union for nav, scope the data" rule exists for:
     # organiser in one household, helper in another. History narrows per household -
     # everything from the first, own rows only from the second - while statistics still

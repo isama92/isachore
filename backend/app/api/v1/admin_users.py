@@ -7,6 +7,7 @@ from sqlalchemy import delete, func, or_, select
 
 from app.api.deps import AdminUser, Impersonator, SessionDep, get_request_token
 from app.api.responses import refusals
+from app.core.api_tokens import api_token_status, revoke_api_token
 from app.core.app_settings import get_app_settings
 from app.core.audit import record_event
 from app.core.email import NO_SMTP_DETAIL, send_confirmation_email, smtp_configured
@@ -29,7 +30,13 @@ from app.models import (
     User,
     UserStatus,
 )
-from app.schemas import Page, UserCreate, UserRead, UserUpdate
+from app.schemas import (
+    ApiTokenStatusRead,
+    Page,
+    UserCreate,
+    UserRead,
+    UserUpdate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,8 +62,44 @@ async def _ensure_email_free(
         )
 
 
-async def _revoke_tokens(session: SessionDep, user_id: int) -> None:
+async def _revoke_tokens(
+    session: SessionDep,
+    user_id: int,
+    *,
+    actor_id: int,
+    impersonator_id: int | None,
+    ip: str | None,
+) -> None:
+    """Revoke every credential that signs this user in: their sessions and their
+    personal access token.
+
+    The access token goes too, which is the deliberate exception to it living in a
+    table of its own. That table exists so a routine session wipe cannot take it by
+    accident; neither caller here is routine. Both are the "this account may be
+    compromised" lever - an administrator resetting somebody's password, and an
+    administrator disabling the account - and a never-expiring credential surviving
+    either is exactly the stale way in auth.md warns about. A user changing their OWN
+    password keeps theirs, which is why api/v1/profile.py does not call this.
+
+    Not called by reset_two_factor, which deliberately revokes no CREDENTIAL FOR SIGNING IN:
+    it clears the enrolment (secret, recovery codes, pending challenges) and leaves sessions
+    and the access token alone, because a lost authenticator is not a compromise.
+    """
     await session.execute(delete(AuthToken).where(AuthToken.user_id == user_id))
+    # Audited, unlike the session wipe beside it. A session ends by itself soon enough and
+    # the surrounding user_updated / user_deactivated event already says why they all went;
+    # an access token would otherwise disappear with nothing recording when, which is the
+    # one question an operator asks after a suspected compromise. Only on a real delete, so
+    # the trail does not fill with revocations of tokens that never existed.
+    if await revoke_api_token(session, user_id):
+        await record_event(
+            session,
+            action=AuditAction.api_token_revoked,
+            actor_id=actor_id,
+            target_id=user_id,
+            impersonator_id=impersonator_id,
+            ip=ip,
+        )
 
 
 async def _revoke_confirmation_tokens(session: SessionDep, user_id: int) -> None:
@@ -347,7 +390,13 @@ async def update_user(
 
     # Force re-login when credentials or access change
     if payload.password is not None or deactivating:
-        await _revoke_tokens(session, user.id)
+        await _revoke_tokens(
+            session,
+            user.id,
+            actor_id=admin.id,
+            impersonator_id=impersonator.id if impersonator else None,
+            ip=client_ip(request),
+        )
     # A disabled account must not be re-openable via a still-live emailed link.
     if to_disabled:
         await _revoke_confirmation_tokens(session, user.id)
@@ -467,13 +516,73 @@ async def deactivate_user(
             status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot deactivate yourself"
         )
     user.status = UserStatus.disabled
-    await _revoke_tokens(session, user.id)
+    await _revoke_tokens(
+        session,
+        user.id,
+        actor_id=admin.id,
+        impersonator_id=impersonator.id if impersonator else None,
+        ip=client_ip(request),
+    )
     # Kill any outstanding confirmation link so a disabled account can't be
     # re-activated by whoever holds it.
     await _revoke_confirmation_tokens(session, user.id)
     await record_event(
         session,
         action=AuditAction.user_deactivated,
+        actor_id=admin.id,
+        target_id=user.id,
+        impersonator_id=impersonator.id if impersonator else None,
+        ip=client_ip(request),
+    )
+    await session.commit()
+
+
+@router.get(
+    "/{user_id}/api-token",
+    response_model=ApiTokenStatusRead,
+    responses=refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No user with this id.",
+        ),
+    ),
+)
+async def get_user_api_token(user_id: int, _: AdminUser, session: SessionDep) -> ApiTokenStatusRead:
+    """Whether this user holds a personal access token, and when they made it. Never
+    the token: only its hash is stored, so an administrator cannot read one out any
+    more than the owner can."""
+    user = await _get_user_or_404(session, user_id)
+    return await api_token_status(session, user.id)
+
+
+@router.delete(
+    "/{user_id}/api-token",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=refusals(
+        (
+            status.HTTP_404_NOT_FOUND,
+            "No user with this id, or that user holds no access token.",
+        ),
+    ),
+)
+async def revoke_user_api_token(
+    user_id: int,
+    admin: AdminUser,
+    impersonator: Impersonator,
+    session: SessionDep,
+    request: Request,
+) -> None:
+    """Revoke a user's access token without disabling their account, for offboarding an
+    integration rather than a person. Self-service revocation is unaffected: this is the
+    same delete, recorded against the administrator who asked for it."""
+    user = await _get_user_or_404(session, user_id)
+    if not await revoke_api_token(session, user.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="This user has no access token"
+        )
+    await record_event(
+        session,
+        action=AuditAction.api_token_revoked,
         actor_id=admin.id,
         target_id=user.id,
         impersonator_id=impersonator.id if impersonator else None,

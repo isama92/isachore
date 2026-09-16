@@ -127,7 +127,7 @@ frontend/src/
 **The API lives under `/api/v1`, JSON only.** Routers in `backend/app/api/v1/`, registered in
 `router.py`.
 
-**A route gated on `AdminUser` answers under `/api/v1/admin`.** All 20 do, across
+**A route gated on `AdminUser` answers under `/api/v1/admin`.** All 22 do, across
 `admin_users.py`, `admin_settings.py` and `admin_households.py`, which is what lets the path be
 read as a claim about *who* a route serves rather than only what it returns; the three
 `include_router` calls are grouped at the bottom of `router.py` for the same reason.
@@ -288,10 +288,17 @@ Four different facts, four different mechanisms. Do not collapse them:
 
 | Gate | Asks | Refusal |
 |---|---|---|
-| `CurrentUser` | Is there a session? | 401 |
+| `CurrentUser` | Is there a session? | 401, or 403 to a valid personal access token |
+| `ApiUser` | Is there a session, *or* a personal access token? | 401 |
 | `AdminUser` | Is this a site admin? | 403 (`FORBIDDEN_ADMIN`) |
 | `require_role` | Do they reach this rung in this household? | 403 (`FORBIDDEN_ROLE`) — a promotion would fix it |
 | `_get_owned_household` | Do they own this household? | 403 (`FORBIDDEN_OWNER`) — a promotion would NOT; only a transfer helps |
+
+**`ApiUser` is an allowlist, so `CurrentUser` stays the default.** A new route is session-only
+until somebody deliberately writes `ApiUser` on it, and `tests/test_openapi_security.py` pins
+the set that carries it. Its 403 is declared on no route — it is raised in a dependency and
+documented once in `main.py`'s `API_DESCRIPTION`, like the CSRF one. See
+[auth.md](docs/architecture/auth.md#the-gate-is-an-allowlist) for where the line falls and why.
 
 **Reads narrow, writes 403.** A list endpoint spanning several households takes
 `member_household_ids(user_id, min_role)` and returns *less data* rather than refusing. A
@@ -340,11 +347,13 @@ parameters cannot be removed per-route.
 from `SecurityBase` dependencies, and `Depends` carries no `responses` at all, so before
 `app/api/responses.py` existed every gated route published itself as anonymous with no refusals.
 
-- The schemes are three `Security(...)` declarations in `api/deps.py` (`sessionCookie`,
-  `bearerToken`, `parkedAdminCookie`), all `auto_error=False` and all **ignored parameters**.
-  They are documentation: the token read stays in `get_request_token`, because four routes call
-  that helper outside the dependency system. Deleting them is silent at runtime and fails four
-  tests.
+- The schemes are four `Security(...)` declarations in `api/deps.py` (`sessionCookie`,
+  `bearerToken`, `parkedAdminCookie`, `apiToken`), all `auto_error=False` and all **ignored
+  parameters**. They are documentation: the token read stays in `get_request_token`, because
+  four routes call that helper outside the dependency system. Deleting them is silent at
+  runtime and fails four tests. `get_api_user` declares three of them, and the two session ones
+  are as load-bearing as `apiToken`: without them its operations publish as reachable by access
+  token alone.
 - **`X-CSRF-Token` is deliberately not a scheme.** FastAPI emits one `security` entry per scheme
   and OpenAPI reads separate entries as *alternatives*, so it would publish "cookie OR csrf
   header" where `core/csrf.py` requires both. It lives in `main.py`'s `API_DESCRIPTION` instead.
@@ -514,8 +523,8 @@ It also reads the *descriptions*, not only the codes:
 `FORBIDDEN_ROLE` for `FORBIDDEN_OWNER` changes no status code and no test that merely counts
 them.
 
-**`tests/test_openapi_refusals.py` reads the code instead.** The per-endpoint refusals — 87 of
-them across 53 operations, far too many to hold in a hand-written set — are checked by walking
+**`tests/test_openapi_refusals.py` reads the code instead.** The per-endpoint refusals — 116 of
+them across 58 operations, far too many to hold in a hand-written set — are checked by walking
 each handler's call graph and comparing the reachable status codes with the declared ones,
 failing in *both* directions. Four things about that walker to know before touching it, each
 of which it got wrong once:
@@ -553,6 +562,7 @@ than a test that pretends. The standing list:
 | `_client()`'s PKCE call | Never executed by either suite | By hand against a real provider |
 | `defer(..., raiseload=True)` on the chores list | The fixtures share one session, so an already-loaded chore keeps its description | Read the compiled SQL |
 | `chore_occurrences.updated_at` moving | Both defaults are SQL `now()`, frozen for the whole savepoint | Complete a chore on the dev stack, compare columns |
+| A missing `ALTER TYPE` for a new `AuditAction` | `pytest` builds the enum from `Base.metadata.create_all` with every member present, `alembic check` does not diff enum members, and the empty-database job writes no audit row | `psql -c "SELECT count(*) FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid WHERE t.typname='audit_action'"` after `upgrade head` |
 
 ### Backend fixtures
 

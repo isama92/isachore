@@ -29,6 +29,35 @@ info:
     so what matters is that a cross-site form cannot set the header at all.
 
     `Authorization: Bearer` requests are exempt, as are requests carrying no auth cookie.
+
+    ## Personal access tokens
+
+    An account may hold one long-lived credential for a client that is not a browser, generated
+    on the Profile page and sent as `Authorization: Bearer isac_...`. It never expires, it is
+    shown once and stored only as a hash, and deleting it is the only way to replace it. It stops
+    working the moment the account stops being active, and an administrator revokes it either on
+    its own or by resetting the password or disabling the account.
+
+    **It is not a second way to be the user.** It reaches only the operations that publish the
+    `apiToken` scheme: the due and unscheduled views, statistics, the household log, the three
+    household reads, and all of tags, chores and completions - reads *and* writes, so a token may
+    create, edit and delete chores and tags and undo a completion.
+
+    Every **gated** operation outside that set answers **403** - every `/admin` operation,
+    everything under `/profile`, the gated `/auth` routes, every household write, and
+    `POST /invitations/{token}/accept`. The public operations are the exception and answer
+    normally, because they never look at who is calling: `POST /auth/login` still logs in, and
+    `POST /auth/logout` answers 204 without revoking anything, since an access token is not a
+    session.
+
+    A token that is unknown or has been revoked answers 401 instead, so the two cases stay
+    distinguishable: 403 means the credential is real and cannot be used here, and no retry with a
+    different access token will help.
+
+    Header only. The same string in a cookie authenticates nobody, which is also why a request
+    carrying one needs no `X-CSRF-Token` - there is no cookie for a cross-site form to ride.
+    That is why two of the schemes below both read `Authorization: Bearer`: the header carries
+    either kind, and which one it is decides where it works.
   version: 0.1.0
 paths:
   /api/v1/health:
@@ -820,6 +849,127 @@ paths:
       security:
         - sessionCookie: []
         - bearerToken: []
+  /api/v1/profile/api-token:
+    get:
+      tags:
+        - api-token
+      summary: Read Api Token
+      description: |-
+        Whether this account holds an access token, and when it was made. Never the
+        token: only its hash is stored, so there is nothing to return.
+      operationId: read_api_token_api_v1_profile_api_token_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiTokenStatusRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+      security:
+        - sessionCookie: []
+        - bearerToken: []
+    post:
+      tags:
+        - api-token
+      summary: Create Api Token
+      description: |-
+        Generate this account's access token and return it once.
+
+        The current password is asked for the same reason the password change form asks: a
+        stolen session or an injected script should not be able to mint a credential that
+        outlives the session it was stolen from. Note what that does NOT cover - it is a
+        check on the caller, not a throttle, and it is no more rate-limited here than the
+        identical check in PATCH /profile.
+
+        The 409 comes from the unique constraint rather than from reading first, so two
+        requests racing cannot both succeed.
+
+        Refused outright while impersonating, which is the one thing here that is not about the
+        password. Impersonation ends; this credential does not, so minting one through it would
+        turn temporary access to somebody's account into permanent access, and the owner would
+        only find out by opening this page. An administrator who has reset the password could
+        otherwise reach it - noisily, since both steps are audited, but noisy is not the same as
+        refused.
+      operationId: create_api_token_api_v1_profile_api_token_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApiTokenCreate'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiTokenCreated'
+        '400':
+          description: The current password is wrong, or none was given. Generating a token needs it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: An administrator impersonating this account cannot generate its access token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '409':
+          description: This account already holds an access token. Delete that one before generating another; an account may hold only one.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+        - sessionCookie: []
+        - bearerToken: []
+    delete:
+      tags:
+        - api-token
+      summary: Delete Api Token
+      description: |-
+        Revoke this account's access token. No password, unlike generating one: revoking
+        a credential is the safe direction, and it is the action you want to be easy when
+        the token is the thing that leaked.
+      operationId: delete_api_token_api_v1_profile_api_token_delete
+      responses:
+        '204':
+          description: Successful Response
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: This account holds no access token, so there is nothing to delete.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+      security:
+        - sessionCookie: []
+        - bearerToken: []
   /api/v1/home:
     get:
       tags:
@@ -843,6 +993,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerToken: []
+        - apiToken: []
       parameters:
         - name: household_id
           in: query
@@ -901,6 +1052,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerToken: []
+        - apiToken: []
       parameters:
         - name: household_id
           in: query
@@ -982,6 +1134,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerToken: []
+        - apiToken: []
       parameters:
         - name: range
           in: query
@@ -1048,6 +1201,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerToken: []
+        - apiToken: []
       parameters:
         - name: page
           in: query
@@ -1138,6 +1292,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerToken: []
+        - apiToken: []
       parameters:
         - name: page
           in: query
@@ -1247,6 +1402,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerToken: []
+        - apiToken: []
       parameters:
         - name: household_id
           in: path
@@ -1394,6 +1550,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerToken: []
+        - apiToken: []
       parameters:
         - name: household_id
           in: path
@@ -1872,6 +2029,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerToken: []
+        - apiToken: []
       parameters:
         - name: page
           in: query
@@ -1953,6 +2111,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerToken: []
+        - apiToken: []
       requestBody:
         required: true
         content:
@@ -2005,6 +2164,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerToken: []
+        - apiToken: []
       parameters:
         - name: tag_id
           in: path
@@ -2051,6 +2211,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerToken: []
+        - apiToken: []
       parameters:
         - name: tag_id
           in: path
@@ -2109,6 +2270,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerToken: []
+        - apiToken: []
       parameters:
         - name: tag_id
           in: path
@@ -2152,6 +2314,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerToken: []
+        - apiToken: []
       requestBody:
         required: true
         content:
@@ -2203,6 +2366,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerToken: []
+        - apiToken: []
       parameters:
         - name: page
           in: query
@@ -2290,6 +2454,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerToken: []
+        - apiToken: []
       parameters:
         - name: chore_id
           in: path
@@ -2330,6 +2495,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerToken: []
+        - apiToken: []
       parameters:
         - name: chore_id
           in: path
@@ -2394,6 +2560,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerToken: []
+        - apiToken: []
       parameters:
         - name: chore_id
           in: path
@@ -2453,6 +2620,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerToken: []
+        - apiToken: []
       parameters:
         - name: chore_id
           in: path
@@ -2534,6 +2702,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerToken: []
+        - apiToken: []
       parameters:
         - name: chore_id
           in: path
@@ -2612,6 +2781,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerToken: []
+        - apiToken: []
   /api/v1/completions:
     get:
       tags:
@@ -2632,6 +2802,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerToken: []
+        - apiToken: []
       parameters:
         - name: page
           in: query
@@ -2741,6 +2912,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerToken: []
+        - apiToken: []
       parameters:
         - name: completion_id
           in: path
@@ -3139,6 +3311,103 @@ paths:
                 $ref: '#/components/schemas/ErrorDetail'
         '404':
           description: No user with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/users/{user_id}/api-token:
+    get:
+      tags:
+        - admin-users
+      summary: Get User Api Token
+      description: |-
+        Whether this user holds a personal access token, and when they made it. Never
+        the token: only its hash is stored, so an administrator cannot read one out any
+        more than the owner can.
+      operationId: get_user_api_token_api_v1_admin_users__user_id__api_token_get
+      security:
+        - sessionCookie: []
+        - bearerToken: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: User Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiTokenStatusRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No user with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+        - admin-users
+      summary: Revoke User Api Token
+      description: |-
+        Revoke a user's access token without disabling their account, for offboarding an
+        integration rather than a person. Self-service revocation is unaffected: this is the
+        same delete, recorded against the administrator who asked for it.
+      operationId: revoke_user_api_token_api_v1_admin_users__user_id__api_token_delete
+      security:
+        - sessionCookie: []
+        - bearerToken: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: User Id
+      responses:
+        '204':
+          description: Successful Response
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '403':
+          description: Signed in, but not a site administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No user with this id, or that user holds no access token.
           content:
             application/json:
               schema:
@@ -3932,6 +4201,61 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
+    ApiTokenCreate:
+      properties:
+        current_password:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Current Password
+      type: object
+      title: ApiTokenCreate
+    ApiTokenCreated:
+      properties:
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        token:
+          type: string
+          title: Token
+      type: object
+      required:
+        - created_at
+        - token
+      title: ApiTokenCreated
+      description: |-
+        The one response that carries the token itself. Shown once and never again:
+        nothing reads it back, because nothing can.
+    ApiTokenRead:
+      properties:
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+      type: object
+      required:
+        - created_at
+      title: ApiTokenRead
+      description: |-
+        What is knowable about an access token after it is made. Not the token: only its
+        SHA-256 is stored, so the plaintext exists nowhere once creation has answered.
+    ApiTokenStatusRead:
+      properties:
+        token:
+          anyOf:
+            - $ref: '#/components/schemas/ApiTokenRead'
+            - type: 'null'
+      type: object
+      title: ApiTokenStatusRead
+      description: |-
+        Whether the caller holds an access token, and when they made it.
+
+        A wrapper round a nullable member rather than a nullable body or a 404. Holding no
+        token is the normal state of every account that has never made one, so a 404 would
+        make the Profile page's ordinary first render an error - and a top-level JSON null
+        forces `T | null` on every client call site for nothing. LoginResponse.user is the
+        same shape for the same reason.
     AssignmentType:
       type: string
       enum:
@@ -6056,3 +6380,7 @@ components:
       description: An impersonating administrator's own session, parked while they act as somebody else. `POST /api/v1/auth/stop-impersonating` is the only route it *authenticates* - several others read it to attribute an action to the real operator, and logout reads it to end both sessions.
       in: cookie
       name: isachore_admin_token
+    apiToken:
+      type: http
+      description: 'A personal access token, `Authorization: Bearer isac_...`, generated on the Profile page. One per account, it never expires, and it is accepted only on the operations that publish this scheme - anywhere else it answers 403. Header only: the same value in a cookie authenticates nobody, which is also why a request carrying one needs no `X-CSRF-Token`.'
+      scheme: bearer
