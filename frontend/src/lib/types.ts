@@ -86,6 +86,21 @@ export type RecoveryCodes = {
   recovery_codes: string[]
 }
 
+// What GET /profile/api-token (and its admin twin) reports: whether the account holds a
+// personal access token and when it was made. `token` is null for an account with none,
+// which is the normal state, not an error. The token itself is never in here - only its
+// hash is stored server-side, so there is nothing to send back.
+export type ApiTokenStatus = {
+  token: { created_at: string } | null
+}
+
+// The one response that carries the token. Returned by POST /profile/api-token and shown
+// once; nothing can read it again.
+export type ApiTokenCreated = {
+  token: string
+  created_at: string
+}
+
 // Envelope returned by the server-side-paginated list endpoints (see
 // backend/app/schemas/pagination.py). Drives the reusable DataTable.
 export type Page<T> = {

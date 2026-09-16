@@ -1,6 +1,6 @@
 """Every route the API exposes, and the one rule about where they live.
 
-**A route gated on `AdminUser` answers under `/admin`.** All 20 of them do, which is
+**A route gated on `AdminUser` answers under `/admin`.** All 22 of them do, which is
 what lets a path be read as a statement about who it serves rather than only about what
 it returns. The three admin routers are grouped at the bottom for the same reason.
 
@@ -12,6 +12,20 @@ Two near-misses that deliberately stay outside `/admin`, both easy to "fix" wron
   `AdminUser` gate would turn away the only caller it exists for.
 - `/logs` reads like an operator surface but is `CurrentUser`-gated and scoped by
   household *ownership*, not by `is_admin`.
+
+**A route reachable by a personal access token takes `ApiUser`, and nothing else does.**
+An allowlist, not a denylist, because it fails in the safe direction: a route added later is
+session-only until somebody deliberately opens it. The 22 that carry it are the due and
+unscheduled views, statistics, the household log, the three household reads, and all of
+tags, chores and completions - reads and writes alike.
+
+Every other GATED route keeps `CurrentUser` and answers 403 to a token: every `/admin`
+operation, everything under `/profile` including the token endpoints themselves, the gated
+`/auth` routes, every household write, and `POST /invitations/{token}/accept`. The public
+routes at the top of this module are NOT "everything else" - they take no user dependency, so
+a token presented to one is ignored and the route answers as it would to anybody.
+`tests/test_openapi_security.py` pins the allowlist closed from the generated document, since
+`ApiUser` is also what publishes the `apiToken` scheme.
 
 **The `responses=` on each call is what documents the gate.** `Depends` carries none of its
 own, so an `include_router` block (from `app/api/responses.py`, merged into every route in
@@ -29,6 +43,7 @@ from app.api.v1 import (
     admin_households,
     admin_settings,
     admin_users,
+    api_tokens,
     auth,
     chores,
     completions,
@@ -82,6 +97,9 @@ api_router.include_router(
 )
 api_router.include_router(
     two_factor.router, prefix="/profile/2fa", tags=["two-factor"], responses=UNAUTHORISED
+)
+api_router.include_router(
+    api_tokens.router, prefix="/profile/api-token", tags=["api-token"], responses=UNAUTHORISED
 )
 api_router.include_router(home.router, prefix="/home", tags=["home"], responses=UNAUTHORISED)
 api_router.include_router(

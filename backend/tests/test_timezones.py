@@ -1291,11 +1291,20 @@ async def test_a_closure_reads_the_slot_after_the_lock_not_from_the_loaded_occur
     make_household: MakeHousehold,
     make_chore: MakeChore,
     db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The other operand. The successor is anchored from `scheduled_for`, so a slot re-anchored in
     between would leave the chore on the old zone's grid - and permanently, since every later
     completion walks from that anchor. The `refresh(..., with_for_update=True)` is what re-reads
-    it; without that this anchors from the stale value."""
+    it; without that this anchors from the stale value.
+
+    The clock is pinned BEFORE both slots, and the choice is load-bearing twice over. A
+    closure that is not backdated advances from whichever is later, the slot or now: once
+    real time passed 20 August 2026 the assertion below simply read tomorrow, which is why
+    this failed on main for a month. Pin it after the stale 5 August slot instead and the
+    test goes quiet a second way - both the stale and the re-read anchor then advance from
+    `now`, the two branches agree, and deleting the refresh above stops failing anything.
+    Only a moment before 5 August separates them."""
     user = await make_user()
     household = await make_household(members=[user], timezone="UTC")
     chore = await make_chore(
@@ -1308,6 +1317,7 @@ async def test_a_closure_reads_the_slot_after_the_lock_not_from_the_loaded_occur
     occ = await _open_occurrence(db_session, chore.id)
     assert occ is not None
     moved = datetime(2026, 8, 20, tzinfo=UTC)
+    pin_clock(monkeypatch, datetime(2026, 8, 1, 12, tzinfo=UTC))
     # `synchronize_session=False` for the same reason as the test above: without it the loaded
     # occurrence picks the new slot up by itself and the refresh proves nothing.
     await db_session.execute(

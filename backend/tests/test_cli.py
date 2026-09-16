@@ -14,11 +14,13 @@ from redis.exceptions import RedisError
 from sqlalchemy import distinct, func, select
 
 from app.cli import _guard_dev_environment, clear_throttle, init_admin
+from app.core.api_tokens import new_api_token
 from app.core.crypto import encrypt
 from app.core.rate_limit import clear_login_throttle
 from app.core.security import generate_token, hash_token, verify_password
 from app.db.seed import SEED_PASSWORD, SEED_TIMEZONE, seed
 from app.models import (
+    ApiToken,
     AuditAction,
     AuditEvent,
     AuthToken,
@@ -276,6 +278,54 @@ async def test_init_restore_reports_every_change_and_audits_it(
     assert event.action == AuditAction.user_updated
     assert event.actor_user_id is None  # no logged-in actor, only shell access
     assert "cli init recovery" in event.detail
+
+
+async def test_init_restore_revokes_the_personal_access_token(
+    db_session, make_user: Callable[..., Awaitable[User]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """auth.md: "Any new 'restore access' step belongs in _restore_admin ... forgetting one
+    leaves a stale way in." An access token never expires, so it is the credential that most
+    deserves to go when an account is being taken back.
+
+    Asserts all three of the row, the printed line and the audit event, because the printed
+    line is the operator's only record from a shell and the event is the only record after
+    the shell closes.
+    """
+    user = await make_user(email="member@example.com")
+    raw = new_api_token()
+    db_session.add(ApiToken(token_hash=hash_token(raw), user_id=user.id))
+    await db_session.commit()
+
+    await init_admin(db_session, "member@example.com", "Member", "User", _INIT_PASSWORD)
+
+    assert await db_session.scalar(select(func.count()).select_from(ApiToken)) == 0
+    assert (
+        "sessions, pending confirmation links and access token revoked" in capsys.readouterr().out
+    )
+    revoked = await db_session.scalar(
+        select(AuditEvent).where(AuditEvent.action == AuditAction.api_token_revoked)
+    )
+    assert revoked is not None
+    assert revoked.target_user_id == user.id
+    assert revoked.actor_user_id is None  # no logged-in actor, only shell access
+
+
+async def test_init_restore_says_nothing_about_a_token_that_did_not_exist(
+    db_session, make_user: Callable[..., Awaitable[User]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The other branch of the message, and the reason the revocation is audited only on a
+    # real delete: without this, a recovery of an account with no token would still claim to
+    # have revoked one and would file an event saying so.
+    await make_user(email="member@example.com")
+
+    await init_admin(db_session, "member@example.com", "Member", "User", _INIT_PASSWORD)
+
+    printed = capsys.readouterr().out
+    assert "sessions and pending confirmation links revoked" in printed
+    assert "access token" not in printed
+    assert not await db_session.scalar(
+        select(AuditEvent).where(AuditEvent.action == AuditAction.api_token_revoked)
+    )
 
 
 async def test_init_noop_prints_and_does_not_audit(

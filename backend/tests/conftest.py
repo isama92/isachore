@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from app.api.v1 import auth as auth_module
 from app.core import oidc as oidc_core
 from app.core import security
+from app.core.api_tokens import new_api_token
 from app.core.assignment import initial_assignee
 from app.core.chores import RecurrenceRule, first_occurrence
 from app.core.config import settings
@@ -26,6 +27,7 @@ from app.db.redis import get_redis
 from app.db.session import get_session
 from app.main import app
 from app.models import (
+    ApiToken,
     AssignmentType,
     AuthToken,
     Chore,
@@ -485,3 +487,42 @@ def auth_client(
         return client
 
     return _auth
+
+
+@pytest.fixture
+def make_api_token(db_session: AsyncSession) -> Callable[[User], Awaitable[str]]:
+    """Mint a personal access token row directly, returning the plaintext.
+
+    Inserts rather than calling POST /profile/api-token for the same reason auth_client
+    inserts an AuthToken: that endpoint is itself under test, so nothing else may depend
+    on it working.
+    """
+
+    async def _make(user: User) -> str:
+        raw = new_api_token()
+        db_session.add(ApiToken(token_hash=hash_token(raw), user_id=user.id))
+        await db_session.commit()
+        return raw
+
+    return _make
+
+
+@pytest.fixture
+def api_client(
+    client: AsyncClient, make_api_token: Callable[[User], Awaitable[str]]
+) -> Callable[[User], Awaitable[AsyncClient]]:
+    """The base client authenticated by a personal access token, and by nothing else.
+
+    Clearing the cookie jar is not housekeeping. `client` is one AsyncClient per test and
+    auth_client sets a cookie on it, which get_request_token prefers over the header - so
+    a test that used both fixtures would quietly exercise the session path and pin nothing
+    at all about access tokens.
+    """
+
+    async def _api(user: User) -> AsyncClient:
+        raw = await make_api_token(user)
+        client.cookies.clear()
+        client.headers["Authorization"] = f"Bearer {raw}"
+        return client
+
+    return _api

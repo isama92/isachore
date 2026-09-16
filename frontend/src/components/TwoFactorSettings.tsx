@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
+import { copyToClipboard } from '../lib/clipboard'
 import { endpoints } from '../lib/endpoints'
 import type { RecoveryCodes, TwoFactorSetup } from '../lib/types'
 import { Badge } from '@/components/ui/badge'
@@ -20,12 +21,16 @@ import { Label } from '@/components/ui/label'
 // The plaintext recovery codes, shown once after enabling or regenerating.
 function RecoveryCodesView({ codes }: { codes: string[] }) {
   const { t } = useTranslation()
+  const [copyError, setCopyError] = useState<string | null>(null)
   async function copy() {
-    try {
-      await navigator.clipboard?.writeText(codes.join('\n'))
+    // See lib/clipboard.ts: the previous `navigator.clipboard?.writeText(...)` here
+    // reported success in any non-secure context, having copied nothing. These codes are
+    // shown once too, so the same reasoning applies.
+    if (await copyToClipboard(codes.join('\n'))) {
+      setCopyError(null)
       toast.success(t('profile.recoveryCodesCopied'))
-    } catch {
-      // Clipboard access can be denied; the codes are still visible to copy by hand.
+    } else {
+      setCopyError(t('profile.recoveryCodesCopyError'))
     }
   }
   return (
@@ -45,6 +50,7 @@ function RecoveryCodesView({ codes }: { codes: string[] }) {
       >
         {t('profile.recoveryCodesCopy')}
       </Button>
+      {copyError && <p className="text-[13px] font-bold text-danger">{copyError}</p>}
     </div>
   )
 }

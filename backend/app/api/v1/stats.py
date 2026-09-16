@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Query
 from sqlalchemy import and_, false, or_, select
 
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps import ApiUser, SessionDep
 from app.core import clock
 from app.core.chores import DueStatus, days_late, days_until_due, due_status, local_day_bounds
 from app.core.households import household_zone, member_household_ids, zones_in_scope
@@ -54,7 +54,7 @@ def _week_start(day: date) -> date:
 
 @router.get("", response_model=StatsRead)
 async def get_stats(
-    user: CurrentUser,
+    user: ApiUser,
     session: SessionDep,
     time_range: Annotated[StatsRange, Query(alias="range")] = "30d",
     household_id: Annotated[int | None, Query(ge=1)] = None,

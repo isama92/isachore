@@ -12,8 +12,8 @@ progress, a separate Unscheduled Chores view for the ones you do whenever you fe
 like it (never due, repeatable on demand, showing how long since each was last
 done), completion history, per-household tags, a Statistics page, admin user and
 household management with impersonation, English/Italian UI, per-user theming,
-optional TOTP two-factor authentication, and optional email-based account
-confirmation.
+optional TOTP two-factor authentication, optional email-based account
+confirmation, and one personal access token per user for a client with no browser.
 
 ## Stack
 
@@ -792,8 +792,9 @@ docker compose exec backend python -m app.cli init \
   promoted to admin if it was not one, re-activated, marked confirmed, and given
   the password you type at the prompt. It also clears the account's two-factor
   enrolment (a restored password alone would still dead-end at the authenticator
-  prompt) and revokes its sessions and any pending confirmation link, so nothing
-  issued before the lockout can be replayed. It prints exactly which of those it
+  prompt) and revokes its sessions, any pending confirmation link and any personal
+  access token, so nothing issued before the lockout can be replayed. It prints
+  exactly which of those it
   changed. All of that is unconditional, so name an account you intend to take
   over; `--first-name` / `--last-name` are ignored here, the existing name is
   kept.
@@ -851,7 +852,7 @@ one deliberately-blocked image, are in `docker/nginx/nginx-docs.conf`.
 
 **The gate is "any active account", not "any operator"**, and that is deliberate:
 `/auth/verify` is `CurrentUser`-gated, so a household helper reads the same reference
-an administrator does, including the twenty `/admin/...` operations and their
+an administrator does, including the twenty-two `/admin/...` operations and their
 schemas. What it keeps out is the anonymous internet. Nothing there is secret - the
 same document is committed to a public repository - so the gate is about not
 publishing your deployment's API surface to passers-by, not about privilege. A
