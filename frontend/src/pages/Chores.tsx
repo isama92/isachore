@@ -362,6 +362,11 @@ export default function Chores() {
     },
     {
       accessorKey: 'start_date',
+      // The only sortable column whose value can be null, and the library picks
+      // a column's first sort direction by sampling the rows on screen: a page
+      // of nothing but unscheduled chores would open descending while every
+      // other page opens ascending. Earliest start first, whatever is loaded.
+      sortDescFirst: false,
       header: t('chores.headers.start'),
       // An unscheduled chore has no start date; the Repeats column beside this one
       // already says so, hence a bare placeholder rather than a second explanation.
