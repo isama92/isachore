@@ -1,19 +1,14 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   columnVisibilityFeature,
-  createCoreRowModel,
   flexRender,
-  rowPaginationFeature,
   rowSortingFeature,
   tableFeatures,
   useTable,
-  type CellData,
   type ColumnDef,
   type OnChangeFn,
-  type PaginationState,
   type RowData,
   type SortingState,
-  type TableFeatures,
 } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
 import {
@@ -42,36 +37,21 @@ import {
 import { cn } from '@/lib/utils'
 import type { FilterSet, UseServerTableResult } from './useServerTable'
 
-// Per-column presentation hooks, set on a column's `meta`. Keeps the generic
-// table free of any column-specific styling.
-//
-// The parameter list has to match table-core's own `ColumnMeta` declaration
-// exactly, variance annotations included, or the merge is rejected outright
-// rather than merely losing these two fields.
-declare module '@tanstack/react-table' {
-  /* eslint-disable @typescript-eslint/no-unused-vars */
-  interface ColumnMeta<
-    in out TFeatures extends TableFeatures,
-    in out TData extends RowData,
-    TValue extends CellData = CellData,
-  > {
-    headClassName?: string
-    cellClassName?: string
-  }
-  /* eslint-enable @typescript-eslint/no-unused-vars */
-}
-
 // Features are opt-in, and a method a feature owns does not exist on the table
-// without it: `getVisibleCells` comes from column visibility, the sort handlers
-// from row sorting. The row models are deliberately absent — the server sorts
-// and paginates, so a client-side model here would reorder the page it was
-// handed. Filtering has no feature at all: it lives entirely in the URL and the
-// request, and never reaches the table.
+// without it: `getVisibleCells` comes from column visibility and the sort
+// handlers from row sorting, which is the whole of what this component calls.
+// The server sorts, filters and paginates, so the derived row models stay out —
+// one here would reorder the page the API just returned — and the core model is
+// the library's own default.
+//
+// `columnMeta` types `columnDef.meta` for this table's columns, which is where
+// per-column presentation hooks live; it keeps the generic table free of any
+// column-specific styling without declaring them on the library's global
+// `ColumnMeta` interface, where they would apply to every table everywhere.
 const dataTableFeatures = tableFeatures({
   columnVisibilityFeature,
-  rowPaginationFeature,
   rowSortingFeature,
-  coreRowModel: createCoreRowModel(),
+  columnMeta: {} as { headClassName?: string; cellClassName?: string },
 })
 
 // Pages declare their own columns, so they need the feature set the table is
@@ -103,10 +83,6 @@ export function DataTable<Row extends RowData, Filters extends FilterSet>({
   const { t } = useTranslation()
 
   const sorting: SortingState = [{ id: controller.sortBy, desc: controller.sortDir === 'desc' }]
-  const pagination: PaginationState = {
-    pageIndex: controller.page - 1,
-    pageSize: controller.pageSize,
-  }
 
   const onSortingChange: OnChangeFn<SortingState> = (updater) => {
     const next = typeof updater === 'function' ? updater(sorting) : updater
@@ -118,11 +94,9 @@ export function DataTable<Row extends RowData, Filters extends FilterSet>({
     features: dataTableFeatures,
     data: controller.rows,
     columns,
-    manualPagination: true,
     manualSorting: true,
     enableSortingRemoval: false,
-    pageCount: controller.pageCount,
-    state: { sorting, pagination },
+    state: { sorting },
     onSortingChange,
   })
 

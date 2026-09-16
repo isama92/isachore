@@ -58,7 +58,7 @@ React 19 + TypeScript, Vite, npm.
 | Routing | react-router 8 (import from `react-router`, never `react-router-dom`) |
 | Styling | Tailwind CSS v4, CSS-first (no `tailwind.config.js`) |
 | Components | shadcn/ui (radix-nova style) over `radix-ui`, owned in `src/components/ui/` |
-| Tables | TanStack Table 8, fully manual mode |
+| Tables | TanStack Table 9, server-driven (opt-in features, no client row models) |
 | Charts | recharts |
 | Rich text | Tiptap v3 |
 | Dates | date-fns |
