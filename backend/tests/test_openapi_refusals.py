@@ -3,8 +3,13 @@
 `test_openapi_security.py` covers the refusals a shared *gate* produces - the 401, the two
 403s, the 429 - and does it with hand-written closed sets, because a gate is applied in one
 place and there are few of them. The refusals in this module are the other kind: raised by a
-handler, or by a helper only that handler calls, and there are 87 of them across 53
-operations. A hand-written list of that size is a list nobody maintains.
+handler, or by a helper only that handler calls. The document declares 116 of them across 58
+operations - that is every refusal a route carries, minus the 401 and the admin 403 that come
+from gates. A hand-written list of that size is a list nobody maintains.
+
+Recheck the figure rather than trusting it, because nothing reads it: it is
+`sum(len(v - _invisible_to_the_walk(k)) for k, v in DECLARED.items())`. The walker's own
+count is higher (121 across 61) because it over-reports the branches listed in UNREACHABLE.
 
 So this reads the code instead. For each route handler it walks the call graph, collects the
 status codes reachable from it, and compares that with what the operation declares. Both
@@ -358,11 +363,19 @@ def _invisible_to_the_walk(key: tuple[str, str]) -> set[str]:
     """Refusals that reach a route through a DEPENDENCY rather than a call, so the walk
     cannot see them however correct they are.
 
-    Exactly two, and the narrowness is the point. `CurrentUser` produces the 401 on all 63
-    gated operations and `AdminUser` the 403 on the 20 admin ones, neither of them by a call
+    Exactly two, and the narrowness is the point. `CurrentUser` produces the 401 on all 68
+    gated operations and `AdminUser` the 403 on the 22 admin ones, neither of them by a call
     the handler makes. Everything else is walkable, so a `require_role` 403 on a route that
     never calls it, or a 429 on a route behind no throttle, still fails below - and the first
     of those is a mistake this project has actually made, on 12 operations at once.
+
+    A third refusal is invisible here and deliberately needs no entry: `get_current_user`
+    answers 403 when a personal access token is presented to a GATED operation outside
+    API_TOKEN_OPERATIONS (a public one takes no user dependency, so it never runs). It is
+    raised in the same dependency as the 401, so the walker cannot see it either - and
+    because it is declared on no route (main.py's API_DESCRIPTION is its only home, like the
+    CSRF 403), the other direction never sees it either. If somebody declares it per route
+    and this file goes red, delete the declaration rather than widening this function.
     """
     return {"401"} | ({"403"} if key[1].startswith(f"{ROOT}/admin/") else set())
 

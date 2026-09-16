@@ -4,7 +4,7 @@ from fastapi import APIRouter, Query
 from sqlalchemy import and_, false, or_, select
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps import ApiUser, SessionDep
 from app.core import clock
 from app.core.chores import days_until_due, due_status, local_day_bounds
 from app.core.households import (
@@ -23,7 +23,7 @@ router = APIRouter()
 
 @router.get("", response_model=HomeRead)
 async def get_home(
-    user: CurrentUser,
+    user: ApiUser,
     session: SessionDep,
     household_id: Annotated[int | None, Query(ge=1)] = None,
     # A repeatable query param (?assignee_id=1&assignee_id=2). No ge constraint:

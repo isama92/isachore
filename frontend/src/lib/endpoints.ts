@@ -46,6 +46,9 @@ export const endpoints = {
       recoveryCodes: `${V1}/profile/2fa/recovery-codes`,
       disable: `${V1}/profile/2fa/disable`,
     },
+    // One path, three methods: GET reports whether a token exists, POST mints it
+    // (and is the only response that ever carries the token itself), DELETE revokes.
+    apiToken: `${V1}/profile/api-token`,
   },
 
   chores: {
@@ -106,6 +109,10 @@ export const endpoints = {
     impersonate: (id: Id) => `${V1}/admin/users/${id}/impersonate`,
     resendConfirmation: (id: Id) => `${V1}/admin/users/${id}/resend-confirmation`,
     resetTwoFactor: (id: Id) => `${V1}/admin/users/${id}/reset-2fa`,
+    // GET reports whether the user holds an access token, DELETE revokes it. There is no
+    // admin POST, and no way round it either: minting needs the owner's own password, and
+    // the profile endpoint refuses outright while an admin is impersonating them.
+    apiToken: (id: Id) => `${V1}/admin/users/${id}/api-token`,
   },
 
   adminSettings: {

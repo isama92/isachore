@@ -52,8 +52,25 @@ def verify_password(password: str, password_hash: str) -> bool:
     return _password_hash.verify(password, password_hash)
 
 
+# The marker that tells a presented credential apart from a session one in a single string
+# comparison, so api/deps.py routes it to the right table without two queries. It lives here
+# rather than in core/api_tokens.py because generate_token below has to know it, and that
+# module already imports from this one.
+API_TOKEN_PREFIX = "isac_"
+
+
 def generate_token() -> str:
-    return secrets.token_urlsafe(32)
+    """A session, invitation or confirmation token: never a personal access token.
+
+    The exclusion makes api/deps.py's prefix test total rather than probabilistic.
+    token_urlsafe draws from [A-Za-z0-9_-], so every character of the prefix is reachable
+    and roughly one token in 64**5 would otherwise be classified as an access token, fail
+    the api_tokens lookup, and 401 for its whole 30-day life with nothing to explain it.
+    One retry costs nothing and removes the case entirely.
+    """
+    while (token := secrets.token_urlsafe(32)).startswith(API_TOKEN_PREFIX):
+        pass
+    return token
 
 
 def hash_token(token: str) -> str:

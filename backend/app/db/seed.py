@@ -29,6 +29,7 @@ from app.core.household_log import record_log_entry
 from app.core.households import add_member, household_zone, personal_household_name
 from app.core.security import hash_password
 from app.models import (
+    ApiToken,
     AssignmentType,
     AuditEvent,
     AuthToken,
@@ -361,6 +362,10 @@ _WIPE_ORDER = [
     HouseholdInvitation,
     Household,
     AuthToken,
+    # Beside AuthToken because it is the same thing to a user - a way in - even
+    # though the users CASCADE would clear it. `seed --fresh` promises to wipe app
+    # data rather than to lean on an ondelete a later change could relax.
+    ApiToken,
     ConfirmationToken,
     # No user_id and so no CASCADE to lean on: an in-flight SSO login belongs to a
     # browser, not yet to an account. Position is therefore free, unlike everything

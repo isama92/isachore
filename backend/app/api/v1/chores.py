@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import contains_eager, defer, selectinload
 
-from app.api.deps import CurrentUser, Impersonator, SessionDep
+from app.api.deps import ApiUser, Impersonator, SessionDep
 from app.api.responses import FORBIDDEN_ROLE, refusals
 from app.api.v1.households import SortDir
 from app.core import clock
@@ -491,7 +491,7 @@ async def _reconcile_open_occurrence(
     ),
 )
 async def create_chore(
-    payload: ChoreCreate, user: CurrentUser, session: SessionDep, impersonator: Impersonator
+    payload: ChoreCreate, user: ApiUser, session: SessionDep, impersonator: Impersonator
 ) -> Chore:
     household = await _resolve_household_or_404(session, user, payload.household_id)
     assignees = await _resolve_assignees(session, household, payload.assignee_ids)
@@ -551,7 +551,7 @@ async def create_chore(
 
 @router.get("", response_model=Page[ChoreListRead])
 async def list_chores(
-    user: CurrentUser,
+    user: ApiUser,
     session: SessionDep,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -623,7 +623,7 @@ async def list_chores(
         ),
     ),
 )
-async def get_chore(chore_id: int, user: CurrentUser, session: SessionDep) -> Chore:
+async def get_chore(chore_id: int, user: ApiUser, session: SessionDep) -> Chore:
     chore = await _get_user_chore_or_404(session, user, chore_id)
     await _attach_current_assignee(session, [chore])
     return chore
@@ -655,7 +655,7 @@ async def get_chore(chore_id: int, user: CurrentUser, session: SessionDep) -> Ch
 async def update_chore(
     chore_id: int,
     payload: ChoreUpdate,
-    user: CurrentUser,
+    user: ApiUser,
     session: SessionDep,
     impersonator: Impersonator,
 ) -> Chore:
@@ -726,7 +726,7 @@ async def update_chore(
     ),
 )
 async def delete_chore(
-    chore_id: int, user: CurrentUser, session: SessionDep, impersonator: Impersonator
+    chore_id: int, user: ApiUser, session: SessionDep, impersonator: Impersonator
 ) -> None:
     chore = await _managed_chore_or_error(session, user, chore_id)
     chore.deleted_at = clock.now()
@@ -924,7 +924,7 @@ async def _close_occurrence(
 )
 async def complete_chore(
     chore_id: int,
-    user: CurrentUser,
+    user: ApiUser,
     session: SessionDep,
     payload: CompleteChoreRequest | None = None,
 ) -> CompletionRead:
@@ -1010,7 +1010,7 @@ async def complete_chore(
         ),
     ),
 )
-async def skip_chore(chore_id: int, user: CurrentUser, session: SessionDep) -> CompletionRead:
+async def skip_chore(chore_id: int, user: ApiUser, session: SessionDep) -> CompletionRead:
     """Skip a chore's current occurrence: close it and move the chore on to its next slot
     without recording any work. Ungated like completing, since every role that can complete a
     chore can decide not to do one.

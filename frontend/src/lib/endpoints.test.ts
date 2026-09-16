@@ -56,6 +56,7 @@ describe('endpoints', () => {
       '/api/v1/admin/users/u5/resend-confirmation',
     )
     expect(endpoints.adminUsers.resetTwoFactor('u5')).toBe('/api/v1/admin/users/u5/reset-2fa')
+    expect(endpoints.adminUsers.apiToken('u5')).toBe('/api/v1/admin/users/u5/api-token')
     expect(endpoints.invitations.accept('tok')).toBe('/api/v1/invitations/tok/accept')
     expect(endpoints.confirm.byToken('tok')).toBe('/api/v1/confirm/tok')
     expect(endpoints.adminHouseholds.byId('h6')).toBe('/api/v1/admin/households/h6')

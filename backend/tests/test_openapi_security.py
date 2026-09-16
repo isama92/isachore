@@ -52,6 +52,34 @@ ROLE_GATED_OPERATIONS = {
     ("DELETE", "/api/v1/households/{household_id}/invitations/{invitation_id}"),
 }
 
+# The operations a personal access token may call, which is exactly the set carrying
+# `ApiUser` in the routers. An allowlist rather than a denylist, so a route added later is
+# session-only until somebody deliberately opens it - and this edit is how they do it.
+API_TOKEN_OPERATIONS = {
+    ("GET", "/api/v1/home"),
+    ("GET", "/api/v1/unscheduled"),
+    ("GET", "/api/v1/stats"),
+    ("GET", "/api/v1/logs"),
+    ("GET", "/api/v1/households"),
+    ("GET", "/api/v1/households/{household_id}"),
+    ("GET", "/api/v1/households/{household_id}/members"),
+    ("GET", "/api/v1/tags"),
+    ("POST", "/api/v1/tags"),
+    ("GET", "/api/v1/tags/{tag_id}"),
+    ("PATCH", "/api/v1/tags/{tag_id}"),
+    ("DELETE", "/api/v1/tags/{tag_id}"),
+    ("GET", "/api/v1/chores"),
+    ("POST", "/api/v1/chores"),
+    ("GET", "/api/v1/chores/{chore_id}"),
+    ("PATCH", "/api/v1/chores/{chore_id}"),
+    ("DELETE", "/api/v1/chores/{chore_id}"),
+    ("POST", "/api/v1/chores/{chore_id}/complete"),
+    ("POST", "/api/v1/chores/{chore_id}/skip"),
+    ("GET", "/api/v1/completions"),
+    ("GET", "/api/v1/completions/filters"),
+    ("DELETE", "/api/v1/completions/{completion_id}"),
+}
+
 # Kept apart from the set above because they are a DIFFERENT refusal wearing the same status
 # code: `_get_owned_household`, which turns away an organiser who does not own the household
 # and which no role change can clear. Ownership is off the ladder (see CLAUDE.md on
@@ -99,11 +127,18 @@ PUBLIC_OPERATIONS_ANSWERING_401 = {
     ("POST", "/api/v1/auth/verify-2fa"),
 }
 
-# A 403 that is not a gate refusing anybody: `POST /auth/login` answers it when the server is
-# configured for single sign-on only, which is a property of the deployment rather than of
-# the caller. It is owned by test_openapi_refusals.py along with the other per-endpoint
-# refusals; naming it here keeps the gate sets below closed.
-ENDPOINT_403 = {("POST", "/api/v1/auth/login")}
+# 403s that are not a gate refusing anybody. They are owned by test_openapi_refusals.py along
+# with the other per-endpoint refusals; naming them here keeps the gate sets below closed.
+#
+# - `POST /auth/login` answers it when the server is configured for single sign-on only,
+#   which is a property of the deployment rather than of the caller.
+# - `POST /profile/api-token` answers it to an impersonating administrator. Also not a gate:
+#   the caller is past every gate, and the account holder making the identical request is
+#   allowed. It is about the credential outliving the impersonation, not about rank.
+ENDPOINT_403 = {
+    ("POST", "/api/v1/auth/login"),
+    ("POST", "/api/v1/profile/api-token"),
+}
 
 ROUTERS_DIR = Path(__file__).resolve().parents[1] / "app" / "api" / "v1"
 
@@ -163,7 +198,7 @@ def handler_name(key: tuple[str, str]) -> str:
     return OPERATIONS[key]["operationId"].split("_api_v1_")[0]
 
 
-def test_the_security_schemes_are_exactly_the_three_transports() -> None:
+def test_the_security_schemes_are_exactly_the_four_transports() -> None:
     """Closed, because the omission is the interesting part.
 
     X-CSRF-Token is absent on purpose: FastAPI emits one `security` entry per scheme and
@@ -172,13 +207,60 @@ def test_the_security_schemes_are_exactly_the_three_transports() -> None:
     prose on the app instead (main.py's API_DESCRIPTION). Nothing in the app's behaviour can
     tell the difference, so this assertion is the only thing standing between that reasoning
     and somebody adding the scheme because it looks missing.
+
+    `apiToken` IS a fourth transport, and it is not the same kind of thing as the other
+    three: those say how a session may travel, this one says which OPERATIONS a credential
+    reaches. Two of the four read the same `Authorization: Bearer` header, which is not
+    duplication - the header carries either a session token or a personal access token, and
+    which one it holds decides where it works.
+
+    The `isac_` assertion below is the counterpart of the X-CSRF-Token one. A personal
+    access token used outside its allowlist answers 403, and that refusal is declared on no
+    route (it is raised in a dependency, so it is invisible to the walker in
+    test_openapi_refusals.py, and stamping it onto ~50 operations would bury the gate
+    refusals). API_DESCRIPTION is therefore its only home, and this is what says so.
     """
     assert set(SPEC["components"]["securitySchemes"]) == {
         "sessionCookie",
         "bearerToken",
         "parkedAdminCookie",
+        "apiToken",
     }
     assert "X-CSRF-Token" in SPEC["info"]["description"]
+    assert "isac_" in SPEC["info"]["description"]
+
+
+def test_the_api_token_operations_are_exactly_these() -> None:
+    """The allowlist a personal access token reaches, closed in both directions.
+
+    Closed rather than spot-checked for the reason at the top of this module, and with an
+    extra edge: the default here is SAFE (a route with no `ApiUser` is session-only), so
+    the failure this catches is not a lost gate but a widened one. A route that gains
+    `ApiUser` without an edit here fails, and so does one that loses it.
+
+    Note the shape of the line: every household WRITE is absent while chore, tag and
+    completion writes are present. That is deliberate and is not "reads only" - changing
+    who may act in a household is account management, and a credential living forever in
+    somebody's Home Assistant config should not do it.
+    """
+    carries_api_token = {
+        key for key, op in OPERATIONS.items() if {"apiToken": []} in op.get("security", [])
+    }
+    assert carries_api_token == API_TOKEN_OPERATIONS
+
+
+def test_an_api_token_operation_still_accepts_a_session() -> None:
+    """All three schemes on each of the 22, not just `apiToken`.
+
+    `get_api_user` takes two ignored `Security(...)` parameters purely so these operations
+    keep publishing the session transports. Dropping them would publish 22 operations as
+    reachable by access token ALONE while they still accept a session, and neither the test
+    above nor `test_a_gated_operation_and_a_401_are_the_same_thing` would notice, because
+    both only ask whether `security` is non-empty or contains one entry.
+    """
+    for key in sorted(API_TOKEN_OPERATIONS):
+        names = {name for entry in OPERATIONS[key]["security"] for name in entry}
+        assert names == {"sessionCookie", "bearerToken", "apiToken"}, key
 
 
 def test_a_gated_operation_and_a_401_are_the_same_thing() -> None:
@@ -222,12 +304,22 @@ def test_a_403_is_declared_only_where_a_gate_can_raise_one() -> None:
     authenticated user may call, and on `GET /completions/filters`, which is deliberately not
     role-narrowed at all.
 
-    Note what this does NOT cover, because the status code is shared and the set is not:
-    CsrfProtectMiddleware also answers 403, on any cookie-authenticated unsafe method with no
-    X-CSRF-Token, which is roughly two dozen operations here including several in neither set
-    below. That refusal is deliberately left to prose in main.py's API_DESCRIPTION - it is a
-    property of the transport rather than of any route, and documenting it per operation
-    would bury the two gates this test is about.
+    Note what this does NOT cover, because the status code is shared and the set is not.
+    Two other things answer 403 and neither is declared anywhere:
+
+    - CsrfProtectMiddleware, on any cookie-authenticated unsafe method with no
+      X-CSRF-Token, which is roughly two dozen operations here including several in
+      neither set below;
+    - get_current_user, on every GATED operation outside API_TOKEN_OPERATIONS when the
+      caller presents a personal access token, which is most of the document. Not the
+      public ones: they take no user dependency, so a token there is simply ignored.
+
+    Both are left to prose in main.py's API_DESCRIPTION for the same reason: each is a
+    property of the transport rather than of any route, and stamping either onto every
+    operation it can reach would bury the two gates this test is about. They are also
+    both invisible to test_openapi_refusals.py's walker, being raised by a dependency and
+    by middleware rather than by anything a handler calls - so if one of them ever IS
+    declared per route and that test goes red, the fix is to delete the declaration.
     """
     gate_403s = {
         key

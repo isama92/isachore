@@ -1,3 +1,18 @@
+"""Households, their members and their invitations.
+
+**The only module that mixes `ApiUser` and `CurrentUser`, and the split is deliberate.**
+Three of the four GET routes take `ApiUser` - the household list, one household, and its
+members. Everything else here is session-only, INCLUDING the fourth read, the invitation
+list, which stays with the invitation writes it belongs to.
+
+So the line is not "reads take one and writes take the other", in either direction: an
+access token may freely create, edit and delete chores, tags and completions, and may not
+read the invitations of a household it can otherwise see. What it may not touch is who is
+in a household and what they may do there, because that is account management and a
+credential living forever in a config file elsewhere should not do it. See
+api/v1/router.py for the full allowlist.
+"""
+
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Annotated, Literal
@@ -6,7 +21,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import ColumnElement, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps import ApiUser, CurrentUser, SessionDep
 from app.api.responses import FORBIDDEN_OWNER, FORBIDDEN_ROLE, FORBIDDEN_ROLE_OR_OWNER, refusals
 from app.core import clock
 from app.core.config import settings
@@ -469,7 +484,7 @@ async def _get_organised_household(
 
 @router.get("", response_model=Page[HouseholdListRead])
 async def list_households(
-    user: CurrentUser,
+    user: ApiUser,
     session: SessionDep,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -512,9 +527,7 @@ async def create_household(
         ),
     ),
 )
-async def get_household(
-    household_id: int, user: CurrentUser, session: SessionDep
-) -> HouseholdListRead:
+async def get_household(household_id: int, user: ApiUser, session: SessionDep) -> HouseholdListRead:
     return await load_household_read(
         session,
         household_id,
@@ -585,7 +598,7 @@ async def delete_household(household_id: int, user: CurrentUser, session: Sessio
 )
 async def list_household_members(
     household_id: int,
-    user: CurrentUser,
+    user: ApiUser,
     session: SessionDep,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
