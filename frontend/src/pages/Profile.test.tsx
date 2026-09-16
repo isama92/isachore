@@ -2,8 +2,21 @@ import { describe, expect, it, vi } from 'vitest'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import Profile from './Profile'
-import { mockFetch, renderWithProviders } from '../test/utils'
+import { jsonResponse, mockFetch, renderWithProviders } from '../test/utils'
 import { makeUser } from '../test/fixtures'
+
+import type { Mock } from 'vitest'
+
+// Everything this page SENDS, which is what the "nothing was sent" assertions below mean.
+// They used to say `not.toHaveBeenCalled()`, which stopped being true when the API section
+// arrived and reads its token state on mount - a read the password and avatar forms have
+// nothing to do with. Filtering to the non-GET calls keeps the assertion pinned to the
+// client-side check it is about, rather than to how many read-only panels the page has.
+function sent(fetchMock: Mock) {
+  return fetchMock.mock.calls.filter(
+    ([, init]) => ((init as RequestInit | undefined)?.method ?? 'GET').toUpperCase() !== 'GET',
+  )
+}
 
 describe('Profile', () => {
   it('saves a new name via PATCH /profile and refreshes', async () => {
@@ -131,7 +144,7 @@ describe('Profile', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Change password' }))
 
     expect(screen.getByText('The new passwords do not match')).toBeInTheDocument()
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(sent(fetchMock)).toEqual([])
   })
 
   it('rejects a too-short new password inline without calling the API', async () => {
@@ -144,7 +157,7 @@ describe('Profile', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Change password' }))
 
     expect(screen.getByText(/at least 8 characters/i)).toBeInTheDocument()
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(sent(fetchMock)).toEqual([])
   })
 
   it('changes the password via PATCH /profile and clears the fields', async () => {
@@ -234,7 +247,7 @@ describe('Profile', () => {
       await screen.findByText('That photo is larger than 5 MB. Pick a smaller one.'),
     ).toBeInTheDocument()
     // The point of the client-side check: nothing was sent.
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(sent(fetchMock)).toEqual([])
 
     // Picking a valid one must still work, which pins the two orderings that make
     // this handler fragile: returning before setAvatarBusy(true) (or the button
@@ -285,7 +298,15 @@ describe('Profile', () => {
         throw new Error('not json')
       },
     } as unknown as Response
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(nginx413))
+    // Only the upload. Stubbing every request with it would also hand the 413 to the
+    // API section's mount-time read, whose inline error would then satisfy the assertion
+    // below for a reason that has nothing to do with the avatar.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
+        init?.method === 'PUT' ? nginx413 : jsonResponse(200, { token: null }),
+      ),
+    )
     const { container } = renderWithProviders(<Profile />, {
       authValue: { user: makeUser({ avatar_url: null }) },
     })
@@ -414,5 +435,19 @@ describe('Profile personal data', () => {
 
     expect(screen.getByRole('button', { name: 'Personal data' })).toBeInTheDocument()
     expect(document.getElementById('personal')).toBeInTheDocument()
+  })
+
+  it('offers the API section below Security', () => {
+    renderWithProviders(<Profile />, { authValue: { user: makeUser() } })
+
+    expect(screen.getByRole('button', { name: 'API' })).toBeInTheDocument()
+    expect(document.getElementById('api')).toBeInTheDocument()
+    // Order, not just presence: the nav is a list and the ask was for API to sit under
+    // Security, so a test that only checked both existed would pass on either order.
+    const labels = screen
+      .getAllByRole('button')
+      .map((b) => b.textContent)
+      .filter((label): label is string => label === 'Security' || label === 'API')
+    expect(labels).toEqual(['Security', 'API'])
   })
 })

@@ -3,7 +3,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import and_, func, or_, select
 
-from app.api.deps import CurrentUser, Impersonator, SessionDep
+from app.api.deps import ApiUser, Impersonator, SessionDep
 from app.api.responses import refusals
 from app.api.v1.households import SortDir
 from app.core.chores import days_late
@@ -45,7 +45,7 @@ CompletionOutcome = Literal["completed", "skipped"]
 
 
 @router.get("/filters", response_model=HistoryFilterOptions)
-async def completion_filters(user: CurrentUser, session: SessionDep) -> HistoryFilterOptions:
+async def completion_filters(user: ApiUser, session: SessionDep) -> HistoryFilterOptions:
     """The option lists for the History filters: the households the user belongs
     to, and the distinct active members across them (candidate completers).
 
@@ -94,7 +94,7 @@ async def completion_filters(user: CurrentUser, session: SessionDep) -> HistoryF
 
 @router.get("", response_model=Page[HistoryEntryRead])
 async def list_completions(
-    user: CurrentUser,
+    user: ApiUser,
     session: SessionDep,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -218,7 +218,7 @@ async def list_completions(
     ),
 )
 async def undo_completion(
-    completion_id: int, user: CurrentUser, session: SessionDep, impersonator: Impersonator
+    completion_id: int, user: ApiUser, session: SessionDep, impersonator: Impersonator
 ) -> None:
     """Undo a closure, completion or skip alike (identified by its done-occurrence id).
     Either the user it is recorded against (completed_by) or an organiser of that household

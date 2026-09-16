@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.models.api_token import ApiToken
     from app.models.auth_token import AuthToken
     from app.models.chore import Chore
     from app.models.confirmation_token import ConfirmationToken
@@ -100,6 +101,9 @@ class User(Base):
 
     tokens: Mapped[list["AuthToken"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
+    )
+    api_token: Mapped["ApiToken | None"] = relationship(
+        back_populates="user", cascade="all, delete-orphan", uselist=False
     )
     confirmation_tokens: Mapped[list["ConfirmationToken"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
