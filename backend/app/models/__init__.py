@@ -1,5 +1,6 @@
 # Importing this package registers every model on Base.metadata
 # (alembic autogenerate and relationship resolution rely on it).
+from app.models.api_token import ApiToken
 from app.models.app_settings import AppSettings
 from app.models.audit_event import AuditAction, AuditEvent
 from app.models.auth_token import AuthToken
@@ -16,6 +17,7 @@ from app.models.two_factor_recovery_code import TwoFactorRecoveryCode
 from app.models.user import User, UserStatus
 
 __all__ = [
+    "ApiToken",
     "AppSettings",
     "AssignmentType",
     "AuditAction",

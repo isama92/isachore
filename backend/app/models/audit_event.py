@@ -23,6 +23,8 @@ class AuditAction(enum.StrEnum):
     two_factor_failed = "two_factor_failed"
     two_factor_reset = "two_factor_reset"
     two_factor_recovery_regenerated = "two_factor_recovery_regenerated"
+    api_token_created = "api_token_created"
+    api_token_revoked = "api_token_revoked"
 
 
 class AuditEvent(Base):

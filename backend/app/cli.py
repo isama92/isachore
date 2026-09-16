@@ -14,6 +14,7 @@ from redis.asyncio import Redis
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.api_tokens import revoke_api_token
 from app.core.audit import record_event
 from app.core.config import is_dev_environment, settings
 from app.core.crypto import generate_key
@@ -125,7 +126,16 @@ async def _restore_admin(session: AsyncSession, user: User, password: str) -> No
         changes.append("single sign-on link cleared")
     await session.execute(delete(AuthToken).where(AuthToken.user_id == user.id))
     await session.execute(delete(ConfirmationToken).where(ConfirmationToken.user_id == user.id))
-    changes.append("sessions and pending confirmation links revoked")
+    # The personal access token goes with them. It is the one credential here that
+    # never expires, so leaving it would make recovery the one step that hands the
+    # account back without taking it away from whoever else held it.
+    if await revoke_api_token(session, user.id):
+        changes.append("sessions, pending confirmation links and access token revoked")
+        # Its own event as well as the summary below, matching what admin_users does, so
+        # "when was this token revoked" is one query rather than a string search.
+        await record_event(session, action=AuditAction.api_token_revoked, target_id=user.id)
+    else:
+        changes.append("sessions and pending confirmation links revoked")
     # No actor_id: there is no logged-in admin, only whoever holds shell access,
     # the same "no known actor" case as login_failed. user_updated is reused
     # rather than adding an enum member, since audit_events.action is a DB enum
@@ -206,7 +216,7 @@ def main() -> None:
         help=(
             "create the first admin user (no-op if an ACTIVE admin exists); with no active "
             "admin it recovers instead, taking over the account with this email: promoted, "
-            "re-activated, password RESET, 2FA cleared, sessions revoked"
+            "re-activated, password RESET, 2FA cleared, sessions and access token revoked"
         ),
     )
     init.add_argument("--email", required=True)

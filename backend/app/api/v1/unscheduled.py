@@ -5,7 +5,7 @@ from fastapi import APIRouter, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps import ApiUser, SessionDep
 from app.core import clock
 from app.core.chores import days_since
 from app.core.households import assignee_visibility, chore_scope, household_zone
@@ -44,7 +44,7 @@ async def _last_completions(session: SessionDep, chore_ids: list[int]) -> dict[i
 
 @router.get("", response_model=UnscheduledRead)
 async def get_unscheduled(
-    user: CurrentUser,
+    user: ApiUser,
     session: SessionDep,
     household_id: Annotated[int | None, Query(ge=1)] = None,
     # A repeatable query param (?assignee_id=1&assignee_id=2), same shape as the due view.
