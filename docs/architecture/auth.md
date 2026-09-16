@@ -24,8 +24,8 @@ Only `active` users can log in or be impersonated. Deactivation is a soft delete
 ### Admin lockout recovery (I2)
 
 `init` no-ops only while an *active* admin exists. With none, it takes over the account named
-by `--email` (promote, re-activate, reset password, clear 2FA, revoke sessions and
-confirmation links) or creates a fresh admin if that email is unknown.
+by `--email` (promote, re-activate, reset password, clear 2FA, revoke sessions, confirmation
+links and any personal access token) or creates a fresh admin if that email is unknown.
 
 Any new "restore access" step belongs in `_restore_admin`, which mirrors the revocations
 `update_user` / `reset_two_factor` do for the same changes; forgetting one leaves a stale way
@@ -33,6 +33,99 @@ in.
 
 It cannot help while an admin row is active but unusable (2FA lost, password forgotten): that
 needs a direct DB edit first.
+
+## Personal access tokens
+
+One long-lived credential per account, for a client with no browser — the motivating one is a
+Home Assistant dashboard polling `GET /home`. Generated and revoked from the **API** section
+of the Profile page; `api_tokens` stores `sha256(token)` and nothing else, so the plaintext
+exists only in the one response that mints it.
+
+The string is `isac_` + `secrets.token_urlsafe(32)`. The prefix does two jobs: it routes a
+presented credential to the right table in one query, and it makes the token greppable by a
+secret scanner.
+
+### Its own table, and the two places that delete from it anyway
+
+`api_tokens` is separate from `auth_tokens` because a never-expiring row there would need an
+exception in every statement that clears a user's sessions by `user_id` — `PATCH /profile`,
+`admin_users._revoke_tokens`, `cli._restore_admin` — and in `purge_expired_tokens`, which
+sweeps by `expires_at` a row like this has none of. Living apart means none of them can take
+it by accident, which is the failure the note under **Admin lockout recovery** is about.
+
+Two of them take it *on purpose*, and the line between them is who is acting:
+
+| Who changes the password | Sessions | Access token |
+|---|---|---|
+| The owner, `PATCH /profile` | all others dropped | **kept** |
+| An administrator, `PATCH /admin/users/{id}` | all dropped | **revoked** |
+| An administrator disabling the account | all dropped | **revoked** |
+| `cli init` recovery | all dropped | **revoked** |
+
+A user changing their own password has not lost control of the account, and breaking their
+integration every time they rotate a password would be a poor trade. An administrator doing
+it is the "this account may be compromised" lever, and a credential that outlived it would be
+exactly the stale way in. `reset_two_factor` revokes neither, as it always has: a lost
+authenticator is not a compromise.
+
+`UNIQUE(user_id)` is what makes "one per account" true rather than merely checked. The create
+endpoint inserts and catches `IntegrityError` for the 409, so two requests racing cannot both
+mint one.
+
+### The gate is an allowlist
+
+`CurrentUser` keeps its exact meaning: a session, by cookie or bearer. `ApiUser` accepts a
+session **or** an access token, and carries the fourth OpenAPI security scheme, `apiToken`. It
+is on exactly 22 operations — the due and unscheduled views, statistics, the household log,
+the three household reads, and all of tags, chores and completions, writes included. The
+closed set lives in `tests/test_openapi_security.py`, read off the generated document.
+
+An allowlist rather than a denylist because it fails safe: a route added later is session-only
+until somebody deliberately opens it. Note the line is *not* "reads only" — a token may create
+and delete chores and tags, and undo completions. What it may not do is anything under
+`/admin` or `/profile`, the gated `/auth` routes, or any write that changes who is in a
+household or what they may do there. Changing membership is account management, and a
+credential sitting forever in somebody's config file should not do it.
+
+A valid token used outside that set answers **403** on every *gated* operation; the public
+ones take no user dependency, so a token presented to `POST /auth/login` or
+`GET /invitations/{token}` is simply ignored. An unknown or revoked token answers 401.
+The distinction is the point: 403 means retrying with a different access token will not help.
+That 403 is declared on no route. It is raised in `get_current_user`, so it is invisible to
+`tests/test_openapi_refusals.py`'s walker in both directions, and it reaches the document only
+through `main.py`'s `API_DESCRIPTION` — the same treatment, for the same reason, as the CSRF
+403. If it ever appears in a route's `responses=`, delete it rather than teaching the walker
+about it.
+
+### Header only
+
+The token is read from `Authorization: Bearer` and never from a cookie, by a separate
+`bearer_token()` helper. That is what keeps the CSRF reasoning below intact: the middleware
+fires on the presence of an auth cookie, so a credential that can never arrive as one is
+CSRF-immune by construction rather than by exemption. `api_token_user` is likewise separate
+from `get_user_by_token`, because that one is also called against the parked admin cookie —
+a shared lookup would turn a token pasted into `isachore_admin_token` into an impersonation
+credential.
+
+### Two deliberate absences
+
+- **No sweep.** `core/tokens.py` gains nothing: there is no expiry to sweep by, and the table
+  holds at most one row per user. Revocation is a delete.
+- **No last-used tracking.** The audit trail records `api_token_created` and
+  `api_token_revoked` and nothing in between, so it cannot answer "was this token used after
+  the laptop was stolen". Accepted as the cost of not writing to the database on every
+  request of a polling client.
+
+Every revocation path *is* audited, including the three that revoke as a side effect of
+something else (`admin_users._revoke_tokens` on an admin password reset and on deactivation,
+and `cli init` recovery). Each writes its own `api_token_revoked` beside the `user_updated` /
+`user_deactivated` event that says why, and only when a row was actually deleted - so
+"when was this token revoked" is one query rather than a search through detail strings.
+
+Both audit actions are members of the native `audit_action` enum, so they cost an `ALTER TYPE`
+in the migration — and nothing in CI catches a forgotten one, because `pytest` builds the type
+from `Base.metadata.create_all`, `alembic check` does not diff enum members, and the
+empty-database job inserts no audit row. Check by hand.
 
 ## CSRF
 

@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from app.models import (
+    ApiToken,
     AssignmentType,
     Chore,
     ChoreOccurrence,
@@ -248,3 +249,43 @@ async def test_chore_recurrence_columns_fill_themselves_in(
     assert repeat_interval == 1
     # Unpinned: the chore keeps whatever weekday its occurrences sit on.
     assert weekdays is None
+
+
+async def test_only_one_api_token_per_user(db_session, make_user: MakeUser) -> None:
+    """ "At most one access token per account" is a constraint, not a convention. The
+    create endpoint inserts and catches IntegrityError rather than reading first, so if
+    this unique moved or vanished the endpoint's 409 would become a second live
+    credential, and no behavioural test above the database would notice."""
+    user = await make_user(email="alice@example.com")
+    db_session.add(ApiToken(user_id=user.id, token_hash="a" * 64))
+    await db_session.commit()
+
+    db_session.add(ApiToken(user_id=user.id, token_hash="b" * 64))
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
+
+
+async def test_two_users_may_each_hold_an_api_token(db_session, make_user: MakeUser) -> None:
+    # The positive half, so the test above cannot pass on a unique sitting on the wrong
+    # column: a constraint over token_hash alone would refuse nothing here, but one
+    # accidentally spanning the table would.
+    alice = await make_user(email="alice@example.com")
+    bob = await make_user(email="bob@example.com")
+    db_session.add(ApiToken(user_id=alice.id, token_hash="a" * 64))
+    db_session.add(ApiToken(user_id=bob.id, token_hash="b" * 64))
+    await db_session.commit()
+
+    assert len((await db_session.execute(select(ApiToken))).scalars().all()) == 2
+
+
+async def test_deleting_a_user_deletes_their_api_token(db_session, make_user: MakeUser) -> None:
+    # The FK CASCADE, which is the whole of what happens to a token when the account
+    # goes. There is no hard-delete endpoint, so this is asserted at the session.
+    user = await make_user(email="alice@example.com")
+    db_session.add(ApiToken(user_id=user.id, token_hash="a" * 64))
+    await db_session.commit()
+
+    await db_session.delete(user)
+    await db_session.commit()
+
+    assert (await db_session.execute(select(ApiToken))).scalars().all() == []

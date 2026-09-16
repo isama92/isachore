@@ -72,6 +72,35 @@ reaches the route. Any value will do: this is a custom-header defence over `Same
 so what matters is that a cross-site form cannot set the header at all.
 
 `Authorization: Bearer` requests are exempt, as are requests carrying no auth cookie.
+
+## Personal access tokens
+
+An account may hold one long-lived credential for a client that is not a browser, generated
+on the Profile page and sent as `Authorization: Bearer isac_...`. It never expires, it is
+shown once and stored only as a hash, and deleting it is the only way to replace it. It stops
+working the moment the account stops being active, and an administrator revokes it either on
+its own or by resetting the password or disabling the account.
+
+**It is not a second way to be the user.** It reaches only the operations that publish the
+`apiToken` scheme: the due and unscheduled views, statistics, the household log, the three
+household reads, and all of tags, chores and completions - reads *and* writes, so a token may
+create, edit and delete chores and tags and undo a completion.
+
+Every **gated** operation outside that set answers **403** - every `/admin` operation,
+everything under `/profile`, the gated `/auth` routes, every household write, and
+`POST /invitations/{token}/accept`. The public operations are the exception and answer
+normally, because they never look at who is calling: `POST /auth/login` still logs in, and
+`POST /auth/logout` answers 204 without revoking anything, since an access token is not a
+session.
+
+A token that is unknown or has been revoked answers 401 instead, so the two cases stay
+distinguishable: 403 means the credential is real and cannot be used here, and no retry with a
+different access token will help.
+
+Header only. The same string in a cookie authenticates nobody, which is also why a request
+carrying one needs no `X-CSRF-Token` - there is no cookie for a cross-site form to ride.
+That is why two of the schemes below both read `Authorization: Bearer`: the header carries
+either kind, and which one it is decides where it works.
 """
 
 # `redoc_url=None` because api/v1/docs.py serves that page instead, from a vendored bundle

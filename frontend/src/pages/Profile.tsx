@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'r
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useAuth } from '../auth/useAuth'
+import ApiTokenSettings from '../components/ApiTokenSettings'
 import TwoFactorSettings from '../components/TwoFactorSettings'
 import { useTheme } from '../theme/useTheme'
 import type { Accent, Flavour } from '../theme/context'
@@ -32,7 +33,7 @@ import {
 
 // The section ids, in page order, that the side submenu links to and the
 // scroll-spy tracks. Module-scoped so it is a stable IntersectionObserver input.
-const SECTION_IDS = ['photo', 'personal', 'appearance', 'security'] as const
+const SECTION_IDS = ['photo', 'personal', 'appearance', 'security', 'api'] as const
 
 // The cap this page enforces and advertises, mirroring the default of
 // settings.avatar_max_bytes (backend/app/core/config.py) so the hint and the
@@ -258,6 +259,7 @@ export default function Profile() {
               { id: 'personal', label: t('profile.personalHeading') },
               { id: 'appearance', label: t('profile.appearance') },
               { id: 'security', label: t('profile.securityHeading') },
+              { id: 'api', label: t('profile.apiHeading') },
             ].map((item) => (
               <li key={item.id}>
                 <button
@@ -560,6 +562,14 @@ export default function Profile() {
                 <TwoFactorSettings />
               </div>
             </div>
+          </section>
+
+          {/* API: the one long-lived access token, for a client with no browser */}
+          <section id="api" className="scroll-mt-20 rounded-2xl border border-line bg-card p-6">
+            <h2 className="mb-4 font-display text-lg font-bold tracking-tight">
+              {t('profile.apiHeading')}
+            </h2>
+            <ApiTokenSettings />
           </section>
         </div>
       </div>

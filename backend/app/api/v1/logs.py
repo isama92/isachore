@@ -5,7 +5,7 @@ from fastapi import APIRouter, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import aliased
 
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps import ApiUser, SessionDep
 from app.api.v1.households import SortDir
 from app.core.household_log import LOG_RETENTION
 from app.core.households import owned_household_ids
@@ -27,7 +27,7 @@ LOG_SORT_COLUMNS = {"created_at": (HouseholdLogEntry.created_at,)}
 
 @router.get("", response_model=Page[LogEntryRead])
 async def list_log_entries(
-    user: CurrentUser,
+    user: ApiUser,
     session: SessionDep,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,

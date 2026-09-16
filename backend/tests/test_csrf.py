@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.api_tokens import new_api_token
 from app.core.csrf import _AUTH_COOKIES
 from app.core.security import (
     ADMIN_COOKIE_NAME,
@@ -18,10 +19,11 @@ from app.core.security import (
     generate_token,
     hash_token,
 )
-from app.models import AuthToken, User
+from app.models import ApiToken, AuthToken, User
 
 Login = Callable[..., Awaitable[User]]
 AuthClient = Callable[[User], Awaitable[AsyncClient]]
+MakeHousehold = Callable[..., Awaitable[object]]
 
 _PROFILE_PATCH = {"first_name": "Renamed", "last_name": "Person"}
 
@@ -188,3 +190,31 @@ def test_the_oidc_state_cookie_is_not_treated_as_a_session_cookie() -> None:
     assert OIDC_STATE_COOKIE_NAME not in _AUTH_COOKIES
     # ...and the positive half, so this cannot pass by the tuple being empty or renamed.
     assert _AUTH_COOKIES == (COOKIE_NAME, ADMIN_COOKIE_NAME)
+
+
+async def test_api_token_mutation_without_header_allowed(
+    client: AsyncClient, make_user: Login, db_session: AsyncSession, make_household: MakeHousehold
+) -> None:
+    """A personal access token is a header credential by construction, so it is
+    CSRF-immune for the same reason a session bearer is and must not be gated either.
+
+    Every other clause is satisfied so only the middleware can produce a 403: the method
+    is unsafe (so the check actually runs), the client carries no auth cookie at all, and
+    POST /tags is an operation an access token may call (so the gate cannot refuse it).
+    Asserting 201 rather than "not 403" is what keeps that true.
+    """
+    user = await make_user()
+    household = await make_household(members=[user])
+    raw = new_api_token()
+    db_session.add(ApiToken(token_hash=hash_token(raw), user_id=user.id))
+    await db_session.commit()
+
+    client.cookies.clear()
+    del client.headers["X-CSRF-Token"]
+    client.headers["Authorization"] = f"Bearer {raw}"
+
+    resp = await client.post(
+        "/api/v1/tags", json={"household_id": household.id, "name": "Kitchen", "color": "#3b82f6"}
+    )
+
+    assert resp.status_code == 201
