@@ -48,6 +48,12 @@ updates:
       backend-minor-patch:
         patterns: ["*"]
         update-types: [minor, patch]
+      # Groups apply to scheduled version updates only by default. Security updates
+      # ignore them, the schedule and open-pull-requests-limit, so each vulnerable
+      # dependency would otherwise get its own PR the moment an advisory lands.
+      backend-security:
+        applies-to: security-updates
+        patterns: ["*"]
 
   - package-ecosystem: npm
     directory: /frontend
@@ -58,6 +64,17 @@ updates:
       frontend-minor-patch:
         patterns: ["*"]
         update-types: [minor, patch]
+      # vitest and its @vitest/* companions (coverage-v8 today) must share one
+      # version, so a major split across PRs leaves each one broken on its own.
+      # @vitest/eslint-plugin has its own version line and stays out.
+      vitest-major:
+        patterns: ["vitest", "@vitest/*"]
+        exclude-patterns: ["@vitest/eslint-plugin"]
+        update-types: [major]
+      # Same as backend-security: one PR for all vulnerable deps, not one each.
+      frontend-security:
+        applies-to: security-updates
+        patterns: ["*"]
     ignore:
       # Must track the node major in docker/frontend.Dockerfile, which is pinned
       # to 24. Types from a newer major describe stdlib APIs the runtime does not
