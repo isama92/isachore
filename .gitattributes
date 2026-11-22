@@ -1,0 +1,4 @@
+# LF everywhere, in the repo and on disk, whatever core.autocrlf says. Prettier, ruff and the
+# pre-commit hooks all write LF, so a CRLF checkout on Windows made every formatter run show
+# hundreds of files as modified with no content change. Binary detection stays automatic.
+* text=auto eol=lf
