@@ -107,6 +107,35 @@ describe('ChoreEdit', () => {
     expect(await screen.findByDisplayValue('Water plants')).toBeInTheDocument()
     expect(screen.getByRole('checkbox', { name: 'Take turns' })).toBeChecked()
     expect(screen.getByLabelText('Turn length')).toHaveValue(3)
+    // Edit keeps the stored value rather than the create page's default of on.
+    expect(screen.getByRole('checkbox', { name: 'Ignore skipped' })).not.toBeChecked()
+  })
+
+  it('pre-fills ignore skipped and resends it on an untouched save', async () => {
+    const rotating = makeChore({
+      id: 7,
+      title: 'Bins',
+      repeats: 'daily',
+      assignment_type: 'alphabetical',
+      turn_length: 7,
+      turns_follow_calendar: true,
+      household: { id: 4, name: 'Beach House', timezone: 'UTC' },
+    })
+    const fetchMock = mockFetch([
+      { path: '/api/v1/chores/7', method: 'GET', body: rotating },
+      { path: MEMBERS, method: 'GET', body: page([]) },
+      { path: TAGS, method: 'GET', body: page([]) },
+      { path: '/api/v1/chores/7', method: 'PATCH', body: rotating },
+    ])
+    renderEdit()
+
+    expect(await screen.findByDisplayValue('Bins')).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'Ignore skipped' })).toBeChecked()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('chores-list')
+    // ChoreUpdate is a full replace, so an untouched save must resend it.
+    expect(patchBody(fetchMock)).toMatchObject({ turn_length: 7, turns_follow_calendar: true })
   })
 
   it('pre-fills the interval and the pinned weekdays, and saves them untouched', async () => {

@@ -145,6 +145,18 @@ export default function ChoreCreate() {
     repeats: clone?.repeats ?? 'weekly',
     assignment_type: clone?.assignment_type ?? 'manual',
     turn_length: clone?.turn_length ?? 1,
+    // On by default for a new chore ("Ignore skipped" is what a household taking turns by the
+    // week expects). A clone that already takes turns keeps its own choice; one that does not
+    // has the API-forced false, which says nothing about what was wanted, so it gets the default.
+    // So is one the API forced false for either of its other two reasons: unscheduled, or the
+    // manual strategy (`_turns_follow_calendar` in backend/app/schemas/chore.py).
+    turns_follow_calendar:
+      clone &&
+      clone.turn_length > 1 &&
+      clone.repeats !== 'manual' &&
+      clone.assignment_type !== 'manual'
+        ? clone.turns_follow_calendar
+        : true,
     repeat_interval: clone?.repeat_interval ?? 1,
     weekdays: clone?.weekdays ?? [],
     assignee_ids: clone?.assignee_ids ?? [],

@@ -9,13 +9,19 @@ from app.api.deps import ApiUser, Impersonator, SessionDep
 from app.api.responses import FORBIDDEN_ROLE, refusals
 from app.api.v1.households import SortDir
 from app.core import clock
-from app.core.assignment import initial_assignee, next_assignee, should_reassign
+from app.core.assignment import (
+    crosses_turn,
+    initial_assignee,
+    next_assignee,
+    should_reassign,
+)
 from app.core.chores import (
     days_until_due,
     due_status,
     end_of_local_day,
     first_occurrence,
     next_occurrence_after,
+    slot_index,
     snap_to_slot,
 )
 from app.core.household_log import changed_chore_fields, record_log_entry, snapshot_chore
@@ -253,7 +259,8 @@ async def _strategy_pick(session: SessionDep, chore: Chore, pool: list[User]) ->
     """`initial_assignee` with the tally `least_done` needs. Five handler-side paths derive an
     assignee from scratch and all of them come through here: `create_chore`, both branches of
     `_reconcile_open_occurrence`, and the stale-assignee case of both `_retained_assignee` and
-    `_successor_assignee`. So no handler reaches `initial_assignee` any other way, and none can
+    `_held_assignee` (the mid-turn half of `_successor_assignee` and of
+    `_calendar_turn_assignee`). So no handler reaches `initial_assignee` any other way, and none can
     quietly fall back to ranking alphabetically. (`next_assignee` also calls it, for a current
     outside the pool - that one is pure and passes its own `counts`, so it cannot route here.)
 
@@ -299,15 +306,60 @@ async def _successor_assignee(
     current = next((u for u in pool if u.id == current_assignee_id), None)
     done_count, counts = await _completion_tally(session, chore.id)
     if not should_reassign(done_count, chore.turn_length):
-        # Mid-turn, so the current assignee keeps it - but `current` is None in two ways that
-        # are not the same thing, exactly as on the skip path. A deliberately unassigned row
-        # (`clear_current_assignee`) is an answer to respect, and a clear is *meant* to outlive
-        # completions up to the next turn boundary. A row naming somebody the pool no longer
-        # holds is a gap, and standing still would leave the chore unassigned until that
-        # boundary - which for a long turn is a chore nobody is on with no edit to blame.
-        if current_assignee_id is not None and current is None:
-            return await _strategy_pick(session, chore, pool)
-        return current
+        return await _held_assignee(session, chore, current_assignee_id, current, pool)
+    return next_assignee(chore.assignment_type, pool, current, counts)
+
+
+async def _held_assignee(
+    session: SessionDep,
+    chore: Chore,
+    current_assignee_id: int | None,
+    current: User | None,
+    pool: list[User],
+) -> User | None:
+    """Mid-turn, so the current assignee keeps it - but `current` is None in two ways that
+    are not the same thing, exactly as on the skip path. A deliberately unassigned row
+    (`clear_current_assignee`) is an answer to respect, and a clear is *meant* to outlive
+    completions up to the next turn boundary. A row naming somebody the pool no longer holds
+    is a gap, and standing still would leave the chore unassigned until that boundary - which
+    for a long turn is a chore nobody is on with no edit to blame.
+
+    Shared by both turn counters (`_successor_assignee` and `_calendar_turn_assignee`), so
+    "mid-turn" means the same thing whichever way the turn is counted."""
+    if current_assignee_id is not None and current is None:
+        return await _strategy_pick(session, chore, pool)
+    return current
+
+
+async def _calendar_turn_assignee(
+    session: SessionDep,
+    chore: Chore,
+    current_assignee_id: int | None,
+    pool: list[User],
+    *,
+    turn_over: bool,
+) -> User | None:
+    """Who is on the hook after a completion OR a skip of a `turns_follow_calendar` chore.
+    `turn_over` is whether the successor slot sits in a later calendar turn than the closed
+    one (`crosses_turn` over `slot_index`), which the caller computes because it holds the
+    rule and the zone.
+
+    This is where the option parts company with `_retained_assignee`: a skip that crosses
+    the boundary DOES hand the chore on, because the household asked for a turn to be a span
+    of the calendar ("Naomi has this week") rather than an amount of work. Skips cannot be
+    used to dump work on somebody either way, since a skip moves nobody before the boundary
+    and the boundary moves them regardless.
+
+    Inside a turn it holds exactly as the completion-counted turn does (`_held_assignee`,
+    including a cleared row staying cleared until the boundary). At the boundary it hands
+    over once through `next_assignee`, with the completion tally: skips stay out of it, so
+    `least_done` still ranks on work actually done."""
+    if not pool:
+        return None
+    current = next((u for u in pool if u.id == current_assignee_id), None)
+    if not turn_over:
+        return await _held_assignee(session, chore, current_assignee_id, current, pool)
+    _, counts = await _completion_tally(session, chore.id)
     return next_assignee(chore.assignment_type, pool, current, counts)
 
 
@@ -504,6 +556,7 @@ async def create_chore(
         repeats=payload.repeats,
         assignment_type=payload.assignment_type,
         turn_length=payload.turn_length,
+        turns_follow_calendar=payload.turns_follow_calendar,
         repeat_interval=payload.repeat_interval,
         weekdays=payload.weekdays,
         assignees=assignees,
@@ -676,6 +729,7 @@ async def update_chore(
     chore.repeats = payload.repeats
     chore.assignment_type = payload.assignment_type
     chore.turn_length = payload.turn_length
+    chore.turns_follow_calendar = payload.turns_follow_calendar
     chore.repeat_interval = payload.repeat_interval
     chore.weekdays = payload.weekdays
     chore.assignees = assignees
@@ -760,7 +814,9 @@ async def _close_occurrence(
 
     The successor's assignee is the one real behavioural fork: a completion hands the chore
     on when the turn ends (`_successor_assignee`), a skip keeps it where it is
-    (`_retained_assignee`).
+    (`_retained_assignee`) - unless the chore counts its turns on the calendar
+    (`turns_follow_calendar`), where both go through `_calendar_turn_assignee` and a skip
+    over the boundary hands over like a completion would.
 
     **`backdate` splits the one `now` this used to have into two, and which value goes where
     is not interchangeable.** It dates the closure at the end of the occurrence's own local
@@ -856,11 +912,23 @@ async def _close_occurrence(
         # `next_slot_after` inside would be unreachable even if this ran.
         upcoming = await free_slot_from(session, chore.id, upcoming, rule, tz)
     pool = list(chore.assignees)
-    next_person = (
-        await _retained_assignee(session, chore, occ.assignee_id, pool)
-        if skipped
-        else await _successor_assignee(session, chore, occ.assignee_id, pool)
-    )
+    if chore.turns_follow_calendar and chore.start_date is not None:
+        # "Ignore skipped": the turn is counted on the calendar, so a skip and a completion
+        # are the same event here and both go through one branch. The `start_date` check is
+        # belt and braces - the schema forces the flag off for unscheduled chores, the only
+        # ones without a start date.
+        turn_over = crosses_turn(
+            slot_index(chore.start_date, scheduled_for, rule, tz),
+            slot_index(chore.start_date, upcoming, rule, tz),
+            chore.turn_length,
+        )
+        next_person = await _calendar_turn_assignee(
+            session, chore, occ.assignee_id, pool, turn_over=turn_over
+        )
+    elif skipped:
+        next_person = await _retained_assignee(session, chore, occ.assignee_id, pool)
+    else:
+        next_person = await _successor_assignee(session, chore, occ.assignee_id, pool)
     session.add(
         ChoreOccurrence(
             chore_id=chore.id,

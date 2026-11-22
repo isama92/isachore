@@ -156,3 +156,17 @@ def should_reassign(done_count: int, turn_length: int) -> bool:
     person holds before handing off (1 = every completion), so reassign on each multiple
     of the turn length. `turn_length` is clamped to >= 1 to stay safe on bad input."""
     return done_count % max(turn_length, 1) == 0
+
+
+def crosses_turn(closed_slot_index: int, next_slot_index: int, turn_length: int) -> bool:
+    """Whether moving the open occurrence from the closed slot to the next one crosses a
+    calendar turn boundary (`turns_follow_calendar`): turn `k` is slots
+    `k*turn_length .. (k+1)*turn_length - 1`, counted by `core.chores.slot_index`.
+
+    Compares turn numbers rather than testing `next % turn_length == 0`, because one closure
+    can jump several slots - a late completion swallows the missed ones - and a jump straight
+    over the boundary slot must still count. Several whole turns passing in one go is still
+    one handover (the product call: the next person, not whoever's turn it would be by now).
+    `turn_length` is clamped to >= 1 like `should_reassign`."""
+    length = max(turn_length, 1)
+    return closed_slot_index // length != next_slot_index // length

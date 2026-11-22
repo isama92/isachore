@@ -106,6 +106,7 @@ export function makeChore(overrides: Partial<Chore> = {}): Chore {
     repeats: 'weekly',
     assignment_type: 'manual',
     turn_length: 1,
+    turns_follow_calendar: false,
     repeat_interval: 1,
     weekdays: null,
     created_at: '2026-07-01T00:00:00Z',

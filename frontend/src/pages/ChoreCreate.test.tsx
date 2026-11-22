@@ -98,6 +98,8 @@ function cloneState(overrides: Record<string, unknown> = {}) {
       assignee_ids: [2],
       tag_ids: [3],
       repeat_interval: 1,
+      turn_length: 1,
+      turns_follow_calendar: false,
       weekdays: [],
       ...overrides,
     },
@@ -363,7 +365,154 @@ describe('ChoreCreate', () => {
     expect(postBody(fetchMock)).toMatchObject({
       assignment_type: 'alphabetical',
       turn_length: 14,
+      // On by default for a new chore, and shown as soon as take turns is.
+      turns_follow_calendar: true,
     })
+  })
+
+  it('offers ignore skipped only under take turns, and submits it unticked', async () => {
+    const fetchMock = singleHouseholdMocks()
+    withRoutes()
+
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    await user.type(await screen.findByLabelText('Title'), 'Bins')
+    await user.click(screen.getByRole('combobox', { name: 'Assignment' }))
+    await user.click(await screen.findByRole('option', { name: 'Alphabetical' }))
+    expect(screen.queryByRole('checkbox', { name: 'Ignore skipped' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('checkbox', { name: 'Take turns' }))
+    const ignoreSkipped = screen.getByRole('checkbox', { name: 'Ignore skipped' })
+    expect(ignoreSkipped).toBeChecked()
+    // The turn-length hint switches to the calendar wording while it is on.
+    expect(screen.getByText(/counted from the start date/)).toBeInTheDocument()
+    await user.click(ignoreSkipped)
+    expect(
+      screen.getByText('Completions before the chore hands off to the next person.'),
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Add chore' }))
+
+    await screen.findByText('chores-list')
+    expect(postBody(fetchMock)).toMatchObject({ turn_length: 2, turns_follow_calendar: false })
+  })
+
+  it('never submits ignore skipped once it is hidden', async () => {
+    const fetchMock = singleHouseholdMocks()
+    withRoutes()
+
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    await user.type(await screen.findByLabelText('Title'), 'Bins')
+    await user.click(screen.getByRole('combobox', { name: 'Assignment' }))
+    await user.click(await screen.findByRole('option', { name: 'Alphabetical' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Take turns' }))
+    expect(screen.getByRole('checkbox', { name: 'Ignore skipped' })).toBeChecked()
+    // Unscheduled has no calendar to follow: the option goes, and so must the value, even
+    // though take turns and the checkbox's own state are both still on.
+    await user.click(screen.getByRole('combobox', { name: 'Repeats' }))
+    await user.click(await screen.findByRole('option', { name: 'Unscheduled' }))
+    expect(screen.queryByRole('checkbox', { name: 'Ignore skipped' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Add chore' }))
+
+    await screen.findByText('chores-list')
+    expect(postBody(fetchMock)).toMatchObject({ turn_length: 2, turns_follow_calendar: false })
+  })
+
+  it('sends ignore skipped as false when take turns was never ticked', async () => {
+    const fetchMock = singleHouseholdMocks()
+    withRoutes()
+
+    // Rotating and scheduled, so only the take-turns clause can be what turns it off - and the
+    // checkbox's own state starts on for a new chore.
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    await user.type(await screen.findByLabelText('Title'), 'Bins')
+    await user.click(screen.getByRole('combobox', { name: 'Assignment' }))
+    await user.click(await screen.findByRole('option', { name: 'Alphabetical' }))
+    await user.click(screen.getByRole('button', { name: 'Add chore' }))
+
+    await screen.findByText('chores-list')
+    expect(postBody(fetchMock)).toMatchObject({ turn_length: 1, turns_follow_calendar: false })
+  })
+
+  it('sends ignore skipped as false once the strategy goes back to manual', async () => {
+    const fetchMock = singleHouseholdMocks()
+    withRoutes()
+
+    // Take turns ticked and the chore scheduled, so only the strategy clause is left to stop it.
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    await user.type(await screen.findByLabelText('Title'), 'Bins')
+    await user.click(screen.getByRole('combobox', { name: 'Assignment' }))
+    await user.click(await screen.findByRole('option', { name: 'Alphabetical' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Take turns' }))
+    expect(screen.getByRole('checkbox', { name: 'Ignore skipped' })).toBeChecked()
+    await user.click(screen.getByRole('combobox', { name: 'Assignment' }))
+    await user.click(await screen.findByRole('option', { name: 'Manual' }))
+    await user.click(screen.getByRole('button', { name: 'Add chore' }))
+
+    await screen.findByText('chores-list')
+    expect(postBody(fetchMock)).toMatchObject({
+      assignment_type: 'manual',
+      turns_follow_calendar: false,
+    })
+  })
+
+  it('keeps the ignore skipped choice of a clone that takes turns', async () => {
+    singleHouseholdMocks()
+    withRoutes(cloneState({ turn_length: 7, turns_follow_calendar: false }))
+
+    expect(await screen.findByRole('checkbox', { name: 'Ignore skipped' })).not.toBeChecked()
+  })
+
+  it('gives a clone that never took turns the new-chore default', async () => {
+    singleHouseholdMocks()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    // The source's false was forced by the API (turn length 1), so it says nothing about intent.
+    withRoutes(cloneState())
+
+    await user.click(await screen.findByRole('checkbox', { name: 'Take turns' }))
+    expect(screen.getByRole('checkbox', { name: 'Ignore skipped' })).toBeChecked()
+  })
+
+  it('gives a clone whose false was forced by the manual strategy the new-chore default', async () => {
+    singleHouseholdMocks()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    // Takes turns and is scheduled, so only the strategy clause can discard the source's false.
+    withRoutes(
+      cloneState({ assignment_type: 'manual', turn_length: 3, turns_follow_calendar: false }),
+    )
+
+    await user.click(await screen.findByRole('combobox', { name: 'Assignment' }))
+    await user.click(await screen.findByRole('option', { name: 'Alphabetical' }))
+    expect(screen.getByRole('checkbox', { name: 'Ignore skipped' })).toBeChecked()
+  })
+
+  it('gives a clone whose false was forced by being unscheduled the new-chore default', async () => {
+    singleHouseholdMocks()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    withRoutes(
+      cloneState({
+        repeats: 'manual',
+        start_date: '',
+        turn_length: 3,
+        turns_follow_calendar: false,
+      }),
+    )
+
+    await user.click(await screen.findByRole('combobox', { name: 'Repeats' }))
+    await user.click(await screen.findByRole('option', { name: 'Daily' }))
+    expect(screen.getByRole('checkbox', { name: 'Ignore skipped' })).toBeChecked()
+  })
+
+  it('explains take turns and ignore skipped behind an info icon', async () => {
+    singleHouseholdMocks()
+    withRoutes()
+
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    await user.click(await screen.findByRole('combobox', { name: 'Assignment' }))
+    await user.click(await screen.findByRole('option', { name: 'Alphabetical' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Take turns' }))
+
+    await user.click(screen.getByRole('button', { name: 'About ignoring skipped' }))
+    expect(await screen.findByText(/The turn follows the calendar/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'About taking turns' })).toBeInTheDocument()
   })
 
   it('resets the current assignee to shared when it is removed from the pool', async () => {

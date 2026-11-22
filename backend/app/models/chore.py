@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     ARRAY,
+    Boolean,
     Column,
     Date,
     DateTime,
@@ -12,6 +13,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    false,
     func,
 )
 from sqlalchemy import Enum as SAEnum
@@ -88,6 +90,15 @@ class Chore(Base):
     # person (the strategy picks who). 1 = hand off every completion; "take turns" in
     # the UI sets a larger value. Only meaningful for the auto-rotating strategies.
     turn_length: Mapped[int] = mapped_column(default=1, server_default="1")
+    # "Ignore skipped" in the UI: count a turn in *grid slots from `start_date`* instead of
+    # in completions, so a 7-slot turn on a daily chore started on a Monday hands over every
+    # Monday however many days were skipped or swallowed by a late completion. False keeps
+    # the completion-counted turn, which is every chore predating this column - hence no
+    # backfill. Only meaningful with take turns on a scheduled, auto-rotating chore; the
+    # schema layer forces False everywhere else (see `_turns_follow_calendar`).
+    turns_follow_calendar: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false()
+    )
     # How many periods pass between occurrences: 1 = every period, 2 = every other, and so
     # on. Not meaningful for `manual`, which never recurs (stored as 1). A plain int with
     # the >= 1 bound enforced at the schema layer, like turn_length.

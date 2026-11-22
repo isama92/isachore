@@ -283,6 +283,69 @@ def next_occurrence_after(
     return next_slot_after(advance_anchor(scheduled_for, completed_at, rule, tz), rule, tz)
 
 
+def slot_index(start_date: date, slot: datetime, rule: RecurrenceRule, tz: ZoneInfo) -> int:
+    """The 0-based position, on the grid that starts at `first_occurrence(start_date)`, of
+    the last grid slot on or before `slot`: by local day for daily and weekly rules, by
+    calendar month for monthly and yearly ones (see below for why). This is what
+    `turns_follow_calendar` divides by the turn length, so turns follow the calendar rather
+    than how many times anyone pressed a button.
+
+    The one place in this module that reasons on a lattice from `start_date` rather than the
+    occurrence chain (see the module docstring), and on purpose: the point is a fixed phase
+    the household chose ("hand over on Mondays"), which the chain cannot give once a skip or
+    a late completion has moved it. The floor ("on or before") is what keeps it honest for a
+    slot that is NOT on this lattice, which happens after a re-phasing edit: it counts the
+    lattice slots that have passed, instead of looping or raising.
+
+    Before the first slot is 0, so a start date moved into the future reads as "the first
+    turn has not begun" rather than a negative turn.
+
+    **The cost must not scale with how far back `start_date` is**, because that is the
+    caller's input: the schema accepts any date, and this runs twice on *every* closure. A
+    naive walk from year 1 is ~740k steps for a rule pinned to every weekday and ~24k for a
+    monthly one. So every period is constant-time, or close to it:
+
+    - daily and unpinned weekly: whole days divided by the step;
+    - pinned weekly: jump whole cycles (`interval` weeks always hold exactly `len(weekdays)`
+      slots, starting from any slot), then walk at most the last two;
+    - monthly and yearly: whole *calendar months* divided by the step. The day of the month
+      is ignored on purpose. It drifts along the chain (Jan 31 -> Feb 28 -> Mar 28), so a
+      day-exact lattice has no closed form, but every step is exactly `interval` months
+      whatever the day, so counting months still advances by exactly one per slot. The
+      phase is the start date's month: a slot reads as that month's slot even on an earlier
+      day than the start date's."""
+    if rule.repeats == RepeatPeriod.manual:
+        raise ValueError(f"{rule.repeats} has no grid to count slots on")
+    first = first_occurrence(start_date, rule, tz)
+    first_day = first.astimezone(tz).date()
+    target_day = slot.astimezone(tz).date()
+    if target_day <= first_day:
+        return 0
+    days = (target_day - first_day).days
+    match rule.repeats:
+        case RepeatPeriod.daily:
+            return days // rule.interval
+        case RepeatPeriod.weekly if not rule.pinned:
+            return days // (DAYS_IN_WEEK * rule.interval)
+        case RepeatPeriod.weekly:
+            # Pinned. Jump to a slot at most two cycles before the target - it is `first`'s
+            # weekday, a whole number of cycles on, so still on the grid - then walk the rest.
+            cycle = DAYS_IN_WEEK * rule.interval
+            cycles = max(0, days // cycle - 1)
+            index = cycles * len(rule.weekdays)
+            anchor = first.astimezone(tz) + timedelta(days=cycles * cycle)
+            nxt = next_slot_after(anchor, rule, tz)
+            while nxt.astimezone(tz).date() <= target_day:
+                index, nxt = index + 1, next_slot_after(nxt, rule, tz)
+            return index
+        case RepeatPeriod.monthly | RepeatPeriod.yearly:
+            months = (target_day.year - first_day.year) * 12 + target_day.month - first_day.month
+            step = rule.interval * (12 if rule.repeats == RepeatPeriod.yearly else 1)
+            return months // step
+        case _:  # pragma: no cover - manual is refused above, every other period handled
+            raise ValueError(f"{rule.repeats} has no grid to count slots on")
+
+
 def days_until_due(due: datetime, now: datetime, tz: ZoneInfo) -> int:
     """Whole days from today to the due date in the household's zone (negative = overdue).
     Date-based so a chore due at local midnight today reads as due today, not overdue.

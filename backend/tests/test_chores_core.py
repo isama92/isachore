@@ -1,8 +1,10 @@
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pytest
 
+import app.core.chores as chores_module
 from app.core.chores import (
     DueStatus,
     RecurrenceRule,
@@ -15,6 +17,7 @@ from app.core.chores import (
     local_day_bounds,
     next_occurrence_after,
     next_slot_after,
+    slot_index,
     snap_to_slot,
 )
 from app.models import RepeatPeriod
@@ -660,3 +663,203 @@ def test_advance_anchor_does_not_roll_for_a_completion_at_the_end_of_the_slots_o
     assert next_occurrence_after(slot, end_of_local_day(slot, UTC_ZONE), DAILY, UTC_ZONE) == (
         datetime(2026, 8, 7, tzinfo=UTC)
     )
+
+
+# --- slot_index (calendar turns) ---------------------------------------------
+
+
+def _midnight(day: date, tz: ZoneInfo = UTC_ZONE) -> datetime:
+    return datetime(day.year, day.month, day.day, tzinfo=tz)
+
+
+def test_slot_index_daily_counts_days_from_the_start() -> None:
+    start = date(2026, 7, 27)  # a Monday
+    assert slot_index(start, _midnight(start), DAILY, UTC_ZONE) == 0
+    assert slot_index(start, _midnight(date(2026, 8, 2)), DAILY, UTC_ZONE) == 6  # Sunday
+    assert slot_index(start, _midnight(date(2026, 8, 3)), DAILY, UTC_ZONE) == 7  # next Monday
+
+
+def test_slot_index_daily_interval_floors_an_off_grid_day() -> None:
+    # Every other day from the 27th: the 29th is slot 1, and the 30th (off the lattice, as a
+    # re-phasing edit can leave a slot) still reads as slot 1 rather than raising or looping.
+    rule = repeating(RepeatPeriod.daily, 2)
+    start = date(2026, 7, 27)
+    assert slot_index(start, _midnight(date(2026, 7, 29)), rule, UTC_ZONE) == 1
+    assert slot_index(start, _midnight(date(2026, 7, 30)), rule, UTC_ZONE) == 1
+    assert slot_index(start, _midnight(date(2026, 7, 31)), rule, UTC_ZONE) == 2
+
+
+def test_slot_index_unpinned_weekly_counts_weeks() -> None:
+    start = date(2026, 7, 6)
+    assert slot_index(start, _midnight(date(2026, 7, 27)), WEEKLY, UTC_ZONE) == 3
+    every_two = repeating(RepeatPeriod.weekly, 2)
+    assert slot_index(start, _midnight(date(2026, 7, 27)), every_two, UTC_ZONE) == 1
+
+
+def test_slot_index_pinned_weekly_counts_each_selected_day() -> None:
+    # Mon + Thu from Monday the 6th: 6 (0), 9 (1), 13 (2), 16 (3), 20 (4).
+    rule = weekly_on(MON, THU)
+    start = date(2026, 7, 6)
+    assert slot_index(start, _midnight(date(2026, 7, 16)), rule, UTC_ZONE) == 3
+    assert slot_index(start, _midnight(date(2026, 7, 20)), rule, UTC_ZONE) == 4
+    # A Saturday sits after Thursday's slot and before Monday's.
+    assert slot_index(start, _midnight(date(2026, 7, 18)), rule, UTC_ZONE) == 3
+
+
+def test_slot_index_pinned_weekly_counts_from_the_snapped_first_slot() -> None:
+    # A Saturday start on a Monday-pinned rule opens on the following Monday, which is slot 0.
+    rule = weekly_on(MON)
+    assert slot_index(date(2026, 7, 4), _midnight(date(2026, 7, 6)), rule, UTC_ZONE) == 0
+    assert slot_index(date(2026, 7, 4), _midnight(date(2026, 7, 13)), rule, UTC_ZONE) == 1
+
+
+def test_slot_index_monthly_counts_calendar_months() -> None:
+    start = date(2026, 1, 31)
+    # Jan 31 -> Feb 28 -> Mar 28 along the chain; counted by month, the drift cannot matter.
+    assert slot_index(start, _midnight(date(2026, 3, 28)), MONTHLY, UTC_ZONE) == 2
+    # The day is ignored on purpose: any day in March is the March slot.
+    assert slot_index(start, _midnight(date(2026, 3, 1)), MONTHLY, UTC_ZONE) == 2
+    assert (
+        slot_index(
+            start, _midnight(date(2026, 7, 15)), repeating(RepeatPeriod.monthly, 3), UTC_ZONE
+        )
+        == 2
+    )
+
+
+def test_slot_index_month_count_floors_between_slots() -> None:
+    # "On or before": an off-lattice month (as a re-phasing edit leaves the chain) reads as the
+    # slot before it, never the one after. Every count here is NOT a multiple of the step, so a
+    # ceiling would answer one higher.
+    every_two = repeating(RepeatPeriod.monthly, 2)
+    start = date(2026, 1, 15)
+    assert slot_index(start, _midnight(date(2026, 2, 1)), every_two, UTC_ZONE) == 0
+    assert slot_index(start, _midnight(date(2026, 4, 1)), every_two, UTC_ZONE) == 1
+    assert slot_index(start, _midnight(date(2026, 6, 1)), every_two, UTC_ZONE) == 2
+    every_two_years = repeating(RepeatPeriod.yearly, 2)
+    assert slot_index(date(2020, 3, 1), _midnight(date(2023, 3, 1)), every_two_years, UTC_ZONE) == 1
+
+
+def test_slot_index_yearly_counts_whole_years() -> None:
+    start = date(2024, 2, 29)
+    assert slot_index(start, _midnight(date(2025, 2, 28)), YEARLY, UTC_ZONE) == 1
+    assert (
+        slot_index(start, _midnight(date(2030, 2, 28)), repeating(RepeatPeriod.yearly, 2), UTC_ZONE)
+        == 3
+    )
+
+
+@pytest.mark.parametrize(
+    ("start", "rule"),
+    [
+        (date(2026, 1, 31), MONTHLY),
+        (date(2026, 1, 31), repeating(RepeatPeriod.monthly, 2)),
+        (date(2026, 8, 31), repeating(RepeatPeriod.monthly, 5)),
+        (date(2024, 2, 29), YEARLY),
+        (date(2024, 2, 29), repeating(RepeatPeriod.yearly, 3)),
+    ],
+    ids=["monthly", "every-2-months", "every-5-months", "yearly-leap-day", "every-3-years"],
+)
+def test_slot_index_month_count_advances_one_per_chain_slot(
+    start: date, rule: RecurrenceRule
+) -> None:
+    # What calendar turns rely on: walking the real occurrence chain, day-of-month drift and
+    # all, every slot reads exactly one higher than the last. Across a DST change too.
+    tz = ZoneInfo("Europe/Amsterdam")
+    slot = first_occurrence(start, rule, tz)
+    for expected in range(60):
+        assert slot_index(start, slot, rule, tz) == expected
+        slot = next_slot_after(slot, rule, tz)
+
+
+def _count_grid_steps(monkeypatch: pytest.MonkeyPatch) -> Callable[[], int]:
+    """Wrap `next_slot_after` as `slot_index` sees it and return a reader for the call count,
+    so a test can pin how far it walks: thousands of cheap steps are invisible to timing but
+    not to this."""
+    calls = 0
+    real = chores_module.next_slot_after
+
+    def counting(dt: datetime, rule: RecurrenceRule, tz: ZoneInfo) -> datetime:
+        nonlocal calls
+        calls += 1
+        return real(dt, rule, tz)
+
+    monkeypatch.setattr(chores_module, "next_slot_after", counting)
+    return lambda: calls
+
+
+def test_slot_index_month_count_does_not_walk_from_a_distant_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # ~24k monthly slots since year 1. Timing would not catch a walk that size, so count the
+    # grid steps instead: the month count takes none.
+    steps = _count_grid_steps(monkeypatch)
+    slot = _midnight(date(2026, 11, 23))
+    assert slot_index(date(1, 1, 1), slot, MONTHLY, UTC_ZONE) == 2025 * 12 + 10
+    assert slot_index(date(1, 1, 1), slot, YEARLY, UTC_ZONE) == 2025
+    assert steps() == 0
+
+
+def test_slot_index_before_the_start_is_zero() -> None:
+    # A start date moved into the future reads as "the first turn has not begun".
+    start = date(2026, 7, 27)
+    assert slot_index(start, _midnight(date(2026, 7, 20)), DAILY, UTC_ZONE) == 0
+
+
+def test_slot_index_reads_the_slot_in_the_households_zone() -> None:
+    # Amsterdam's local midnight on Monday 3 August is 22:00Z on the Sunday. Read in UTC that
+    # would be slot 6; in the household's zone it is the Monday, slot 7.
+    tz = ZoneInfo("Europe/Amsterdam")
+    start = date(2026, 7, 27)
+    slot = _midnight(date(2026, 8, 3), tz).astimezone(UTC)
+    assert slot.day == 2
+    assert slot_index(start, slot, DAILY, tz) == 7
+
+
+def test_slot_index_refuses_an_unscheduled_rule() -> None:
+    with pytest.raises(ValueError):
+        slot_index(date(2026, 7, 27), _midnight(date(2026, 7, 28)), MANUAL, UTC_ZONE)
+
+
+def _walked_slot_index(start: date, slot: datetime, rule: RecurrenceRule, tz: ZoneInfo) -> int:
+    """The obvious definition, one grid step at a time: the reference the shortcuts must match."""
+    first = first_occurrence(start, rule, tz)
+    target = slot.astimezone(tz).date()
+    if target <= first.astimezone(tz).date():
+        return 0
+    index, nxt = 0, next_slot_after(first, rule, tz)
+    while nxt.astimezone(tz).date() <= target:
+        index, nxt = index + 1, next_slot_after(nxt, rule, tz)
+    return index
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        weekly_on(MON),
+        weekly_on(TUE, FRI),
+        weekly_on(TUE, FRI, every=2),
+        weekly_on(*range(7), every=3),
+    ],
+    ids=["mon", "tue-fri", "tue-fri-every-2", "daily-ish-every-3"],
+)
+def test_slot_index_pinned_weekly_jump_matches_the_walk(rule: RecurrenceRule) -> None:
+    # Every target day over ten weeks, from a start on each weekday, and across a DST change.
+    tz = ZoneInfo("Europe/Amsterdam")
+    for start in (date(2026, 10, 1) + timedelta(days=n) for n in range(7)):
+        for offset in range(70):
+            slot = _midnight(start + timedelta(days=offset), tz)
+            assert slot_index(start, slot, rule, tz) == _walked_slot_index(start, slot, rule, tz)
+
+
+def test_slot_index_pinned_weekly_does_not_walk_from_a_distant_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A start date in year 1 is accepted by the schema. Walking from it is ~700k steps; the
+    # jump leaves at most two cycles (here 14 slots, plus the step that ends the loop).
+    steps = _count_grid_steps(monkeypatch)
+    rule = weekly_on(*range(7))
+    start = date(1, 1, 1)  # a Monday
+    slot = _midnight(start + timedelta(weeks=100_000, days=3))
+    assert slot_index(start, slot, rule, UTC_ZONE) == 100_000 * 7 + 3
+    assert steps() <= 2 * 7 + 1

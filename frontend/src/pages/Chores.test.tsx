@@ -199,6 +199,8 @@ describe('Chores', () => {
       repeats: 'weekly' as const,
       repeat_interval: 3,
       weekdays: [1, 4],
+      turn_length: 7,
+      turns_follow_calendar: true,
       assignment_type: 'least_done' as const,
       household: { id: 4, name: 'Beach House', timezone: 'UTC' },
       assignees: [makeHouseholdMember({ id: 2 }), makeHouseholdMember({ id: 3 })],
@@ -235,6 +237,9 @@ describe('Chores', () => {
       // Carried, or the copy silently loses its schedule.
       repeat_interval: 3,
       weekdays: [1, 4],
+      // And the turn, calendar choice included.
+      turn_length: 7,
+      turns_follow_calendar: true,
     })
   })
 
