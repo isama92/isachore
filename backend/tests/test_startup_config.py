@@ -70,8 +70,11 @@ def test_placeholder_app_key_is_reported_as_invalid_not_unset(
 
 def test_truncated_app_key_is_reported_as_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
     # A real key with a byte lost in copy-paste: the case that is silent today.
+    # Strip the trailing "=" before truncating: it is base64 padding, not key
+    # material, and Python 3.15's decoder accepts a key without it (the same 32
+    # bytes), so dropping only the "=" no longer makes the key invalid.
     _prod_config(monkeypatch)
-    monkeypatch.setattr(settings, "app_key", _KEY[:-1])
+    monkeypatch.setattr(settings, "app_key", _KEY.rstrip("=")[:-1])
     assert "not a valid Fernet key" in check_startup_config()[0]
 
 
