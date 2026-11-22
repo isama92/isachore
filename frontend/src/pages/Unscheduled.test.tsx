@@ -425,7 +425,7 @@ describe('edit pen', () => {
       authValue: { user: makeUser({ id: 1 }), memberships: membershipsFor('organiser', 1) },
     })
 
-    const pen = await screen.findByRole('link', { name: 'Edit “Bathroom”' })
+    const pen = await screen.findByRole('link', { name: 'Edit: “Bathroom”' })
     expect(pen).toHaveAttribute('href', '/chores/12/edit')
   })
 
@@ -444,7 +444,7 @@ describe('edit pen', () => {
 
     // Wait for the row first, so the absence is not just an empty page.
     expect(await screen.findByText('Bathroom')).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: 'Edit “Bathroom”' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Edit: “Bathroom”' })).not.toBeInTheDocument()
   })
 
   it('decides per household, not on organising somewhere', async () => {
@@ -466,11 +466,11 @@ describe('edit pen', () => {
       },
     })
 
-    expect(await screen.findByRole('link', { name: 'Edit “Hoover”' })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: 'Edit: “Hoover”' })).toHaveAttribute(
       'href',
       '/chores/1/edit',
     )
     expect(screen.getByText('Mow')).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: 'Edit “Mow”' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Edit: “Mow”' })).not.toBeInTheDocument()
   })
 })

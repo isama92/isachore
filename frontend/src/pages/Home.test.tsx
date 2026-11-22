@@ -418,10 +418,17 @@ describe('Home', () => {
 
     const doneButton = await screen.findByRole('button', { name: /^Done: .*Do the dishes/ })
     const row = doneButton.closest('li')!
+    // The default auth value organises household 1, so the row carries the edit pen too. A
+    // link has no `disabled`: it has to leave the tab order instead, or the keyboard could
+    // open a chore that was just completed.
+    const pen = within(row).getByRole('link', { name: 'Edit: “Do the dishes”' })
+    expect(pen).not.toHaveAttribute('tabindex')
     await user.click(doneButton)
 
     expect(row).toHaveAttribute('data-exiting')
     expect(doneButton).toBeDisabled()
+    expect(pen).toHaveAttribute('tabindex', '-1')
+    expect(pen).toHaveAttribute('aria-disabled', 'true')
     await waitFor(() => expect(screen.queryByText('Do the dishes')).not.toBeInTheDocument())
   })
 
@@ -1103,7 +1110,7 @@ describe('edit pen', () => {
       authValue: { user: makeUser({ id: 1 }), memberships: membershipsFor('organiser', 1) },
     })
 
-    const pen = await screen.findByRole('link', { name: 'Edit “Bathroom”' })
+    const pen = await screen.findByRole('link', { name: 'Edit: “Bathroom”' })
     expect(pen).toHaveAttribute('href', '/chores/12/edit')
   })
 
@@ -1122,7 +1129,7 @@ describe('edit pen', () => {
 
     // Wait for the row first, so the absence is not just an empty page.
     expect(await screen.findByText('Bathroom')).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: 'Edit “Bathroom”' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Edit: “Bathroom”' })).not.toBeInTheDocument()
   })
 
   it('decides per household, not on organising somewhere', async () => {
@@ -1144,11 +1151,11 @@ describe('edit pen', () => {
       },
     })
 
-    expect(await screen.findByRole('link', { name: 'Edit “Hoover”' })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: 'Edit: “Hoover”' })).toHaveAttribute(
       'href',
       '/chores/1/edit',
     )
     expect(screen.getByText('Mow')).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: 'Edit “Mow”' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Edit: “Mow”' })).not.toBeInTheDocument()
   })
 })

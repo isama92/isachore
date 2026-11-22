@@ -101,7 +101,9 @@ export default function ChoreRow({
               {/* The edit pen sits with the marker rather than with Skip and Done: those act
                   on today's occurrence, this leaves for the chore itself. A Link, not a
                   button, because it is navigation. Not disabled while busy, since editing
-                  does not race a completion; an exiting row is already pointer-events-none. */}
+                  does not race a completion. While exiting, pointer-events-none on the <li>
+                  stops the mouse, but a link has no `disabled`, so it also leaves the tab
+                  order: otherwise the keyboard could still open a chore just completed. */}
               {editTo && (
                 <Button
                   asChild
@@ -109,7 +111,12 @@ export default function ChoreRow({
                   size="icon-xs"
                   className="shrink-0 text-muted-foreground"
                 >
-                  <Link to={editTo} aria-label={editLabel}>
+                  <Link
+                    to={editTo}
+                    aria-label={editLabel}
+                    tabIndex={exiting ? -1 : undefined}
+                    aria-disabled={exiting || undefined}
+                  >
                     <SquarePenIcon />
                   </Link>
                 </Button>
