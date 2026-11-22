@@ -392,7 +392,7 @@ describe('clearing the current assignee', () => {
     expect(within(picker).getByText('Jo Ng')).toBeInTheDocument()
 
     await user.click(picker)
-    await user.click(await screen.findByRole('option', { name: 'Nobody in particular' }))
+    await user.click(await screen.findByRole('option', { name: 'Nobody' }))
     expect(screen.getByText('Shown to everyone in the household.')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Save changes' }))
@@ -413,7 +413,7 @@ describe('clearing the current assignee', () => {
     await screen.findByDisplayValue('Dishes')
     const picker = screen.getByRole('combobox', { name: 'Currently assigned to' })
     await user.click(picker)
-    await user.click(await screen.findByRole('option', { name: 'Nobody in particular' }))
+    await user.click(await screen.findByRole('option', { name: 'Nobody' }))
     await user.click(screen.getByRole('combobox', { name: 'Currently assigned to' }))
     await user.click(await screen.findByRole('option', { name: 'Sam Lee' }))
 
@@ -480,7 +480,7 @@ describe('clearing the current assignee', () => {
 
     await screen.findByDisplayValue('Dishes')
     const picker = screen.getByRole('combobox', { name: 'Currently assigned to' })
-    expect(within(picker).getByText('Nobody in particular')).toBeInTheDocument()
+    expect(within(picker).getByText('Nobody')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Save changes' }))
     await screen.findByText('chores-list')

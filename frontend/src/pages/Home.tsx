@@ -4,6 +4,8 @@ import { toast } from 'sonner'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
+import { hasRoleIn } from '../lib/permissions'
+import { routes } from '../lib/routes'
 import { repeatLabel } from '../lib/chores'
 import { formatDateTime } from '../lib/format'
 import { dueDotClass, groupByDue, relativeDueLabel } from '../lib/home'
@@ -41,7 +43,7 @@ function prefersReducedMotion(): boolean {
 }
 
 export default function Home() {
-  const { user } = useAuth()
+  const { user, memberships } = useAuth()
   const { t } = useTranslation()
   const [data, setData] = useState<HomeData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -329,6 +331,12 @@ export default function Home() {
                         doneText={t('home.done')}
                         doneLabel={t('home.markDone', { title: chore.title })}
                         descriptionLabel={t('home.showDescription', { title: chore.title })}
+                        editTo={
+                          hasRoleIn(memberships, chore.household.id, 'organiser')
+                            ? routes.chores.edit.to(chore.id)
+                            : undefined
+                        }
+                        editLabel={t('home.editChore', { title: chore.title })}
                         skipLabel={t('home.skip', { title: chore.title })}
                         onShowDescription={
                           chore.has_description ? () => setDescriptionFor(chore) : undefined
