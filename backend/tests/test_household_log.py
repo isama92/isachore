@@ -762,6 +762,10 @@ async def test_logs_paginate_and_sort_ascending(
 ) -> None:
     user = await make_user()
     household = await make_household(members=[user])
+    # Anchored to now, not to DUE: the read hides anything older than LOG_RETENTION against
+    # the real clock, so a fixed date passes until it ages out and then fails forever (this
+    # one did, 90 days after DUE). A day back keeps all five well inside the window.
+    start = datetime.now(UTC) - timedelta(days=1)
     for i in range(5):
         db_session.add(
             HouseholdLogEntry(
@@ -769,7 +773,7 @@ async def test_logs_paginate_and_sort_ascending(
                 household_id=household.id,
                 actor_user_id=user.id,
                 chore_title=f"Chore {i}",
-                created_at=DUE + timedelta(minutes=i),
+                created_at=start + timedelta(minutes=i),
             )
         )
     await db_session.commit()
