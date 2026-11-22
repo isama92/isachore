@@ -471,6 +471,36 @@ describe('ChoreCreate', () => {
     expect(screen.getByRole('checkbox', { name: 'Ignore skipped' })).toBeChecked()
   })
 
+  it('gives a clone whose false was forced by the manual strategy the new-chore default', async () => {
+    singleHouseholdMocks()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    // Takes turns and is scheduled, so only the strategy clause can discard the source's false.
+    withRoutes(
+      cloneState({ assignment_type: 'manual', turn_length: 3, turns_follow_calendar: false }),
+    )
+
+    await user.click(await screen.findByRole('combobox', { name: 'Assignment' }))
+    await user.click(await screen.findByRole('option', { name: 'Alphabetical' }))
+    expect(screen.getByRole('checkbox', { name: 'Ignore skipped' })).toBeChecked()
+  })
+
+  it('gives a clone whose false was forced by being unscheduled the new-chore default', async () => {
+    singleHouseholdMocks()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    withRoutes(
+      cloneState({
+        repeats: 'manual',
+        start_date: '',
+        turn_length: 3,
+        turns_follow_calendar: false,
+      }),
+    )
+
+    await user.click(await screen.findByRole('combobox', { name: 'Repeats' }))
+    await user.click(await screen.findByRole('option', { name: 'Daily' }))
+    expect(screen.getByRole('checkbox', { name: 'Ignore skipped' })).toBeChecked()
+  })
+
   it('explains take turns and ignore skipped behind an info icon', async () => {
     singleHouseholdMocks()
     withRoutes()

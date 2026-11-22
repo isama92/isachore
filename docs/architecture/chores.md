@@ -185,6 +185,10 @@ What to keep straight:
   re-phases the turns without moving the open slot, which is how an existing chore is put onto
   Mondays. (With none, the edit re-seeds the open slot from the new date as usual.) `slot_index` floors, so
   an open slot left off that lattice by a re-phasing edit still gets an answer.
+- **Monthly and yearly count calendar months, not days.** The chain's day of the month drifts
+  (Jan 31 -> Feb 28 -> Mar 28), so a day-exact lattice has no closed form, while every step
+  is exactly `interval` months. Counting months keeps `slot_index` constant-time, which
+  matters because it runs twice on every closure with a caller-chosen start date.
 - **Swallowed slots count.** A late completion jumps past the missed slots and leaves no rows
   for them, which is why this counts on the calendar rather than counting done and skipped
   rows. For the same reason the boundary test compares turn numbers, never `next % length`: a
