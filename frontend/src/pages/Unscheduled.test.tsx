@@ -3,7 +3,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import Unscheduled from './Unscheduled'
-import { mockFetch, renderWithProviders } from '../test/utils'
+import { membershipsFor, mockFetch, renderWithProviders } from '../test/utils'
 import { makeChore, makeHouseholdMember, makeUnscheduledChore, makeUser } from '../test/fixtures'
 import type { HistoryFilterOptions, UnscheduledChore } from '../lib/types'
 
@@ -405,5 +405,72 @@ describe('description dialog', () => {
     // /Skip/ would come back empty whether the gate is there or not. The count does not.
     expect(within(row).getAllByRole('button')).toHaveLength(1)
     expect(within(row).getByRole('button', { name: 'Done: “Kettle”' })).toBeInTheDocument()
+  })
+})
+
+describe('edit pen', () => {
+  const FLAT_A = { id: 1, name: 'Flat A', timezone: 'UTC' }
+  const FLAT_B = { id: 2, name: 'Flat B', timezone: 'UTC' }
+
+  it('links an organiser of the chore’s household to its edit page', async () => {
+    mockFetch([
+      { path: FILTERS, method: 'GET', body: SOLO_OPTIONS },
+      {
+        path: LIST,
+        method: 'GET',
+        body: body([makeUnscheduledChore({ id: 12, title: 'Bathroom' })]),
+      },
+    ])
+    renderWithProviders(<Unscheduled />, {
+      authValue: { user: makeUser({ id: 1 }), memberships: membershipsFor('organiser', 1) },
+    })
+
+    const pen = await screen.findByRole('link', { name: 'Edit: “Bathroom”' })
+    expect(pen).toHaveAttribute('href', '/chores/12/edit')
+  })
+
+  it.each(['deputy', 'helper'] as const)('shows no pen to a %s', async (role) => {
+    mockFetch([
+      { path: FILTERS, method: 'GET', body: SOLO_OPTIONS },
+      {
+        path: LIST,
+        method: 'GET',
+        body: body([makeUnscheduledChore({ id: 12, title: 'Bathroom' })]),
+      },
+    ])
+    renderWithProviders(<Unscheduled />, {
+      authValue: { user: makeUser({ id: 1 }), memberships: membershipsFor(role, 1) },
+    })
+
+    // Wait for the row first, so the absence is not just an empty page.
+    expect(await screen.findByText('Bathroom')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Edit: “Bathroom”' })).not.toBeInTheDocument()
+  })
+
+  it('decides per household, not on organising somewhere', async () => {
+    mockFetch([
+      { path: FILTERS, method: 'GET', body: MULTI_OPTIONS },
+      {
+        path: LIST,
+        method: 'GET',
+        body: body([
+          makeUnscheduledChore({ id: 1, title: 'Hoover', household: FLAT_A }),
+          makeUnscheduledChore({ id: 2, title: 'Mow', household: FLAT_B }),
+        ]),
+      },
+    ])
+    renderWithProviders(<Unscheduled />, {
+      authValue: {
+        user: makeUser({ id: 1 }),
+        memberships: [...membershipsFor('organiser', 1), ...membershipsFor('helper', 2)],
+      },
+    })
+
+    expect(await screen.findByRole('link', { name: 'Edit: “Hoover”' })).toHaveAttribute(
+      'href',
+      '/chores/1/edit',
+    )
+    expect(screen.getByText('Mow')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Edit: “Mow”' })).not.toBeInTheDocument()
   })
 })

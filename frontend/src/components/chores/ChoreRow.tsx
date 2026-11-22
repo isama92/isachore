@@ -1,12 +1,14 @@
-import { CheckIcon, FileTextIcon, SkipForwardIcon } from 'lucide-react'
+import { CheckIcon, FileTextIcon, SkipForwardIcon, SquarePenIcon } from 'lucide-react'
+import { Link } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
 // One chore card in a list view: a colour-coded dot + title + one line of detail, who it
 // is for ("who is this for"), an optional marker for chores that carry written instructions,
-// an optional Skip action, and a "Done" button. Shared by the two list pages, which
-// differ only in what they put in `detail` and how they react to a completion:
+// an optional edit pen for organisers, an optional Skip action, and a "Done" button. Shared
+// by the two list pages, which differ only in what they put in `detail` and how they react
+// to a completion:
 //
 // - My Chores passes a due label and `exiting`, so the row plays an exit animation and
 //   the rows below glide up: completing a chore either re-dates it or removes it.
@@ -27,6 +29,8 @@ export default function ChoreRow({
   doneLabel,
   descriptionLabel,
   skipLabel,
+  editTo,
+  editLabel,
   onShowDescription,
   onSkip,
   onComplete,
@@ -52,6 +56,11 @@ export default function ChoreRow({
   // move past (the API refuses one outright). Passing no handler is how that page opts out.
   // `skipLabel` is likewise the icon-only button's only accessible name.
   skipLabel?: string
+  // `editTo` gates the edit pen the same way: callers pass it only when the user organises
+  // the chore's household (the check ChoreEdit enforces), so the pen never leads to a
+  // redirect. `editLabel` is its only accessible name.
+  editTo?: string
+  editLabel?: string
   onShowDescription?: () => void
   onSkip?: () => void
   onComplete: () => void
@@ -87,6 +96,29 @@ export default function ChoreRow({
                   className="shrink-0 text-muted-foreground"
                 >
                   <FileTextIcon />
+                </Button>
+              )}
+              {/* The edit pen sits with the marker rather than with Skip and Done: those act
+                  on today's occurrence, this leaves for the chore itself. A Link, not a
+                  button, because it is navigation. Not disabled while busy, since editing
+                  does not race a completion. While exiting, pointer-events-none on the <li>
+                  stops the mouse, but a link has no `disabled`, so it also leaves the tab
+                  order: otherwise the keyboard could still open a chore just completed. */}
+              {editTo && (
+                <Button
+                  asChild
+                  variant="ghost"
+                  size="icon-xs"
+                  className="shrink-0 text-muted-foreground"
+                >
+                  <Link
+                    to={editTo}
+                    aria-label={editLabel}
+                    tabIndex={exiting ? -1 : undefined}
+                    aria-disabled={exiting || undefined}
+                  >
+                    <SquarePenIcon />
+                  </Link>
                 </Button>
               )}
             </div>

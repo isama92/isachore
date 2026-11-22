@@ -4,6 +4,8 @@ import { toast } from 'sonner'
 import { useAuth } from '../auth/useAuth'
 import { api, ApiError } from '../lib/api'
 import { endpoints } from '../lib/endpoints'
+import { hasRoleIn } from '../lib/permissions'
+import { routes } from '../lib/routes'
 import { doneDotClass, lastDoneLabel } from '../lib/unscheduled'
 import type { UnscheduledChore, UnscheduledData } from '../lib/types'
 import ChoreFilters from '@/components/chores/ChoreFilters'
@@ -14,7 +16,7 @@ import { useFilterOptions } from '@/components/chores/useFilterOptions'
 import { fullName } from '@/lib/user'
 
 export default function Unscheduled() {
-  const { user } = useAuth()
+  const { user, memberships } = useAuth()
   const { t } = useTranslation()
   const [data, setData] = useState<UnscheduledData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -168,6 +170,12 @@ export default function Unscheduled() {
                 doneText={t('unscheduled.done')}
                 doneLabel={t('unscheduled.markDone', { title: chore.title })}
                 descriptionLabel={t('unscheduled.showDescription', { title: chore.title })}
+                editTo={
+                  hasRoleIn(memberships, chore.household.id, 'organiser')
+                    ? routes.chores.edit.to(chore.id)
+                    : undefined
+                }
+                editLabel={t('unscheduled.editChore', { title: chore.title })}
                 onShowDescription={
                   chore.has_description ? () => setDescriptionFor(chore) : undefined
                 }

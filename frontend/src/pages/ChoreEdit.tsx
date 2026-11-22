@@ -97,7 +97,7 @@ export default function ChoreEdit() {
             assignee_ids: chore.assignees.map((a) => a.id),
             current_assignee_id: chore.current_assignee?.id ?? null,
             // Seeded from the chore's actual state: an already-unassigned chore opens with
-            // "Nobody in particular" selected rather than an empty picker, so saving an
+            // "Nobody" selected rather than an empty picker, so saving an
             // unrelated edit cannot quietly re-derive an assignee for it.
             //
             // The pool check matters. A chore with no assignees is *necessarily* unassigned, so
