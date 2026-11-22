@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 FROM python:3.15-slim AS base
 # Keep in sync with the uv version used locally
-COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13 /uv /uvx /bin/
 ENV UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \
     UV_PYTHON_DOWNLOADS=0 \
