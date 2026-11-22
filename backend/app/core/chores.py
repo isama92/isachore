@@ -297,11 +297,16 @@ def slot_index(start_date: date, slot: datetime, rule: RecurrenceRule, tz: ZoneI
     lattice slots that have passed, instead of looping or raising.
 
     Before the first slot is 0, so a start date moved into the future reads as "the first
-    turn has not begun" rather than a negative turn. Daily and unpinned weekly rules are pure
-    arithmetic on local dates; monthly, yearly and pinned weekly walk the grid. Unlike
-    `advance_anchor`, whose walk scales with how late a completion is, this one scales with the
-    chore's age: at worst about 365 steps per year (pinned to every weekday), twice per
-    closure, which is still negligible."""
+    turn has not begun" rather than a negative turn.
+
+    **The cost must not scale with how far back `start_date` is**, because that is the
+    caller's input: the schema accepts any date, and a naive walk from year 1 on a rule pinned
+    to every weekday is ~740k steps, twice per closure. So daily and unpinned weekly are pure
+    arithmetic, and pinned weekly jumps whole cycles (`interval` weeks always hold exactly
+    `len(weekdays)` slots, starting from any slot) and walks only the last two. Monthly and
+    yearly still walk, at most 12 steps a year of history, which `date`'s year range caps at
+    about 120k; their day-of-month clamping drifts (Jan 31 -> Feb 28 -> Mar 28), so there is no
+    exact closed form to jump with."""
     if rule.repeats == RepeatPeriod.manual:
         raise ValueError(f"{rule.repeats} has no grid to count slots on")
     first = first_occurrence(start_date, rule, tz)
@@ -315,6 +320,17 @@ def slot_index(start_date: date, slot: datetime, rule: RecurrenceRule, tz: ZoneI
             return days // rule.interval
         case RepeatPeriod.weekly if not rule.pinned:
             return days // (DAYS_IN_WEEK * rule.interval)
+        case RepeatPeriod.weekly:
+            # Pinned. Jump to a slot at most two cycles before the target - it is `first`'s
+            # weekday, a whole number of cycles on, so still on the grid - then walk the rest.
+            cycle = DAYS_IN_WEEK * rule.interval
+            cycles = max(0, days // cycle - 1)
+            index = cycles * len(rule.weekdays)
+            anchor = first.astimezone(tz) + timedelta(days=cycles * cycle)
+            nxt = next_slot_after(anchor, rule, tz)
+            while nxt.astimezone(tz).date() <= target_day:
+                index, nxt = index + 1, next_slot_after(nxt, rule, tz)
+            return index
         case _:
             index, nxt = 0, next_slot_after(first, rule, tz)
             while nxt.astimezone(tz).date() <= target_day:

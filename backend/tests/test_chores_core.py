@@ -737,3 +737,43 @@ def test_slot_index_reads_the_slot_in_the_households_zone() -> None:
 def test_slot_index_refuses_an_unscheduled_rule() -> None:
     with pytest.raises(ValueError):
         slot_index(date(2026, 7, 27), _midnight(date(2026, 7, 28)), MANUAL, UTC_ZONE)
+
+
+def _walked_slot_index(start: date, slot: datetime, rule: RecurrenceRule, tz: ZoneInfo) -> int:
+    """The obvious definition, one grid step at a time: the reference the shortcuts must match."""
+    first = first_occurrence(start, rule, tz)
+    target = slot.astimezone(tz).date()
+    if target <= first.astimezone(tz).date():
+        return 0
+    index, nxt = 0, next_slot_after(first, rule, tz)
+    while nxt.astimezone(tz).date() <= target:
+        index, nxt = index + 1, next_slot_after(nxt, rule, tz)
+    return index
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        weekly_on(MON),
+        weekly_on(TUE, FRI),
+        weekly_on(TUE, FRI, every=2),
+        weekly_on(*range(7), every=3),
+    ],
+    ids=["mon", "tue-fri", "tue-fri-every-2", "daily-ish-every-3"],
+)
+def test_slot_index_pinned_weekly_jump_matches_the_walk(rule: RecurrenceRule) -> None:
+    # Every target day over ten weeks, from a start on each weekday, and across a DST change.
+    tz = ZoneInfo("Europe/Amsterdam")
+    for start in (date(2026, 10, 1) + timedelta(days=n) for n in range(7)):
+        for offset in range(70):
+            slot = _midnight(start + timedelta(days=offset), tz)
+            assert slot_index(start, slot, rule, tz) == _walked_slot_index(start, slot, rule, tz)
+
+
+def test_slot_index_pinned_weekly_does_not_walk_from_a_distant_start() -> None:
+    # A start date in year 1 is accepted by the schema. Walking from it is ~740k steps; the
+    # jump makes it a handful, so this finishes instantly and still counts right: 7 slots a week.
+    rule = weekly_on(*range(7))
+    start = date(1, 1, 1)  # a Monday
+    slot = _midnight(start + timedelta(weeks=100_000, days=3))
+    assert slot_index(start, slot, rule, UTC_ZONE) == 100_000 * 7 + 3
