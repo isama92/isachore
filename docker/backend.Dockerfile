@@ -27,7 +27,7 @@ WORKDIR /app
 # installs to /usr/local/bin. `prod` does not inherit from this stage, so it copies the
 # directory across explicitly.
 #
-# python:3.14-slim carries no curl, and Python is right here, so urllib plus hashlib does it
+# python:3.15-slim carries no curl, and Python is right here, so urllib plus hashlib does it
 # with no apt layer. The digest check is `RUN`-time, so a mismatch fails the build.
 #
 # Two consequences of fetching rather than committing, both acceptable and neither obvious.
