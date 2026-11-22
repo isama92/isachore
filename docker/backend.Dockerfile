@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
-FROM python:3.14-slim AS base
+FROM python:3.15-slim AS base
 # Keep in sync with the uv version used locally
-COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13 /uv /uvx /bin/
 ENV UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \
     UV_PYTHON_DOWNLOADS=0 \
@@ -27,7 +27,7 @@ WORKDIR /app
 # installs to /usr/local/bin. `prod` does not inherit from this stage, so it copies the
 # directory across explicitly.
 #
-# python:3.14-slim carries no curl, and Python is right here, so urllib plus hashlib does it
+# python:3.15-slim carries no curl, and Python is right here, so urllib plus hashlib does it
 # with no apt layer. The digest check is `RUN`-time, so a mismatch fails the build.
 #
 # Two consequences of fetching rather than committing, both acceptable and neither obvious.
@@ -104,7 +104,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev
 COPY . /app
 
-FROM python:3.14-slim AS prod
+FROM python:3.15-slim AS prod
 RUN groupadd -r app && useradd -r -g app app
 COPY --from=builder /opt/venv /opt/venv
 # The vendored ReDoc bundle. Needs its own COPY because this stage starts from a bare
