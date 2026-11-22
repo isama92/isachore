@@ -169,6 +169,10 @@ export type Chore = {
   // Completions one assignee holds before the chore hands off (1 = every
   // completion; "take turns" in the form sets a larger value).
   turn_length: number
+  // "Ignore skipped": a turn is `turn_length` calendar slots counted from `start_date`, so
+  // skipped and missed slots count too. Always false unless taking turns on a scheduled,
+  // auto-rotating chore (the API normalises it).
+  turns_follow_calendar: boolean
   // Periods between occurrences (1 = every period). Not applicable to `manual`.
   repeat_interval: number
   // Which weekdays a weekly chore lands on, as Monday-first indexes 0-6 (the
@@ -253,6 +257,7 @@ export const LOG_FIELDS = [
   'repeats',
   'assignment_type',
   'turn_length',
+  'turns_follow_calendar',
   'repeat_interval',
   'weekdays',
   'assignees',
@@ -391,6 +396,7 @@ export type ChoreCloneState = {
   repeats: RepeatPeriod
   assignment_type: AssignmentType
   turn_length: number
+  turns_follow_calendar: boolean
   repeat_interval: number
   // Normalised to [] (like `description` above) so router state stays plain. Must be
   // carried, or cloning an "every 2 days" chore silently produces a plain daily one.

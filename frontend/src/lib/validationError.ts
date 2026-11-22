@@ -86,6 +86,7 @@ const FIELD_NAMES = [
   'repeats',
   'assignment_type',
   'turn_length',
+  'turns_follow_calendar',
   'repeat_interval',
   'weekdays',
   'name',

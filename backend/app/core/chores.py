@@ -283,6 +283,45 @@ def next_occurrence_after(
     return next_slot_after(advance_anchor(scheduled_for, completed_at, rule, tz), rule, tz)
 
 
+def slot_index(start_date: date, slot: datetime, rule: RecurrenceRule, tz: ZoneInfo) -> int:
+    """The 0-based position, on the grid that starts at `first_occurrence(start_date)`, of
+    the last grid slot whose local day is on or before `slot`'s. This is what
+    `turns_follow_calendar` divides by the turn length, so turns follow the calendar rather
+    than how many times anyone pressed a button.
+
+    The one place in this module that reasons on a lattice from `start_date` rather than the
+    occurrence chain (see the module docstring), and on purpose: the point is a fixed phase
+    the household chose ("hand over on Mondays"), which the chain cannot give once a skip or
+    a late completion has moved it. The floor ("on or before") is what keeps it honest for a
+    slot that is NOT on this lattice, which happens after a re-phasing edit: it counts the
+    lattice slots that have passed, instead of looping or raising.
+
+    Before the first slot is 0, so a start date moved into the future reads as "the first
+    turn has not begun" rather than a negative turn. Daily and unpinned weekly rules are pure
+    arithmetic on local dates; monthly, yearly and pinned weekly walk the grid. Unlike
+    `advance_anchor`, whose walk scales with how late a completion is, this one scales with the
+    chore's age: at worst about 365 steps per year (pinned to every weekday), twice per
+    closure, which is still negligible."""
+    if rule.repeats == RepeatPeriod.manual:
+        raise ValueError(f"{rule.repeats} has no grid to count slots on")
+    first = first_occurrence(start_date, rule, tz)
+    first_day = first.astimezone(tz).date()
+    target_day = slot.astimezone(tz).date()
+    if target_day <= first_day:
+        return 0
+    days = (target_day - first_day).days
+    match rule.repeats:
+        case RepeatPeriod.daily:
+            return days // rule.interval
+        case RepeatPeriod.weekly if not rule.pinned:
+            return days // (DAYS_IN_WEEK * rule.interval)
+        case _:
+            index, nxt = 0, next_slot_after(first, rule, tz)
+            while nxt.astimezone(tz).date() <= target_day:
+                index, nxt = index + 1, next_slot_after(nxt, rule, tz)
+            return index
+
+
 def days_until_due(due: datetime, now: datetime, tz: ZoneInfo) -> int:
     """Whole days from today to the due date in the household's zone (negative = overdue).
     Date-based so a chore due at local midnight today reads as due today, not overdue.

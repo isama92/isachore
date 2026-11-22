@@ -1,6 +1,6 @@
 import random
 
-from app.core.assignment import initial_assignee, next_assignee, should_reassign
+from app.core.assignment import crosses_turn, initial_assignee, next_assignee, should_reassign
 from app.models import AssignmentType, User
 
 
@@ -199,3 +199,26 @@ def test_should_reassign_clamps_non_positive_turn_length() -> None:
 def test_should_reassign_zero_count_is_true_but_not_relied_on() -> None:
     # done_count is 1-based in practice; this just pins the raw modulo behaviour.
     assert should_reassign(0, 3) is True
+
+
+# --- crosses_turn -------------------------------------------------------------
+
+
+def test_crosses_turn_holds_inside_a_turn() -> None:
+    assert not crosses_turn(0, 1, 7)
+    assert not crosses_turn(5, 6, 7)
+
+
+def test_crosses_turn_on_the_boundary_slot() -> None:
+    assert crosses_turn(6, 7, 7)
+
+
+def test_crosses_turn_when_a_jump_lands_past_the_boundary() -> None:
+    # A late completion swallowing the missed slots never lands ON slot 7; a modulo test of
+    # the next index (`next % 7 == 0`) would miss this handover.
+    assert crosses_turn(5, 9, 7)
+    assert crosses_turn(0, 16, 7)
+
+
+def test_crosses_turn_clamps_non_positive_turn_length() -> None:
+    assert crosses_turn(0, 1, 0)

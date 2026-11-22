@@ -68,6 +68,22 @@ def _normalised_schedule(
     return start_date, repeat_interval, sorted(set(weekdays))
 
 
+def _turns_follow_calendar(
+    requested: bool, repeats: RepeatPeriod, assignment_type: AssignmentType, turn_length: int
+) -> bool:
+    """`turns_follow_calendar` where it means something, False everywhere else: it needs a
+    turn longer than one slot, a grid to count slots on (not `manual` repeats) and a strategy
+    that rotates (not the `manual` one). Normalised rather than rejected for the same reason
+    as the schedule above: the form only shows the checkbox under "Take turns", so a stale
+    True left over from a previous edit must not 422 or silently reactivate later."""
+    return (
+        requested
+        and turn_length > 1
+        and repeats != RepeatPeriod.manual
+        and assignment_type != AssignmentType.manual
+    )
+
+
 class ChoreHouseholdRead(BaseModel):
     """The household a chore belongs to, embedded in both chore reads (it sits on
     ChoreReadBase) so the list column and the read-only edit header can show its name
@@ -102,6 +118,8 @@ class ChoreReadBase(BaseModel):
     assignment_type: AssignmentType
     # Completions one assignee holds before the chore hands off (1 = every completion).
     turn_length: int
+    # True: a turn is `turn_length` grid slots counted from `start_date`, skipped or not.
+    turns_follow_calendar: bool
     # Periods between occurrences (1 = every period), and the Monday-first weekdays a weekly
     # chore falls on. None means unpinned: the chore keeps whatever weekday its occurrences
     # already sit on. For a chore created unpinned that is its start date's weekday, but a
@@ -163,6 +181,9 @@ class ChoreCreate(BaseModel):
     assignment_type: AssignmentType
     # >= 1; the "take turns" UI uses >= 2, 1 means hand off every completion.
     turn_length: int = Field(default=1, ge=1)
+    # "Ignore skipped": count turns in grid slots from `start_date` rather than completions.
+    # Forced to False where it means nothing (see `_turns_follow_calendar`).
+    turns_follow_calendar: bool = False
     # How many periods between occurrences. Capped at core.chores.MAX_INTERVAL, which is
     # what keeps a yearly rule's month arithmetic inside datetime's year range.
     repeat_interval: int = Field(default=1, ge=1, le=MAX_INTERVAL)
@@ -192,6 +213,9 @@ class ChoreCreate(BaseModel):
         self.start_date, self.repeat_interval, self.weekdays = _normalised_schedule(
             self.repeats, self.start_date, self.repeat_interval, self.weekdays
         )
+        self.turns_follow_calendar = _turns_follow_calendar(
+            self.turns_follow_calendar, self.repeats, self.assignment_type, self.turn_length
+        )
         return self
 
 
@@ -205,6 +229,9 @@ class ChoreUpdate(BaseModel):
     repeats: RepeatPeriod
     assignment_type: AssignmentType
     turn_length: int = Field(default=1, ge=1)
+    # "Ignore skipped": count turns in grid slots from `start_date` rather than completions.
+    # Forced to False where it means nothing (see `_turns_follow_calendar`).
+    turns_follow_calendar: bool = False
     repeat_interval: int = Field(default=1, ge=1, le=MAX_INTERVAL)
     weekdays: list[Weekday] | None = None
     assignee_ids: list[int] = Field(default_factory=list)
@@ -226,5 +253,8 @@ class ChoreUpdate(BaseModel):
     def _canonicalise_schedule(self) -> Self:
         self.start_date, self.repeat_interval, self.weekdays = _normalised_schedule(
             self.repeats, self.start_date, self.repeat_interval, self.weekdays
+        )
+        self.turns_follow_calendar = _turns_follow_calendar(
+            self.turns_follow_calendar, self.repeats, self.assignment_type, self.turn_length
         )
         return self

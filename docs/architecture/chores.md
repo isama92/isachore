@@ -34,7 +34,8 @@ The load-bearing part is that `current_assignee_id` stays derived against the li
 is what lets the payload gate more loosely than the render (on the strategy, not also on the
 pool) and still never submit a stale or hidden value, since an empty pool forces `null`
 either way. For the auto strategies an override lasts until the next turn boundary, because
-completing re-derives through `_successor_assignee` — which is what the
+completing re-derives through `_successor_assignee` (or, for calendar turns, any closure over
+the boundary re-derives through `_calendar_turn_assignee`, skips included) — which is what the
 `currentAssigneeTurnHint` copy promises the user, so keep them in step.
 
 ### `least_done` reads a tie as a handover
@@ -166,6 +167,39 @@ recompute `elif` would immediately re-derive somebody from the strategy and undo
 In the form the choice is a `UNASSIGNED` sentinel option rather than `value=""`, which Radix
 reserves for "nothing selected" and would render as the placeholder.
 
+### Calendar turns ("Ignore skipped")
+
+`chores.turns_follow_calendar`. By default a turn is `turn_length` **completions**
+(`should_reassign` over `_completion_tally`) and a skip never spends one. That is what stops a
+skip pushing work onto a housemate, but it also means "Naomi has it this week" drifts
+mid-week as soon as a day is skipped. With the flag on, a turn is `turn_length` **grid slots
+counted from `start_date`** instead: `slot_index` places the closed slot and its successor, and
+`crosses_turn` hands over when they fall in different turns. A daily chore with a 7-slot turn
+that starts on a Monday therefore changes hands every Monday, however the week went.
+
+What to keep straight:
+
+- **The phase comes from `start_date`, not from the occurrence chain.** This is the one place
+  that reasons on a lattice from the start date (see `core/chores.py`'s module docstring for
+  why everything else does not). Once the chore has completions, editing the start date
+  re-phases the turns without moving the open slot, which is how an existing chore is put onto
+  Mondays. (With none, the edit re-seeds the open slot from the new date as usual.) `slot_index` floors, so
+  an open slot left off that lattice by a re-phasing edit still gets an answer.
+- **Swallowed slots count.** A late completion jumps past the missed slots and leaves no rows
+  for them, which is why this counts on the calendar rather than counting done and skipped
+  rows. For the same reason the boundary test compares turn numbers, never `next % length`: a
+  jump rarely lands *on* the boundary slot.
+- **Several turns at once still hand over once** (the product call): the next person, not
+  whoever's turn it would be by now.
+- **A skip over the boundary hands over**, unlike `_retained_assignee`. Inside a turn both
+  paths hold through `_held_assignee`, the same helper the completion-counted turn uses, so a
+  cleared row stays cleared and a stale one is re-derived exactly as it is there.
+- **`least_done` still ranks on work done.** Only the *timing* of a turn moves to the
+  calendar; the tally passed to `next_assignee` still excludes skips.
+- **The schema forces it off** where it means nothing (turn length 1, unscheduled, the
+  `manual` strategy), and the form defaults it **on** for a new chore but keeps the stored
+  value on edit. The UI label is "Ignore skipped", explained behind an `InfoHint` icon.
+
 ## Backdating a completion
 
 `CompleteChoreRequest.backdate` — the chore somebody did and forgot to tick.
@@ -217,8 +251,10 @@ Seven things to keep straight:
   much of today's list did you get through", and that work was not today's); Statistics
   buckets it on the day it was due, so clearing a 40-day backlog moves nothing on a 7-day
   window; and a rotating chore advances **once per completion**, so walking three missed days
-  passes three turns. History also sorts it into the past rather than to the top, since the
-  default sort is `completed_at` desc.
+  passes three turns. (Calendar turns differ here: walking the backlog hands over at every
+  boundary it crosses, where one late completion over the same span hands over once.) History
+  also sorts it into the past rather than to the top, since the default sort is
+  `completed_at` desc.
 
 ## Unscheduled chores
 

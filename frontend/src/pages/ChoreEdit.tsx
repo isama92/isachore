@@ -92,6 +92,7 @@ export default function ChoreEdit() {
             repeats: chore.repeats,
             assignment_type: chore.assignment_type,
             turn_length: chore.turn_length,
+            turns_follow_calendar: chore.turns_follow_calendar,
             repeat_interval: chore.repeat_interval,
             weekdays: chore.weekdays ?? [],
             assignee_ids: chore.assignees.map((a) => a.id),

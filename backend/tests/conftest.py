@@ -363,6 +363,7 @@ def make_chore(db_session: AsyncSession) -> Callable[..., Awaitable[Chore]]:
         repeats: RepeatPeriod = RepeatPeriod.weekly,
         assignment_type: AssignmentType = AssignmentType.manual,
         turn_length: int = 1,
+        turns_follow_calendar: bool = False,
         repeat_interval: int = 1,
         weekdays: list[int] | None = None,
         assignees: list[User] | None = None,
@@ -384,6 +385,7 @@ def make_chore(db_session: AsyncSession) -> Callable[..., Awaitable[Chore]]:
             repeats=repeats,
             assignment_type=assignment_type,
             turn_length=turn_length,
+            turns_follow_calendar=turns_follow_calendar,
             repeat_interval=repeat_interval,
             weekdays=weekdays,
         )

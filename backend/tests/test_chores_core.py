@@ -15,6 +15,7 @@ from app.core.chores import (
     local_day_bounds,
     next_occurrence_after,
     next_slot_after,
+    slot_index,
     snap_to_slot,
 )
 from app.models import RepeatPeriod
@@ -660,3 +661,79 @@ def test_advance_anchor_does_not_roll_for_a_completion_at_the_end_of_the_slots_o
     assert next_occurrence_after(slot, end_of_local_day(slot, UTC_ZONE), DAILY, UTC_ZONE) == (
         datetime(2026, 8, 7, tzinfo=UTC)
     )
+
+
+# --- slot_index (calendar turns) ---------------------------------------------
+
+
+def _midnight(day: date, tz: ZoneInfo = UTC_ZONE) -> datetime:
+    return datetime(day.year, day.month, day.day, tzinfo=tz)
+
+
+def test_slot_index_daily_counts_days_from_the_start() -> None:
+    start = date(2026, 7, 27)  # a Monday
+    assert slot_index(start, _midnight(start), DAILY, UTC_ZONE) == 0
+    assert slot_index(start, _midnight(date(2026, 8, 2)), DAILY, UTC_ZONE) == 6  # Sunday
+    assert slot_index(start, _midnight(date(2026, 8, 3)), DAILY, UTC_ZONE) == 7  # next Monday
+
+
+def test_slot_index_daily_interval_floors_an_off_grid_day() -> None:
+    # Every other day from the 27th: the 29th is slot 1, and the 30th (off the lattice, as a
+    # re-phasing edit can leave a slot) still reads as slot 1 rather than raising or looping.
+    rule = repeating(RepeatPeriod.daily, 2)
+    start = date(2026, 7, 27)
+    assert slot_index(start, _midnight(date(2026, 7, 29)), rule, UTC_ZONE) == 1
+    assert slot_index(start, _midnight(date(2026, 7, 30)), rule, UTC_ZONE) == 1
+    assert slot_index(start, _midnight(date(2026, 7, 31)), rule, UTC_ZONE) == 2
+
+
+def test_slot_index_unpinned_weekly_counts_weeks() -> None:
+    start = date(2026, 7, 6)
+    assert slot_index(start, _midnight(date(2026, 7, 27)), WEEKLY, UTC_ZONE) == 3
+    every_two = repeating(RepeatPeriod.weekly, 2)
+    assert slot_index(start, _midnight(date(2026, 7, 27)), every_two, UTC_ZONE) == 1
+
+
+def test_slot_index_pinned_weekly_counts_each_selected_day() -> None:
+    # Mon + Thu from Monday the 6th: 6 (0), 9 (1), 13 (2), 16 (3), 20 (4).
+    rule = weekly_on(MON, THU)
+    start = date(2026, 7, 6)
+    assert slot_index(start, _midnight(date(2026, 7, 16)), rule, UTC_ZONE) == 3
+    assert slot_index(start, _midnight(date(2026, 7, 20)), rule, UTC_ZONE) == 4
+    # A Saturday sits after Thursday's slot and before Monday's.
+    assert slot_index(start, _midnight(date(2026, 7, 18)), rule, UTC_ZONE) == 3
+
+
+def test_slot_index_pinned_weekly_counts_from_the_snapped_first_slot() -> None:
+    # A Saturday start on a Monday-pinned rule opens on the following Monday, which is slot 0.
+    rule = weekly_on(MON)
+    assert slot_index(date(2026, 7, 4), _midnight(date(2026, 7, 6)), rule, UTC_ZONE) == 0
+    assert slot_index(date(2026, 7, 4), _midnight(date(2026, 7, 13)), rule, UTC_ZONE) == 1
+
+
+def test_slot_index_monthly_walks_the_grid() -> None:
+    start = date(2026, 1, 31)
+    # Jan 31 -> Feb 28 -> Mar 28: the same drift the occurrence chain has.
+    assert slot_index(start, _midnight(date(2026, 3, 28)), MONTHLY, UTC_ZONE) == 2
+    assert slot_index(start, _midnight(date(2026, 3, 27)), MONTHLY, UTC_ZONE) == 1
+
+
+def test_slot_index_before_the_start_is_zero() -> None:
+    # A start date moved into the future reads as "the first turn has not begun".
+    start = date(2026, 7, 27)
+    assert slot_index(start, _midnight(date(2026, 7, 20)), DAILY, UTC_ZONE) == 0
+
+
+def test_slot_index_reads_the_slot_in_the_households_zone() -> None:
+    # Amsterdam's local midnight on Monday 3 August is 22:00Z on the Sunday. Read in UTC that
+    # would be slot 6; in the household's zone it is the Monday, slot 7.
+    tz = ZoneInfo("Europe/Amsterdam")
+    start = date(2026, 7, 27)
+    slot = _midnight(date(2026, 8, 3), tz).astimezone(UTC)
+    assert slot.day == 2
+    assert slot_index(start, slot, DAILY, tz) == 7
+
+
+def test_slot_index_refuses_an_unscheduled_rule() -> None:
+    with pytest.raises(ValueError):
+        slot_index(date(2026, 7, 27), _midnight(date(2026, 7, 28)), MANUAL, UTC_ZONE)

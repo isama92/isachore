@@ -28,6 +28,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { TagMultiSelect } from '@/components/chores/TagMultiSelect'
 import { WeekdayPicker } from '@/components/chores/WeekdayPicker'
 import { AssigneeMultiSelect } from '@/components/chores/AssigneeMultiSelect'
+import { InfoHint } from '@/components/InfoHint'
 import RichTextEditor from '@/components/rich-text/RichTextEditor'
 
 // The "nobody" option's value in the current-assignee Select. A sentinel because Radix reserves
@@ -49,6 +50,10 @@ export type ChoreFormValues = {
   // Completions per assignee before a handoff (1 = every completion). "Take turns"
   // is on when this is > 1.
   turn_length: number
+  // "Ignore skipped": count a turn in calendar slots from the start date rather than in
+  // completions, so skips and missed days still move the handover along. Only applies under
+  // "Take turns" on a scheduled, auto-rotating chore; the API forces it off everywhere else.
+  turns_follow_calendar: boolean
   // Periods between occurrences (1 = every period). Read only to seed the
   // string-backed input below, the same way turn_length is.
   repeat_interval: number
@@ -78,6 +83,7 @@ export type ChoreSubmit = {
   repeats: RepeatPeriod
   assignment_type: AssignmentType
   turn_length: number
+  turns_follow_calendar: boolean
   repeat_interval: number
   // null rather than [] when the period is not weekly or nothing is pinned (the
   // same asymmetry as description: string -> string | null above).
@@ -143,6 +149,9 @@ export function ChoreForm({
   const [turnLength, setTurnLength] = useState(() =>
     String(initial.turn_length > 1 ? initial.turn_length : 2),
   )
+  // Its own state for the same reason as takeTurns: unticking "Take turns" hides it without
+  // forgetting it, and the payload below gates it rather than this state.
+  const [ignoreSkipped, setIgnoreSkipped] = useState(() => initial.turns_follow_calendar)
   // String-backed for the same reasons as turnLength: it can be cleared and typed into
   // multi-digit, then parsed and clamped on submit.
   const [repeatInterval, setRepeatInterval] = useState(() => String(initial.repeat_interval))
@@ -218,6 +227,9 @@ export function ChoreForm({
         assignment_type: values.assignment_type,
         // A whole number >= 2 when taking turns, otherwise 1 (hand off every completion).
         turn_length: isManual || !takeTurns ? 1 : Math.max(2, Math.trunc(Number(turnLength)) || 2),
+        // Gated on exactly what shows the checkbox, so a hidden one never submits true. The API
+        // normalises the same way, which keeps other clients honest too.
+        turns_follow_calendar: !isManual && takeTurns && !manualRepeat && ignoreSkipped,
         repeat_interval: interval,
         // null both when the period is not weekly and when nothing is pinned: the API
         // treats both as unpinned. Since ChoreUpdate is a full replace, this is also how
@@ -376,13 +388,36 @@ export function ChoreForm({
       {/* Take turns: only for the auto-rotating strategies (manual never rotates). */}
       {!isManual && (
         <div className="flex flex-col gap-3">
-          <label className="flex items-center gap-2 text-sm font-medium">
-            <Checkbox
-              checked={takeTurns}
-              onCheckedChange={(checked) => setTakeTurns(checked === true)}
-            />
-            {t('choreCreate.takeTurns')}
-          </label>
+          {/* The two toggles share a row; "Ignore skipped" only exists under "Take turns", and
+              only for a scheduled chore, since an unscheduled one has no calendar to follow. */}
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+            <div className="flex items-center gap-1.5">
+              <label className="flex items-center gap-2 text-sm font-medium">
+                <Checkbox
+                  checked={takeTurns}
+                  onCheckedChange={(checked) => setTakeTurns(checked === true)}
+                />
+                {t('choreCreate.takeTurns')}
+              </label>
+              <InfoHint label={t('choreCreate.takeTurnsInfoLabel')}>
+                {t('choreCreate.takeTurnsInfo')}
+              </InfoHint>
+            </div>
+            {takeTurns && !manualRepeat && (
+              <div className="flex items-center gap-1.5">
+                <label className="flex items-center gap-2 text-sm font-medium">
+                  <Checkbox
+                    checked={ignoreSkipped}
+                    onCheckedChange={(checked) => setIgnoreSkipped(checked === true)}
+                  />
+                  {t('choreCreate.ignoreSkipped')}
+                </label>
+                <InfoHint label={t('choreCreate.ignoreSkippedInfoLabel')}>
+                  {t('choreCreate.ignoreSkippedInfo')}
+                </InfoHint>
+              </div>
+            )}
+          </div>
           {takeTurns && (
             <div className="flex flex-col gap-1.5">
               <Label id="turn-length-label" htmlFor="turn-length">
@@ -398,7 +433,11 @@ export function ChoreForm({
                 onChange={(e) => setTurnLength(e.target.value)}
               />
               <p className="text-[13px] font-medium text-muted-foreground">
-                {t('choreCreate.turnLengthHint')}
+                {t(
+                  !manualRepeat && ignoreSkipped
+                    ? 'choreCreate.turnLengthCalendarHint'
+                    : 'choreCreate.turnLengthHint',
+                )}
               </p>
             </div>
           )}

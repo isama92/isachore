@@ -4332,6 +4332,10 @@ components:
           minimum: 1
           title: Turn Length
           default: 1
+        turns_follow_calendar:
+          type: boolean
+          title: Turns Follow Calendar
+          default: false
         repeat_interval:
           type: integer
           maximum: 365
@@ -4419,6 +4423,9 @@ components:
         turn_length:
           type: integer
           title: Turn Length
+        turns_follow_calendar:
+          type: boolean
+          title: Turns Follow Calendar
         repeat_interval:
           type: integer
           title: Repeat Interval
@@ -4460,6 +4467,7 @@ components:
         - repeats
         - assignment_type
         - turn_length
+        - turns_follow_calendar
         - repeat_interval
         - weekdays
         - created_at
@@ -4504,6 +4512,9 @@ components:
         turn_length:
           type: integer
           title: Turn Length
+        turns_follow_calendar:
+          type: boolean
+          title: Turns Follow Calendar
         repeat_interval:
           type: integer
           title: Repeat Interval
@@ -4547,6 +4558,7 @@ components:
         - repeats
         - assignment_type
         - turn_length
+        - turns_follow_calendar
         - repeat_interval
         - weekdays
         - created_at
@@ -4586,6 +4598,10 @@ components:
           minimum: 1
           title: Turn Length
           default: 1
+        turns_follow_calendar:
+          type: boolean
+          title: Turns Follow Calendar
+          default: false
         repeat_interval:
           type: integer
           maximum: 365

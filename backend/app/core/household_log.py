@@ -42,6 +42,7 @@ CHORE_LOG_FIELDS = (
     "repeats",
     "assignment_type",
     "turn_length",
+    "turns_follow_calendar",
     "repeat_interval",
     "weekdays",
     "assignees",
@@ -64,6 +65,7 @@ class ChoreSnapshot:
     repeats: RepeatPeriod
     assignment_type: AssignmentType
     turn_length: int
+    turns_follow_calendar: bool
     repeat_interval: int
     weekdays: tuple[int, ...] | None
     assignees: frozenset[int]
@@ -80,6 +82,7 @@ def snapshot_chore(chore: Chore) -> ChoreSnapshot:
         repeats=chore.repeats,
         assignment_type=chore.assignment_type,
         turn_length=chore.turn_length,
+        turns_follow_calendar=chore.turns_follow_calendar,
         repeat_interval=chore.repeat_interval,
         # A tuple rather than the list itself, which is what stops `before` aliasing the value
         # the edit then overwrites. Both None and [] collapse to None, so a legacy row holding

@@ -451,6 +451,9 @@ async def test_list_chore_row_carries_no_more_than_the_table_needs(
         "repeats",
         "assignment_type",
         "turn_length",
+        # Beside turn_length on ChoreReadBase: the two describe one turn, so a row that
+        # shows one should never need a second read for the other.
+        "turns_follow_calendar",
         "repeat_interval",
         "weekdays",
         "created_at",
