@@ -1079,6 +1079,21 @@ async def _record_extra_skips(
     return slots[-1]
 
 
+def _credited_user_id(chore: Chore, user: User, requested: int | None) -> int:
+    """Who the History credits for a completion or a skip. The caller may hand it to one of
+    the chore's current assignees, but not to an arbitrary user; crediting yourself is always
+    allowed (an unassigned chore, "Done as me", "Skip as me"). One rule for both paths, so the
+    two credit dialogs can never disagree about who may be named."""
+    if requested is None or requested == user.id:
+        return user.id
+    if not any(a.id == requested for a in chore.assignees):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A completion or skip can only be credited to the current user or an assignee",
+        )
+    return requested
+
+
 @router.post(
     "/{chore_id}/complete",
     response_model=CompletionRead,
@@ -1148,22 +1163,13 @@ async def complete_chore(
             status_code=status.HTTP_409_CONFLICT,
             detail="This chore has already been completed",
         )
-    # Who the History credits. The caller may hand a completion to one of the chore's
-    # assignees, but not to an arbitrary user (crediting yourself is always allowed,
-    # e.g. an unassigned chore or "Done as me").
-    completed_by_id = user.id
-    if payload is not None and payload.completed_by_user_id is not None:
-        completed_by_id = payload.completed_by_user_id
-        if completed_by_id != user.id and not any(a.id == completed_by_id for a in chore.assignees):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="A completion can only be credited to the current user or an assignee",
-            )
     return await _close_occurrence(
         session,
         chore,
         occ,
-        closed_by_id=completed_by_id,
+        closed_by_id=_credited_user_id(
+            chore, user, payload.completed_by_user_id if payload is not None else None
+        ),
         skipped=False,
         backdate=payload is not None and payload.backdate,
         conflict_detail="This chore has already been completed",
@@ -1178,7 +1184,8 @@ async def complete_chore(
         (
             status.HTTP_400_BAD_REQUEST,
             "The chore is unscheduled, so it is never due and there is nothing to skip, "
-            "or `count` asks for more occurrences than are due.",
+            "`count` asks for more occurrences than are due, or the skip is recorded "
+            "against somebody who is neither you nor one of the chore's assignees.",
         ),
         (
             status.HTTP_404_NOT_FOUND,
@@ -1201,10 +1208,14 @@ async def skip_chore(
     without recording any work. Ungated like completing, since every role that can complete a
     chore can decide not to do one.
 
-    Two things it deliberately is not. It takes no `completed_by_user_id`, because there is no
-    credit to hand out - a skip is always recorded against whoever pressed the button. And it
-    refuses an unscheduled chore (400): those are never due, so there is no deadline to move
-    past and nothing to skip. That refusal is also what keeps "every skipped row belongs to a
+    An optional `completed_by_user_id` records the skip against one of the chore's assignees
+    instead of the caller, under the same rule as completing (`_credited_user_id`): skipping a
+    housemate's chore asks "Skip as {name}" or "Skip as me", so the per-chore stats can tell
+    "they skipped it" from "I skipped it for them". With no body the caller is recorded, which
+    is what a skip always did. Every row of a multi-slot skip carries the same person.
+
+    It refuses an unscheduled chore (400): those are never due, so there is no deadline to
+    move past and nothing to skip. That refusal is also what keeps "every skipped row belongs to a
     scheduled chore" true at the data layer rather than only in the UI, which is what lets the
     punctuality breakdown in stats.py host a skipped slice alongside its three due-date ones.
 
@@ -1239,7 +1250,9 @@ async def skip_chore(
         session,
         chore,
         occ,
-        closed_by_id=user.id,
+        closed_by_id=_credited_user_id(
+            chore, user, payload.completed_by_user_id if payload is not None else None
+        ),
         skipped=True,
         # Explicit rather than defaulted, so the decision is greppable: a skip records no
         # work, so there is nothing to date on a due day and no "I did it on Friday" to tell

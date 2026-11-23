@@ -76,9 +76,10 @@ mint one.
 
 `CurrentUser` keeps its exact meaning: a session, by cookie or bearer. `ApiUser` accepts a
 session **or** an access token, and carries the fourth OpenAPI security scheme, `apiToken`. It
-is on exactly 22 operations — the due and unscheduled views, statistics, the household log,
-the three household reads, and all of tags, chores and completions, writes included. The
-closed set lives in `tests/test_openapi_security.py`, read off the generated document.
+is on exactly 24 operations — the due and unscheduled views, statistics (page-wide and per
+chore), the household log, the three household reads, and all of tags, chores and
+completions, writes included. The closed set lives in `tests/test_openapi_security.py`, read
+off the generated document.
 
 An allowlist rather than a denylist because it fails safe: a route added later is session-only
 until somebody deliberately opens it. Note the line is *not* "reads only" — a token may create

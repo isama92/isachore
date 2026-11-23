@@ -108,9 +108,15 @@ class SkipChoreRequest(BaseModel):
     Omitted, or None, skips every occurrence that is due by today, so a client that sends no
     body gets the same landing spot a skip always had. A number may not exceed the chore's
     `due_count` (refused with a 400, since that depends on the chore rather than on the
-    request), except that a chore with nothing due yet still accepts a single skip."""
+    request), except that a chore with nothing due yet still accepts a single skip.
+
+    `completed_by_user_id` records the skip against another member instead of the caller, so
+    the per-chore stats show who gave it up. Same rule as `CompleteChoreRequest`: it must be
+    the caller or one of the chore's current assignees (400 otherwise). Omitted or None
+    records the caller."""
 
     count: int | None = Field(default=None, ge=1)
+    completed_by_user_id: int | None = None
 
 
 class CompletionRead(BaseModel):

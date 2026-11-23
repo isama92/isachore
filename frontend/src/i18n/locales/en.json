@@ -203,6 +203,12 @@
       "doneAsMe": "Done as me",
       "doneAs": "Done as {{name}}"
     },
+    "creditSkip": {
+      "title": "Skip “{{title}}”?",
+      "body": "This chore is assigned to {{names}}. Who should the History record this skip against?",
+      "skipAsMe": "Skip as me",
+      "skipAs": "Skip as {{name}}"
+    },
     "completed": "Chore marked done",
     "backdate": {
       "title": "When did you do “{{title}}”?",
@@ -371,6 +377,20 @@
     "mostSkipped": {
       "title": "Most skipped chores",
       "none": "Nothing was skipped."
+    },
+    "perChore": {
+      "title": "Per chore",
+      "label": "Chore",
+      "placeholder": "Choose a chore…",
+      "search": "Search chores…",
+      "noOptions": "No chores found.",
+      "hint": "Pick a chore to see who completed and who skipped it.",
+      "people": "Completed and skipped per person",
+      "timeline": "Over time",
+      "done": "Completed",
+      "skipped": "Skipped",
+      "others": "Others",
+      "noActivity": "Nobody completed or skipped this chore in this period."
     }
   },
   "logs": {

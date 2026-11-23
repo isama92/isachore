@@ -805,3 +805,131 @@ async def test_a_multi_skip_passes_over_a_slot_the_chore_already_closed(
     # -7, -6 and -4 are newly skipped; -5 is the row that was already there.
     assert _days(occurrences) == [-7, -6, -5, -4, -3]
     assert occurrences[-1].status == OccurrenceStatus.open
+
+
+# --- "Skip as ...": recording a skip against an assignee ----------------------
+
+
+async def _bens_chore(
+    make_user: MakeUser, make_household: MakeHousehold, make_chore: MakeChore, **kwargs: object
+) -> tuple[User, User, User, Chore]:
+    """Ben holds a daily chore Ava may skip; Cleo is a housemate who is not in its pool."""
+    ava = await make_user(email="ava@example.com", first_name="Ava")
+    ben = await make_user(email="ben@example.com", first_name="Ben")
+    cleo = await make_user(email="cleo@example.com", first_name="Cleo")
+    household = await make_household(members=[ava, ben, cleo])
+    chore = await make_chore(
+        household=household,
+        repeats=RepeatPeriod.daily,
+        assignment_type=AssignmentType.alphabetical,
+        assignees=[ava, ben],
+        current_assignee=ben,
+        **kwargs,
+    )
+    return ava, ben, cleo, chore
+
+
+async def test_skip_can_be_recorded_against_an_assignee(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    ava, ben, _, chore = await _bens_chore(
+        make_user, make_household, make_chore, start_date=NOW.date()
+    )
+    client = await auth_client(ava)
+
+    resp = await client.post(
+        f"/api/v1/chores/{chore.id}/skip", json={"completed_by_user_id": ben.id}
+    )
+    assert resp.status_code == 201
+    assert resp.json()["completed_by_user_id"] == ben.id
+
+    closed = next(
+        o for o in await _occurrences(db_session, chore.id) if o.status == OccurrenceStatus.done
+    )
+    assert closed.skipped is True
+    assert closed.completed_by_user_id == ben.id
+    # Crediting the skip moves nobody: the turn rule is the same as for any skip.
+    assert await _open_assignee(db_session, chore.id) == ben.id
+
+
+async def test_skip_explicitly_recorded_against_the_caller(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    ava, _, _, chore = await _bens_chore(
+        make_user, make_household, make_chore, start_date=NOW.date()
+    )
+    client = await auth_client(ava)
+
+    resp = await client.post(
+        f"/api/v1/chores/{chore.id}/skip", json={"completed_by_user_id": ava.id}
+    )
+    assert resp.status_code == 201
+    assert resp.json()["completed_by_user_id"] == ava.id
+
+
+async def test_skip_as_the_caller_needs_no_place_in_the_pool(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    """Naming yourself is always allowed, as "Skip as me" is, even off the pool. Without this
+    the non-assignee refusal below could be satisfied by refusing every explicit id."""
+    _, _, cleo, chore = await _bens_chore(
+        make_user, make_household, make_chore, start_date=NOW.date()
+    )
+    client = await auth_client(cleo)
+
+    resp = await client.post(
+        f"/api/v1/chores/{chore.id}/skip", json={"completed_by_user_id": cleo.id}
+    )
+    assert resp.status_code == 201
+    assert resp.json()["completed_by_user_id"] == cleo.id
+
+
+async def test_skip_recorded_against_a_non_assignee_is_refused_and_writes_nothing(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    ava, _, cleo, chore = await _bens_chore(
+        make_user, make_household, make_chore, start_date=NOW.date()
+    )
+    client = await auth_client(ava)
+
+    resp = await client.post(
+        f"/api/v1/chores/{chore.id}/skip", json={"completed_by_user_id": cleo.id}
+    )
+    assert resp.status_code == 400
+    occurrences = await _occurrences(db_session, chore.id)
+    assert [o.status for o in occurrences] == [OccurrenceStatus.open]
+
+
+async def test_a_multi_skip_records_every_row_against_the_chosen_person(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    ava, ben, _, chore = await _bens_chore(
+        make_user, make_household, make_chore, start_date=NOW.date() - timedelta(days=7)
+    )
+    client = await auth_client(ava)
+
+    resp = await client.post(
+        f"/api/v1/chores/{chore.id}/skip", json={"count": 3, "completed_by_user_id": ben.id}
+    )
+    assert resp.status_code == 201
+    skipped_rows = [o for o in await _occurrences(db_session, chore.id) if o.skipped]
+    assert len(skipped_rows) == 3
+    assert all(o.completed_by_user_id == ben.id for o in skipped_rows)

@@ -68,6 +68,9 @@ export const endpoints = {
   // (households + members) are reused from completions.filters, so there is no
   // separate stats/filters path.
   stats: `${V1}/stats`,
+  // The per-chore charts: the chore picker's options, and one chore's figures.
+  statsChores: `${V1}/stats/chores`,
+  statsChore: (id: Id) => `${V1}/stats/chores/${id}`,
 
   // The household activity log for the Logs page (owner-only, server-paginated). Its filter
   // options come from completions.filters too, narrowed client-side to owned households, so
