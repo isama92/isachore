@@ -152,6 +152,14 @@ its `Statistics.tsx` call site, so a stock overwrite cannot reach `main` — but
 failure whose cause is several steps from the command that caused it. Reflexively hitting `y`
 here costs an afternoon.
 
+### Never build a theme colour's name at runtime
+
+Tailwind v4 emits a `--color-*` theme variable only when its name appears written out somewhere
+in the scanned source. `` `var(--color-chart-${n})` `` therefore resolves to nothing for every
+`n` no file spells out, and recharts draws that series black, with no error and no failing unit
+test (jsdom renders no chart). Keep the full names in a literal list, as `CHART_COLOURS` in
+`lib/choreStats.ts` does for `--chart-1..10`.
+
 ## Theme
 
 `ThemeProvider` + `useTheme()` in `frontend/src/theme/` (context/provider/hook split, same rule as
