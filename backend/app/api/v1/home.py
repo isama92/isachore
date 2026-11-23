@@ -6,13 +6,14 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import ApiUser, SessionDep
 from app.core import clock
-from app.core.chores import days_until_due, due_status, local_day_bounds
+from app.core.chores import days_until_due, due_slots, due_status, local_day_bounds
 from app.core.households import (
     assignee_visibility,
     chore_scope,
     household_zone,
     zones_in_scope,
 )
+from app.core.occurrences import rule_for
 from app.models import Chore, ChoreOccurrence, OccurrenceStatus, RepeatPeriod
 from app.schemas import DueChoreRead, HomeRead, ProgressRead
 from app.schemas.chore import ChoreHouseholdRead
@@ -85,7 +86,8 @@ async def get_home(
     for occ in occurrences:
         # The household is already selectinloaded by the query above, so the zone costs no
         # extra query.
-        days = days_until_due(occ.scheduled_for, now, household_zone(occ.chore.household.timezone))
+        tz = household_zone(occ.chore.household.timezone)
+        days = days_until_due(occ.scheduled_for, now, tz)
         if days <= 0:
             pending_ids.add(occ.chore_id)
         items.append(
@@ -98,6 +100,7 @@ async def get_home(
                 next_due=occ.scheduled_for,
                 days_until_due=days,
                 status=due_status(days),
+                due_count=len(due_slots(occ.scheduled_for, now, rule_for(occ.chore), tz)),
                 # No extra query: the chore is already selectinloaded. Not free of bytes,
                 # though - that eager load pulls every column including description, so the
                 # HTML still crosses from Postgres to the app even though it never reaches the

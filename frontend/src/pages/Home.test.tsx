@@ -748,7 +748,8 @@ describe('description dialog', () => {
     })
 
     it('shows the error and keeps the row (no refetch) when the skip fails', async () => {
-      const fetchMock = stub({ status: 400, body: { detail: 'nothing to skip' } })
+      // A server failure says nothing about the page being stale, so nothing is reloaded.
+      const fetchMock = stub({ status: 500, body: { detail: 'server exploded' } })
       const user = userEvent.setup({ pointerEventsCheck: 0 })
       renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
 
@@ -756,9 +757,68 @@ describe('description dialog', () => {
       const dialog = await screen.findByRole('alertdialog')
       await user.click(within(dialog).getByRole('button', { name: 'Skip it' }))
 
-      expect(await screen.findByText('nothing to skip')).toBeInTheDocument()
+      expect(await screen.findByText('server exploded')).toBeInTheDocument()
       expect(screen.getByText('Do the dishes')).toBeInTheDocument()
       expect(homeGets(fetchMock).length).toBe(1)
+    })
+
+    it.each([400, 409])(
+      'reloads the view after a %i, keeping the error, so a stale row is not retried',
+      async (status) => {
+        // The stub's second Home answer is the server's current view: the chore is gone,
+        // e.g. a housemate completed it while the dialog was open.
+        const fetchMock = stub({ status, body: { detail: 'out of date' } })
+        const user = userEvent.setup({ pointerEventsCheck: 0 })
+        renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+        await user.click(await screen.findByRole('button', { name: /^Skip: .*Do the dishes/ }))
+        const dialog = await screen.findByRole('alertdialog')
+        await user.click(within(dialog).getByRole('button', { name: 'Skip it' }))
+
+        expect(await screen.findByText('out of date')).toBeInTheDocument()
+        await waitFor(() => expect(homeGets(fetchMock).length).toBe(2))
+        await waitFor(() => expect(screen.queryByText('Do the dishes')).not.toBeInTheDocument())
+        // The refetch does not wipe the message explaining why nothing happened.
+        expect(screen.getByText('out of date')).toBeInTheDocument()
+      },
+    )
+
+    it.each([
+      ['Just 1', 'Skip 1 day', JSON.stringify({ count: 1 })],
+      ['All until today (5)', 'Skip 5 days', JSON.stringify({ count: 5 })],
+    ])('with several due, choosing "%s" posts the matching body', async (option, confirm, body) => {
+      const fetchMock = mockFetch([
+        { path: FILTERS, method: 'GET', body: SOLO_OPTIONS },
+        {
+          path: HOME,
+          method: 'GET',
+          body: homeBody(0, 1, [
+            makeDueChore({
+              id: 7,
+              title: 'Do the dishes',
+              repeats: 'daily',
+              status: 'overdue',
+              days_until_due: -4,
+              due_count: 5,
+            }),
+          ]),
+        },
+        { path: SKIP, method: 'POST', status: 201, body: {} },
+      ])
+      const user = userEvent.setup({ pointerEventsCheck: 0 })
+      renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+      await user.click(await screen.findByRole('button', { name: /^Skip: .*Do the dishes/ }))
+      const dialog = await screen.findByRole('alertdialog')
+      await user.click(within(dialog).getByRole('radio', { name: option }))
+      await user.click(within(dialog).getByRole('button', { name: confirm }))
+
+      const post = await waitFor(() =>
+        fetchMock.mock.calls.find(
+          ([url, init]) => String(url).includes('/api/v1/chores/7/skip') && init?.method === 'POST',
+        )!,
+      )
+      expect(post[1]?.body).toBe(body)
     })
 
     it('disables both row actions while the row animates out', async () => {

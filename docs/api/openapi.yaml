@@ -2698,6 +2698,12 @@ paths:
         and Home only ever surfaces overdue/today/soon, so a pushed-out chore simply leaves the
         view. Bounding it would need a notion of "too early" that the completion path does not
         have; if that is ever wanted, both paths should get it together.
+
+        By default it skips every occurrence that is due by today, one skipped history row each,
+        and the chore reopens at its next future slot. An optional `count` skips only that many of
+        them, so a chore ignored for a week can be moved on by a day; it may not exceed the number
+        due (400), checked under the row lock in `_close_occurrence`. However many slots it spans,
+        the assignee is decided once (see `_close_occurrence`).
       operationId: skip_chore_api_v1_chores__chore_id__skip_post
       security:
         - sessionCookie: []
@@ -2710,6 +2716,14 @@ paths:
           schema:
             type: integer
             title: Chore Id
+      requestBody:
+        content:
+          application/json:
+            schema:
+              anyOf:
+                - $ref: '#/components/schemas/SkipChoreRequest'
+                - type: 'null'
+              title: Payload
       responses:
         '201':
           description: Successful Response
@@ -2718,7 +2732,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/CompletionRead'
         '400':
-          description: The chore is unscheduled, so it is never due and there is nothing to skip.
+          description: The chore is unscheduled, so it is never due and there is nothing to skip, or `count` asks for more occurrences than are due.
           content:
             application/json:
               schema:
@@ -4821,6 +4835,9 @@ components:
           title: Days Until Due
         status:
           $ref: '#/components/schemas/DueStatus'
+        due_count:
+          type: integer
+          title: Due Count
         has_description:
           type: boolean
           title: Has Description
@@ -4841,6 +4858,7 @@ components:
         - next_due
         - days_until_due
         - status
+        - due_count
         - has_description
         - household
         - assignees
@@ -5877,6 +5895,25 @@ components:
       required:
         - require_confirmation
       title: ServerSettingsUpdate
+    SkipChoreRequest:
+      properties:
+        count:
+          anyOf:
+            - type: integer
+              minimum: 1
+            - type: 'null'
+          title: Count
+      type: object
+      title: SkipChoreRequest
+      description: |-
+        Optional body for POST /chores/{id}/skip. `count` is how many due occurrences to skip,
+        starting with the open one; each becomes its own skipped history row, and the chore
+        reopens one slot after the last of them.
+
+        Omitted, or None, skips every occurrence that is due by today, so a client that sends no
+        body gets the same landing spot a skip always had. A number may not exceed the chore's
+        `due_count` (refused with a 400, since that depends on the chore rather than on the
+        request), except that a chore with nothing due yet still accepts a single skip.
     SkippedChoreStat:
       properties:
         chore_id:

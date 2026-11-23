@@ -90,9 +90,12 @@ async def test_skip_closes_the_occurrence_and_advances(
     assert body["days_until_due"] == 1
     assert body["status"] == "soon"
 
+    # One skipped row per due slot (two days ago, yesterday, today), then the successor.
     occurrences = await _occurrences(db_session, chore.id)
-    assert len(occurrences) == 2
-    closed, successor = occurrences
+    assert len(occurrences) == 4
+    *skipped_rows, successor = occurrences
+    assert all(o.status == OccurrenceStatus.done and o.skipped for o in skipped_rows)
+    closed = skipped_rows[0]
     assert closed.status == OccurrenceStatus.done
     assert closed.skipped is True
     assert closed.completed_by_user_id == user.id
@@ -484,3 +487,321 @@ async def test_skip_by_someone_other_than_the_assignee(
     assert closed.completed_by_user_id == ava.id  # recorded against whoever pressed skip
     assert closed.assignee_id == ben.id  # ...on the occurrence that was Ben's
     assert await _open_assignee(db_session, chore.id) == ben.id  # and still is
+
+
+# --- skipping several due occurrences ---------------------------------------
+
+
+async def _week_ignored_daily(
+    make_user: MakeUser, make_household: MakeHousehold, make_chore: MakeChore, **kwargs: object
+) -> tuple[User, Chore]:
+    """A daily chore last due a week ago: eight slots are due, the 7th day back through today."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(
+        household=household,
+        title="Dishes",
+        start_date=NOW.date() - timedelta(days=7),
+        repeats=RepeatPeriod.daily,
+        **kwargs,
+    )
+    return user, chore
+
+
+def _days(occurrences: list[ChoreOccurrence]) -> list[int]:
+    """Each row's slot as days from today (negative = past), which reads better than dates."""
+    return [(o.scheduled_for.astimezone(UTC).date() - NOW.date()).days for o in occurrences]
+
+
+async def test_home_reports_how_many_occurrences_are_due(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    week = await make_chore(
+        household=household,
+        title="Week",
+        start_date=NOW.date() - timedelta(days=7),
+        repeats=RepeatPeriod.daily,
+    )
+    today = await make_chore(
+        household=household, title="Today", start_date=NOW.date(), repeats=RepeatPeriod.daily
+    )
+    later = await make_chore(
+        household=household,
+        title="Later",
+        start_date=NOW.date() + timedelta(days=3),
+        repeats=RepeatPeriod.daily,
+    )
+    client = await auth_client(user)
+
+    items = {i["id"]: i for i in (await client.get("/api/v1/home")).json()["items"]}
+    assert items[week.id]["due_count"] == 8
+    assert items[today.id]["due_count"] == 1
+    assert items[later.id]["due_count"] == 0
+
+
+async def test_skip_count_one_moves_a_week_ignored_chore_on_by_a_single_day(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    user, chore = await _week_ignored_daily(make_user, make_household, make_chore)
+    client = await auth_client(user)
+
+    resp = await client.post(f"/api/v1/chores/{chore.id}/skip", json={"count": 1})
+    assert resp.status_code == 201
+    # Still overdue, now by six days: the next missed slot, not tomorrow.
+    assert resp.json()["days_until_due"] == -6
+    assert resp.json()["status"] == "overdue"
+
+    occurrences = await _occurrences(db_session, chore.id)
+    assert _days(occurrences) == [-7, -6]
+    assert [o.skipped for o in occurrences] == [True, False]
+
+
+async def test_skip_count_closes_that_many_slots_one_row_each(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    user, chore = await _week_ignored_daily(make_user, make_household, make_chore)
+    client = await auth_client(user)
+
+    resp = await client.post(f"/api/v1/chores/{chore.id}/skip", json={"count": 3})
+    assert resp.status_code == 201
+    body = resp.json()
+    # The echo describes the first row closed, and next_due the successor.
+    assert body["scheduled_for"].startswith((NOW.date() - timedelta(days=7)).isoformat())
+    assert body["days_until_due"] == -4
+
+    occurrences = await _occurrences(db_session, chore.id)
+    assert _days(occurrences) == [-7, -6, -5, -4]
+    skipped_rows = occurrences[:3]
+    assert all(o.status == OccurrenceStatus.done and o.skipped for o in skipped_rows)
+    assert all(o.completed_by_user_id == user.id and o.title == "Dishes" for o in skipped_rows)
+    assert all(o.completed_timezone == skipped_rows[0].completed_timezone for o in skipped_rows)
+    assert occurrences[3].status == OccurrenceStatus.open
+
+
+async def test_skip_count_equal_to_the_due_count_lands_where_a_bare_skip_does(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    user, chore = await _week_ignored_daily(make_user, make_household, make_chore)
+    client = await auth_client(user)
+
+    resp = await client.post(f"/api/v1/chores/{chore.id}/skip", json={"count": 8})
+    assert resp.status_code == 201
+    assert resp.json()["days_until_due"] == 1
+    assert _days(await _occurrences(db_session, chore.id)) == [*range(-7, 1), 1]
+
+
+async def test_bare_skip_and_null_count_skip_every_due_slot(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    user, chore = await _week_ignored_daily(make_user, make_household, make_chore)
+    client = await auth_client(user)
+
+    resp = await client.post(f"/api/v1/chores/{chore.id}/skip", json={"count": None})
+    assert resp.status_code == 201
+    occurrences = await _occurrences(db_session, chore.id)
+    # Eight skipped rows, the 7th day back through today, and tomorrow open.
+    assert _days(occurrences) == [*range(-7, 1), 1]
+    assert [o.skipped for o in occurrences] == [True] * 8 + [False]
+
+
+async def test_skipping_all_of_a_weekly_chore_lands_next_week(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    """The weekly case: ignored for six weeks, "all" lands on the next slot, one row per
+    missed week (seven, counting the one six weeks ago and today's)."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(
+        household=household,
+        start_date=NOW.date() - timedelta(weeks=6),
+        repeats=RepeatPeriod.weekly,
+    )
+    client = await auth_client(user)
+
+    resp = await client.post(f"/api/v1/chores/{chore.id}/skip")
+    assert resp.status_code == 201
+    assert resp.json()["days_until_due"] == 7
+    occurrences = await _occurrences(db_session, chore.id)
+    assert _days(occurrences) == [-42, -35, -28, -21, -14, -7, 0, 7]
+
+
+async def test_skip_count_above_the_due_count_is_refused_and_writes_nothing(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    user, chore = await _week_ignored_daily(make_user, make_household, make_chore)
+    client = await auth_client(user)
+
+    resp = await client.post(f"/api/v1/chores/{chore.id}/skip", json={"count": 9})
+    assert resp.status_code == 400
+    assert resp.json()["detail"].endswith("and this chore has 8")
+    occurrences = await _occurrences(db_session, chore.id)
+    assert len(occurrences) == 1
+    await db_session.refresh(occurrences[0])
+    assert occurrences[0].status == OccurrenceStatus.open
+
+
+async def test_skip_count_below_one_is_a_validation_error(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    user, chore = await _week_ignored_daily(make_user, make_household, make_chore)
+    client = await auth_client(user)
+    resp = await client.post(f"/api/v1/chores/{chore.id}/skip", json={"count": 0})
+    assert resp.status_code == 422
+
+
+async def test_a_not_yet_due_chore_skips_one_step_but_no_more(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    """Nothing is due, yet a single skip still pushes the chore a step (the endpoint's
+    documented latitude). The count is what may not reach into the future."""
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(
+        household=household,
+        start_date=NOW.date() + timedelta(days=2),
+        repeats=RepeatPeriod.daily,
+    )
+    client = await auth_client(user)
+
+    two = await client.post(f"/api/v1/chores/{chore.id}/skip", json={"count": 2})
+    assert two.status_code == 400
+    # Not "this chore has 1": the one allowed step is not a due occurrence.
+    assert two.json()["detail"] == "Nothing is due yet, so only one occurrence can be skipped"
+    one = await client.post(f"/api/v1/chores/{chore.id}/skip", json={"count": 1})
+    assert one.status_code == 201
+    assert _days(await _occurrences(db_session, chore.id)) == [2, 3]
+
+
+async def test_skip_with_a_count_still_refuses_an_unscheduled_chore(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, repeats=RepeatPeriod.manual)
+    client = await auth_client(user)
+    resp = await client.post(f"/api/v1/chores/{chore.id}/skip", json={"count": 1})
+    assert resp.status_code == 400
+    assert "unscheduled" in resp.json()["detail"]
+
+
+async def test_a_multi_skip_keeps_the_chore_with_whoever_had_it(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    """Counting completions, a skip never spends a turn however many slots it spans: Ava keeps
+    the chore, and every skipped row names her as the one who was on the hook."""
+    ava = await make_user(email="ava@example.com", first_name="Ava")
+    ben = await make_user(email="ben@example.com", first_name="Ben")
+    household = await make_household(members=[ava, ben])
+    chore = await make_chore(
+        household=household,
+        start_date=NOW.date() - timedelta(days=7),
+        repeats=RepeatPeriod.daily,
+        assignment_type=AssignmentType.alphabetical,
+        assignees=[ava, ben],
+        current_assignee=ava,
+    )
+    client = await auth_client(ben)
+
+    resp = await client.post(f"/api/v1/chores/{chore.id}/skip", json={"count": 5})
+    assert resp.status_code == 201
+    occurrences = await _occurrences(db_session, chore.id)
+    assert [o.assignee_id for o in occurrences] == [ava.id] * 6
+    # Recorded against whoever pressed the button, as a single skip is.
+    assert all(o.completed_by_user_id == ben.id for o in occurrences[:5])
+
+
+async def test_undo_after_a_multi_skip_reopens_only_the_last_slot(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    user, chore = await _week_ignored_daily(make_user, make_household, make_chore)
+    client = await auth_client(user)
+
+    resp = await client.post(f"/api/v1/chores/{chore.id}/skip", json={"count": 3})
+    assert resp.status_code == 201
+    last_skipped = (await _occurrences(db_session, chore.id))[2]
+
+    assert (await client.delete(f"/api/v1/completions/{last_skipped.id}")).status_code == 204
+    # Fresh objects: the undo changed rows this session already holds.
+    db_session.expunge_all()
+    occurrences = await _occurrences(db_session, chore.id)
+    assert _days(occurrences) == [-7, -6, -5]
+    assert [o.status for o in occurrences] == [
+        OccurrenceStatus.done,
+        OccurrenceStatus.done,
+        OccurrenceStatus.open,
+    ]
+
+
+async def test_a_multi_skip_passes_over_a_slot_the_chore_already_closed(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    """An open slot re-seeded into the past can sit behind a slot the chore already has a done
+    row for. That slot is passed over rather than inserted twice, which would be a 409 that no
+    retry clears. (The done row is built after the open one, which undo could not cope with,
+    but nothing here undoes.)"""
+    user, chore = await _week_ignored_daily(make_user, make_household, make_chore)
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=TODAY_START - timedelta(days=5),
+        status=OccurrenceStatus.done,
+    )
+    client = await auth_client(user)
+
+    resp = await client.post(f"/api/v1/chores/{chore.id}/skip", json={"count": 4})
+    assert resp.status_code == 201
+    occurrences = await _occurrences(db_session, chore.id)
+    # -7, -6 and -4 are newly skipped; -5 is the row that was already there.
+    assert _days(occurrences) == [-7, -6, -5, -4, -3]
+    assert occurrences[-1].status == OccurrenceStatus.open

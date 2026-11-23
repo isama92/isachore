@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.chores import DueStatus
 from app.models import RepeatPeriod
@@ -23,6 +23,11 @@ class DueChoreRead(BaseModel):
     next_due: datetime
     days_until_due: int  # negative = overdue, 0 = today, positive = upcoming
     status: DueStatus
+    # How many occurrences are due by today: the open one plus every missed slot after it
+    # (`due_slots`). 0 for an upcoming chore, 1 for one due today or overdue by a single slot.
+    # The skip dialog offers "just one, all of them, or a custom number" only above 1, and
+    # this is also the most `POST /chores/{id}/skip` accepts as a `count`.
+    due_count: int
     # Whether the chore carries written instructions, NOT the instructions themselves: the row
     # only needs it to decide whether to offer the marker icon that opens the description
     # dialog, which fetches the chore itself on open. Sending the HTML here instead would put
@@ -93,6 +98,19 @@ class CompleteChoreRequest(BaseModel):
 
     completed_by_user_id: int | None = None
     backdate: bool = False
+
+
+class SkipChoreRequest(BaseModel):
+    """Optional body for POST /chores/{id}/skip. `count` is how many due occurrences to skip,
+    starting with the open one; each becomes its own skipped history row, and the chore
+    reopens one slot after the last of them.
+
+    Omitted, or None, skips every occurrence that is due by today, so a client that sends no
+    body gets the same landing spot a skip always had. A number may not exceed the chore's
+    `due_count` (refused with a 400, since that depends on the chore rather than on the
+    request), except that a chore with nothing due yet still accepts a single skip."""
+
+    count: int | None = Field(default=None, ge=1)
 
 
 class CompletionRead(BaseModel):

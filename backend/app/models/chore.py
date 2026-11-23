@@ -90,7 +90,7 @@ class Chore(Base):
     # person (the strategy picks who). 1 = hand off every completion; "take turns" in
     # the UI sets a larger value. Only meaningful for the auto-rotating strategies.
     turn_length: Mapped[int] = mapped_column(default=1, server_default="1")
-    # "Ignore skipped" in the UI: count a turn in *grid slots from `start_date`* instead of
+    # "Skips use up the turn" in the UI: count a turn in *grid slots from `start_date`* instead of
     # in completions, so a 7-slot turn on a daily chore started on a Monday hands over every
     # Monday however many days were skipped or swallowed by a late completion. False keeps
     # the completion-counted turn, which is every chore predating this column - hence no

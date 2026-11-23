@@ -181,7 +181,7 @@ class ChoreCreate(BaseModel):
     assignment_type: AssignmentType
     # >= 1; the "take turns" UI uses >= 2, 1 means hand off every completion.
     turn_length: int = Field(default=1, ge=1)
-    # "Ignore skipped": count turns in grid slots from `start_date` rather than completions.
+    # "Skips use up the turn": count turns in grid slots from `start_date` rather than completions.
     # Forced to False where it means nothing (see `_turns_follow_calendar`).
     turns_follow_calendar: bool = False
     # How many periods between occurrences. Capped at core.chores.MAX_INTERVAL, which is
@@ -229,7 +229,7 @@ class ChoreUpdate(BaseModel):
     repeats: RepeatPeriod
     assignment_type: AssignmentType
     turn_length: int = Field(default=1, ge=1)
-    # "Ignore skipped": count turns in grid slots from `start_date` rather than completions.
+    # "Skips use up the turn": count turns in grid slots from `start_date` rather than completions.
     # Forced to False where it means nothing (see `_turns_follow_calendar`).
     turns_follow_calendar: bool = False
     repeat_interval: int = Field(default=1, ge=1, le=MAX_INTERVAL)
