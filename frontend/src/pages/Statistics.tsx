@@ -9,6 +9,7 @@ import { formatDate } from '../lib/chores'
 import { fullName } from '../lib/user'
 import type { HistoryFilterOptions, StatsData, StatsRange } from '../lib/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import ChoreStatsSection from '@/components/stats/ChoreStatsSection'
 import {
   ChartContainer,
   ChartLegend,
@@ -543,6 +544,14 @@ export default function Statistics() {
           </div>
         </div>
       )}
+
+      {/* Outside the `data` gate on purpose: it fetches on its own, and a failure of the
+          aggregate above should not take the per-chore charts down with it. */}
+      <ChoreStatsSection
+        range={range}
+        userId={filters.user_id}
+        householdId={filters.household_id}
+      />
     </main>
   )
 }

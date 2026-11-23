@@ -59,6 +59,8 @@ API_TOKEN_OPERATIONS = {
     ("GET", "/api/v1/home"),
     ("GET", "/api/v1/unscheduled"),
     ("GET", "/api/v1/stats"),
+    ("GET", "/api/v1/stats/chores"),
+    ("GET", "/api/v1/stats/chores/{chore_id}"),
     ("GET", "/api/v1/logs"),
     ("GET", "/api/v1/households"),
     ("GET", "/api/v1/households/{household_id}"),

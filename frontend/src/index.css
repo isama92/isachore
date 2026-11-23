@@ -221,6 +221,11 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+  --color-chart-7: var(--chart-7);
+  --color-chart-8: var(--chart-8);
+  --color-chart-9: var(--chart-9);
+  --color-chart-10: var(--chart-10);
   --color-stat-on-time: var(--stat-on-time);
   --color-stat-late: var(--stat-late);
   --color-stat-early: var(--stat-early);
@@ -280,7 +285,7 @@
 
   /* Statistics charts. --primary is the bar colour on the two ranking lists (per
      person, most skipped) and the completed series over time, so they track the
-     user's chosen accent. --chart-1..5 is the reserved categorical ramp for any
+     user's chosen accent. --chart-1..10 is the reserved categorical ramp for any
      future multi-series chart: fixed Catppuccin accents (independent of
      --primary) so those series stay mutually distinct whatever the accent. The
      punctuality colours mirror the --due-* pattern (green = on time, red = late,
@@ -305,6 +310,14 @@
   --chart-3: var(--ctp-peach);
   --chart-4: var(--ctp-mauve);
   --chart-5: var(--ctp-yellow);
+  /* 6..10 alternate warm and cool so neighbours in a stack stay apart, and avoid the
+     accents 1..5 already took. Several share a family with the punctuality colours (green,
+     maroon), which is fine: the two never appear in one chart. */
+  --chart-6: var(--ctp-pink);
+  --chart-7: var(--ctp-green);
+  --chart-8: var(--ctp-maroon);
+  --chart-9: var(--ctp-sapphire);
+  --chart-10: var(--ctp-lavender);
   --stat-on-time: var(--ctp-green);
   --stat-late: var(--ctp-red);
   --stat-early: var(--ctp-sky);

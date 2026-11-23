@@ -728,7 +728,7 @@ describe('description dialog', () => {
           ([url, init]) => String(url).includes('/api/v1/chores/7/skip') && init?.method === 'POST',
         )!,
       )
-      expect(post[1]?.body).toBeUndefined() // no credit to assign, so no body
+      expect(post[1]?.body).toBeUndefined() // my own chore and a single slot, so no body
       await waitFor(() => expect(screen.queryByText('Do the dishes')).not.toBeInTheDocument())
       expect(homeGets(fetchMock).length).toBe(2) // load + post-skip refetch
     })
@@ -819,6 +819,115 @@ describe('description dialog', () => {
         )!,
       )
       expect(post[1]?.body).toBe(body)
+    })
+
+    describe('“Skip as …” for another member’s chore', () => {
+      const ANNA = makeHouseholdMember({ id: 2, first_name: 'Anna', last_name: 'Aardvark' })
+      const ME = makeHouseholdMember({ id: 1, first_name: 'Me', last_name: 'Myself' })
+
+      function stubAssigned(assignees: (typeof ANNA)[], dueCount = 1) {
+        return mockFetch([
+          { path: FILTERS, method: 'GET', body: SOLO_OPTIONS },
+          {
+            path: HOME,
+            method: 'GET',
+            body: homeBody(0, 1, [
+              makeDueChore({
+                id: 7,
+                title: 'Do the dishes',
+                repeats: 'daily',
+                status: dueCount > 1 ? 'overdue' : 'today',
+                days_until_due: dueCount > 1 ? -(dueCount - 1) : 0,
+                due_count: dueCount,
+                assignees,
+              }),
+            ]),
+          },
+          { path: SKIP, method: 'POST', status: 201, body: {} },
+        ])
+      }
+
+      function skipPost(fetchMock: ReturnType<typeof mockFetch>) {
+        return fetchMock.mock.calls.find(
+          ([url, init]) => String(url).includes('/api/v1/chores/7/skip') && init?.method === 'POST',
+        )
+      }
+
+      async function confirmSkip(user: ReturnType<typeof userEvent.setup>) {
+        await user.click(await screen.findByRole('button', { name: /^Skip: .*Do the dishes/ }))
+        const dialog = await screen.findByRole('alertdialog')
+        await user.click(within(dialog).getByRole('button', { name: 'Skip it' }))
+      }
+
+      it('asks who skipped it after the confirmation and records the assignee', async () => {
+        const fetchMock = stubAssigned([ANNA])
+        const user = userEvent.setup({ pointerEventsCheck: 0 })
+        renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+        await confirmSkip(user)
+        const credit = await screen.findByRole('alertdialog')
+        expect(within(credit).getByRole('button', { name: 'Skip as me' })).toBeInTheDocument()
+        // Nothing is sent until somebody is named.
+        expect(skipPost(fetchMock)).toBeUndefined()
+
+        await user.click(within(credit).getByRole('button', { name: 'Skip as Anna Aardvark' }))
+        const post = await waitFor(() => skipPost(fetchMock)!)
+        expect(JSON.parse(String(post[1]?.body))).toEqual({ completed_by_user_id: 2 })
+      })
+
+      it('“Skip as me” sends no body', async () => {
+        const fetchMock = stubAssigned([ANNA])
+        const user = userEvent.setup({ pointerEventsCheck: 0 })
+        renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+        await confirmSkip(user)
+        const credit = await screen.findByRole('alertdialog')
+        await user.click(within(credit).getByRole('button', { name: 'Skip as me' }))
+        const post = await waitFor(() => skipPost(fetchMock)!)
+        expect(post[1]?.body).toBeUndefined()
+      })
+
+      it('carries the chosen count into the credited skip', async () => {
+        const fetchMock = stubAssigned([ANNA], 5)
+        const user = userEvent.setup({ pointerEventsCheck: 0 })
+        renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+        await user.click(await screen.findByRole('button', { name: /^Skip: .*Do the dishes/ }))
+        const dialog = await screen.findByRole('alertdialog')
+        await user.click(within(dialog).getByRole('radio', { name: 'Just 1' }))
+        await user.click(within(dialog).getByRole('button', { name: 'Skip 1 day' }))
+        const credit = await screen.findByRole('alertdialog')
+        await user.click(within(credit).getByRole('button', { name: 'Skip as Anna Aardvark' }))
+
+        const post = await waitFor(() => skipPost(fetchMock)!)
+        expect(JSON.parse(String(post[1]?.body))).toEqual({ count: 1, completed_by_user_id: 2 })
+      })
+
+      it('sends nothing when the credit question is cancelled', async () => {
+        const fetchMock = stubAssigned([ANNA])
+        const user = userEvent.setup({ pointerEventsCheck: 0 })
+        renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+        await confirmSkip(user)
+        const credit = await screen.findByRole('alertdialog')
+        await user.click(within(credit).getByRole('button', { name: 'Cancel' }))
+
+        await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+        expect(skipPost(fetchMock)).toBeUndefined()
+        expect(screen.getByText('Do the dishes')).toBeInTheDocument()
+      })
+
+      it('does not ask when I am one of the assignees', async () => {
+        // Assigned to somebody else as well, so only the "mine" clause keeps the dialog shut.
+        const fetchMock = stubAssigned([ANNA, ME])
+        const user = userEvent.setup({ pointerEventsCheck: 0 })
+        renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+        await confirmSkip(user)
+        const post = await waitFor(() => skipPost(fetchMock)!)
+        expect(post[1]?.body).toBeUndefined()
+        expect(screen.queryByRole('button', { name: 'Skip as me' })).not.toBeInTheDocument()
+      })
     })
 
     it('disables both row actions while the row animates out', async () => {

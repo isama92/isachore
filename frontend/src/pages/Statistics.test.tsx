@@ -36,6 +36,11 @@ function stubFetch(opts: {
     if (method === 'GET' && path.endsWith('/api/v1/stats')) {
       return jsonBody(opts.stats ?? makeStats(), opts.statsStatus ?? 200)
     }
+    // The per-chore section's picker, which fetches on mount; its own behaviour is covered in
+    // ChoreStatsSection.test.tsx.
+    if (method === 'GET' && path.endsWith('/api/v1/stats/chores')) {
+      return jsonBody([{ id: 4, title: 'Bins', household_id: 1, household_name: 'Flat' }])
+    }
     return jsonBody(undefined, 204)
   })
   vi.stubGlobal('fetch', fetchMock)
@@ -185,6 +190,41 @@ describe('Statistics', () => {
     await screen.findByText('80%')
     expect(screen.queryByRole('combobox', { name: 'Person' })).not.toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: 'Household' })).not.toBeInTheDocument()
+  })
+
+  it('offers the per-chore picker, empty, below the page-wide charts', async () => {
+    stubFetch({})
+    renderWithProviders(<Statistics />)
+
+    await screen.findByText('80%')
+    expect(screen.getByRole('heading', { name: 'Per chore' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Chore' })).toHaveTextContent('Choose a chore…')
+  })
+
+  it('passes the person filter on to the per-chore charts', async () => {
+    const fetchMock = stubFetch({
+      options: {
+        households: [{ id: 1, name: 'Test Household', timezone: 'UTC' }],
+        members: [
+          makeHouseholdMember({ id: 1, first_name: 'Me', last_name: 'Here' }),
+          makeHouseholdMember({ id: 2, first_name: 'Jo', last_name: 'Ng' }),
+        ],
+      },
+    })
+    renderWithProviders(<Statistics />)
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+
+    await screen.findByText('80%')
+    await user.click(await screen.findByRole('combobox', { name: 'Person' }))
+    await user.click(await screen.findByRole('option', { name: 'Jo Ng' }))
+    await user.click(screen.getByRole('combobox', { name: 'Chore' }))
+    await user.click(await screen.findByRole('option', { name: /Bins/ }))
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.map(([url]) => String(url)).find((u) => u.includes('/stats/chores/4')),
+      ).toContain('user_id=2'),
+    )
   })
 
   it('shows an error when loading fails', async () => {

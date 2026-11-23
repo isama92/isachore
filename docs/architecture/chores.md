@@ -243,6 +243,50 @@ What to keep straight:
 - **The dialog's unit follows the period only when it can.** "3 days" is true for a plain
   daily chore; every 2 days or a week pinned to Tue and Fri say "3 occurrences" instead.
 
+## Who a skip is recorded against ("Skip as …")
+
+`SkipChoreRequest.completed_by_user_id`. A skip used to be recorded against whoever pressed
+the button, full stop. Now Home asks, exactly when Done asks "who gets the credit?": skipping
+a chore assigned only to other people opens `CreditDialog` in `action="skip"` mode ("Skip as
+{name}" / "Skip as me"), after the count dialog. An unassigned chore, or one you are already
+an assignee of, is recorded against you without asking. Both paths share `creditsMe` on the
+frontend and `_credited_user_id` on the backend, so the two dialogs open in the same cases
+and accept the same people: yourself always, otherwise only a current assignee (400).
+
+What to keep straight:
+
+- **It changes who the row names, nothing else.** The turn rules read the assignee and the
+  done tally, never `completed_by_user_id` on a skipped row, so crediting a skip moves no turn.
+- **The row then belongs to that person, undo included.** `undo_completion` allows the person
+  the row names or an organiser, so whoever pressed "Skip as Ben" cannot undo it themselves
+  (and a helper no longer sees it on History). The same trade-off "Done as" already makes,
+  accepted rather than adding a "submitted by" column.
+- **Every row of a multi-slot skip names the same person**: `_record_extra_skips` copies it
+  from the first row.
+- **Only Home passes `skip`.** Unscheduled chores are never skipped, so their page never needs
+  the skip copy, which is why the keys live under `home.creditSkip` alone.
+- **What reads it:** the per-chore Statistics charts below, History, and the `user_id` filter
+  on `GET /stats` (which already filtered skips by `completed_by_user_id`).
+
+## Per-chore statistics
+
+`GET /stats/chores` (the picker) and `GET /stats/chores/{id}` (one chore's figures), shown by
+`components/stats/ChoreStatsSection.tsx` under the page-wide cards. Same deputy scope, range
+window and day/week bucketing as `GET /stats` (`_range_window`, `_bucket_keys` are shared), so
+the numbers add up with the rest of the page. Differences worth knowing:
+
+- **One chore is a target, not a filter**, so a chore out of scope or soft-deleted is a 404,
+  not an empty answer.
+- **`people` always includes the current assignees**, at zero if need be, so "never does it"
+  is visible, plus anyone else with a closure in the range. Unscheduled chores are mostly
+  unassigned, so theirs lists activity only.
+- **A closure with no completer** (a hard-deleted user) is in nobody's row; its skip still
+  counts in the bucket's `skipped`, which is why the frontend's empty state sums skips from the
+  buckets rather than from the people. Its *completion* shows nowhere, a known gap that unlike
+  `GET /stats` the per-chore figures do not total.
+- **Timeline colours follow the user id**, not the rank, using the reserved `--chart-1..10`
+  ramp; the eleventh person onwards folds into one "Others" series (`lib/choreStats.ts`).
+
 ## Backdating a completion
 
 `CompleteChoreRequest.backdate` — the chore somebody did and forgot to tick.

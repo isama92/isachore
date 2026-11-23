@@ -203,6 +203,12 @@
       "doneAsMe": "Fatto da me",
       "doneAs": "Fatto da {{name}}"
     },
+    "creditSkip": {
+      "title": "Saltare “{{title}}”?",
+      "body": "Questa faccenda è assegnata a {{names}}. A chi va attribuito il salto nella cronologia?",
+      "skipAsMe": "Saltato da me",
+      "skipAs": "Saltato da {{name}}"
+    },
     "completed": "Faccenda segnata come completata",
     "backdate": {
       "title": "Quando hai fatto “{{title}}”?",
@@ -371,6 +377,20 @@
     "mostSkipped": {
       "title": "Faccende più saltate",
       "none": "Nessuna faccenda saltata."
+    },
+    "perChore": {
+      "title": "Per faccenda",
+      "label": "Faccenda",
+      "placeholder": "Scegli una faccenda…",
+      "search": "Cerca faccende…",
+      "noOptions": "Nessuna faccenda trovata.",
+      "hint": "Scegli una faccenda per vedere chi l'ha completata e chi l'ha saltata.",
+      "people": "Completate e saltate per persona",
+      "timeline": "Nel tempo",
+      "done": "Completate",
+      "skipped": "Saltate",
+      "others": "Altri",
+      "noActivity": "Nessuno ha completato o saltato questa faccenda in questo periodo."
     }
   },
   "logs": {

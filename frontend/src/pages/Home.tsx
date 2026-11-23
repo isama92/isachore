@@ -57,8 +57,17 @@ export default function Home() {
   // non-null shape. Skipping always confirms, unlike completing: it moves the chore's
   // schedule on, so a mis-click has consequences a Done does not. Undoing it means finding
   // the row on History, which every role now reaches for their own closures - a recovery
-  // path rather than a reason to skip the dialog.
+  // path rather than a reason to skip the dialog. Not for a skip recorded "as" somebody
+  // else, though: like a Done credited to them, the row is theirs, so only they or an
+  // organiser can undo it (and a helper no longer sees it on History).
   const [skipFor, setSkipFor] = useState<DueChore | null>(null)
+  // The skip awaiting "who skipped it?" (null = closed): asked after the count, and only for a
+  // chore assigned to somebody else, exactly when completing asks "who gets the credit?".
+  // Carries the count for the same reason creditFor carries the backdate answer.
+  const [skipCreditFor, setSkipCreditFor] = useState<{
+    chore: DueChore
+    count: number | null
+  } | null>(null)
 
   const options = useFilterOptions()
   const [householdId, setHouseholdId] = useState('')
@@ -195,16 +204,20 @@ export default function Home() {
     )
   }
 
-  // No credit question for a skip: there is no work to attribute, so it is always recorded
-  // against whoever confirmed it. No toast either, unlike completing: a skip was just
-  // confirmed through a dialog, so the tap is already acknowledged.
+  // No toast, unlike completing: a skip was just confirmed through a dialog, so the tap is
+  // already acknowledged.
   //
-  // `count` null skips every due occurrence, which is the endpoint's default, so it sends no
-  // body; a number sends `{ count }`.
-  function skipChore(chore: DueChore, count: number | null) {
+  // Only the keys that carry a decision are sent: `count` null skips every due occurrence and
+  // an absent `completed_by_user_id` records the caller, both the endpoint's defaults, so the
+  // plain skip of your own chore still sends no body at all.
+  function skipChore(chore: DueChore, count: number | null, completedByUserId?: number) {
+    const body: { count?: number; completed_by_user_id?: number } = {}
+    if (count !== null) body.count = count
+    if (completedByUserId !== undefined) body.completed_by_user_id = completedByUserId
     closeChore(
       chore,
-      () => api.post(endpoints.chores.skip(chore.id), count === null ? undefined : { count }),
+      () =>
+        api.post(endpoints.chores.skip(chore.id), Object.keys(body).length > 0 ? body : undefined),
       t('home.skipError'),
     )
   }
@@ -221,9 +234,15 @@ export default function Home() {
     }
   }
 
-  function requestCredit(chore: DueChore, backdate: boolean) {
+  // Whether closing this chore needs no "who?" question: it is unassigned or already mine.
+  // Shared by Done and Skip, so the two dialogs open in exactly the same cases.
+  function creditsMe(chore: DueChore) {
     const mine = user ? chore.assignees.some((a) => a.id === user.id) : false
-    if (chore.assignees.length === 0 || mine) {
+    return chore.assignees.length === 0 || mine
+  }
+
+  function requestCredit(chore: DueChore, backdate: boolean) {
+    if (creditsMe(chore)) {
       completeChore(chore, { backdate })
     } else {
       setCreditFor({ chore, backdate })
@@ -242,10 +261,23 @@ export default function Home() {
     if (pending) completeChore(pending.chore, { completedByUserId, backdate: pending.backdate })
   }
 
+  // Skip asks "how many?" first, then "who skipped it?" for somebody else's chore, mirroring
+  // Done's "when?" then "who?".
   function confirmSkip(count: number | null) {
     const chore = skipFor
     setSkipFor(null)
-    if (chore) skipChore(chore, count)
+    if (!chore) return
+    if (creditsMe(chore)) {
+      skipChore(chore, count)
+    } else {
+      setSkipCreditFor({ chore, count })
+    }
+  }
+
+  function creditAndSkip(completedByUserId?: number) {
+    const pending = skipCreditFor
+    setSkipCreditFor(null)
+    if (pending) skipChore(pending.chore, pending.count, completedByUserId)
   }
 
   const left = data ? data.progress.total_today - data.progress.done_today : 0
@@ -393,6 +425,15 @@ export default function Home() {
       {/* Asks how many to skip when several occurrences are due, and is the plain "really
           skip this?" confirm otherwise. Controlled on skipFor, like its neighbours. */}
       <SkipDialog chore={skipFor} onClose={() => setSkipFor(null)} onConfirm={confirmSkip} />
+
+      {/* "Skip as …": the credit dialog in skip mode, chained after the count above. */}
+      <CreditDialog
+        group="home"
+        action="skip"
+        chore={skipCreditFor?.chore ?? null}
+        onClose={() => setSkipCreditFor(null)}
+        onConfirm={creditAndSkip}
+      />
 
       <DescriptionDialog chore={descriptionFor} onClose={() => setDescriptionFor(null)} />
     </main>

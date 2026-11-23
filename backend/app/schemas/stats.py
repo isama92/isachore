@@ -112,3 +112,56 @@ class StatsRead(BaseModel):
     punctuality: Punctuality
     per_person: list[PersonStat]
     most_skipped: list[SkippedChoreStat]
+
+
+class StatsChoreOption(BaseModel):
+    """One entry of the Statistics page's chore picker: an active chore in a household where
+    the caller is at least a deputy. `household_name` rides along for the same reason as on
+    `SkippedChoreStat`: two households can hold a chore with the same title."""
+
+    id: int
+    title: str
+    household_id: int
+    household_name: str
+
+
+class ChorePersonStat(BaseModel):
+    """One row of the per-chore chart: how often this person completed and skipped the chore
+    in the range. Current assignees are always present, at zero if need be, so "never does
+    it" is visible; anybody else appears once they have a closure in the range. A skip
+    counts against whoever it was recorded against (the "Skip as ..." choice)."""
+
+    user_id: int
+    first_name: str
+    last_name: str
+    done: int
+    skipped: int
+
+
+class UserCount(BaseModel):
+    """How many completions one person was credited with in one bucket."""
+
+    user_id: int
+    count: int
+
+
+class ChoreBucket(BaseModel):
+    """One point on the per-chore timeline. `bucket` is an ISO date (day, or a week's Monday),
+    as on `CompletionBucket`. `done` lists only the people with a completion in the bucket;
+    `skipped` counts every skip in it, whoever it was recorded against. Every bucket in the
+    range is present, so the stacked bars keep a continuous axis."""
+
+    bucket: str
+    done: list[UserCount]
+    skipped: int
+
+
+class ChoreStatsRead(BaseModel):
+    """Per-chore statistics: who completed and skipped one chore over the range, and when."""
+
+    chore_id: int
+    title: str
+    range: str
+    granularity: str
+    people: list[ChorePersonStat]
+    over_time: list[ChoreBucket]

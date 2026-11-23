@@ -1184,6 +1184,137 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/stats/chores:
+    get:
+      tags:
+        - stats
+      summary: List Stats Chores
+      description: |-
+        The chores the per-chore charts can be asked about: active (not soft-deleted) chores,
+        scheduled and unscheduled alike, in the households where the caller is at least a deputy,
+        the same scope as `GET /stats`. Optional `household_id` narrows to one of them; one the
+        caller cannot see just yields an empty list, as everywhere on this page.
+
+        Sorted by title, case-insensitively (see `most_skipped` for why `casefold`), then by
+        household name and id so two same-titled chores keep a stable order.
+      operationId: list_stats_chores_api_v1_stats_chores_get
+      security:
+        - sessionCookie: []
+        - bearerToken: []
+        - apiToken: []
+      parameters:
+        - name: household_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: integer
+                minimum: 1
+              - type: 'null'
+            title: Household Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StatsChoreOption'
+                title: Response List Stats Chores Api V1 Stats Chores Get
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/stats/chores/{chore_id}:
+    get:
+      tags:
+        - stats
+      summary: Get Chore Stats
+      description: |-
+        Who completed and who skipped one chore over the range, for the Statistics page's
+        per-chore charts: a total per person (`people`) and a per-bucket split (`over_time`).
+
+        Scoped like `GET /stats` (deputy or above), but a single chore is a *target* rather than a
+        filter, so one outside that scope, or soft-deleted, is a 404 rather than an empty answer.
+        The picker only ever offers chores from `GET /stats/chores`, so a miss means the page is
+        stale, and a helper cannot read a chore's numbers by guessing its id.
+
+        `range` and `granularity` follow `GET /stats` (same window, same daily/weekly buckets, a
+        closure bucketed in its own snapshotted zone), so a chore's figures add up with the page
+        around them. `user_id` narrows both outputs to that person's closures, the way `GET /stats`
+        narrows its completions.
+
+        `people` always holds the chore's current assignees, at zero if need be, plus anyone else
+        with a closure in the range: a former assignee, or somebody who did an unassigned chore.
+        A closure whose completer was hard-deleted (`completed_by_user_id` NULL) has nobody to
+        show, so it is in no person's row; its skip still counts in the bucket's `skipped`, which
+        is everybody's.
+      operationId: get_chore_stats_api_v1_stats_chores__chore_id__get
+      security:
+        - sessionCookie: []
+        - bearerToken: []
+        - apiToken: []
+      parameters:
+        - name: chore_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Chore Id
+        - name: range
+          in: query
+          required: false
+          schema:
+            enum:
+              - 7d
+              - 30d
+              - 90d
+            type: string
+            default: 30d
+            title: Range
+        - name: user_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: integer
+                minimum: 1
+              - type: 'null'
+            title: User Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChoreStatsRead'
+        '401':
+          description: 'No usable session: the cookie or bearer token is absent, expired, or belongs to a user who is no longer active.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '404':
+          description: No active chore with this id in a household where you are at least a deputy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/logs:
     get:
       tags:
@@ -2683,10 +2814,14 @@ paths:
         without recording any work. Ungated like completing, since every role that can complete a
         chore can decide not to do one.
 
-        Two things it deliberately is not. It takes no `completed_by_user_id`, because there is no
-        credit to hand out - a skip is always recorded against whoever pressed the button. And it
-        refuses an unscheduled chore (400): those are never due, so there is no deadline to move
-        past and nothing to skip. That refusal is also what keeps "every skipped row belongs to a
+        An optional `completed_by_user_id` records the skip against one of the chore's assignees
+        instead of the caller, under the same rule as completing (`_credited_user_id`): skipping a
+        housemate's chore asks "Skip as {name}" or "Skip as me", so the per-chore stats can tell
+        "they skipped it" from "I skipped it for them". With no body the caller is recorded, which
+        is what a skip always did. Every row of a multi-slot skip carries the same person.
+
+        It refuses an unscheduled chore (400): those are never due, so there is no deadline to
+        move past and nothing to skip. That refusal is also what keeps "every skipped row belongs to a
         scheduled chore" true at the data layer rather than only in the UI, which is what lets the
         punctuality breakdown in stats.py host a skipped slice alongside its three due-date ones.
 
@@ -2732,7 +2867,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/CompletionRead'
         '400':
-          description: The chore is unscheduled, so it is never due and there is nothing to skip, or `count` asks for more occurrences than are due.
+          description: The chore is unscheduled, so it is never due and there is nothing to skip, `count` asks for more occurrences than are due, or the skip is recorded against somebody who is neither you nor one of the chore's assignees.
           content:
             application/json:
               schema:
@@ -4315,6 +4450,30 @@ components:
       required:
         - file
       title: Body_upload_avatar_api_v1_profile_avatar_put
+    ChoreBucket:
+      properties:
+        bucket:
+          type: string
+          title: Bucket
+        done:
+          items:
+            $ref: '#/components/schemas/UserCount'
+          type: array
+          title: Done
+        skipped:
+          type: integer
+          title: Skipped
+      type: object
+      required:
+        - bucket
+        - done
+        - skipped
+      title: ChoreBucket
+      description: |-
+        One point on the per-chore timeline. `bucket` is an ISO date (day, or a week's Monday),
+        as on `CompletionBucket`. `done` lists only the people with a completion in the bucket;
+        `skipped` counts every skip in it, whoever it was recorded against. Every bucket in the
+        range is present, so the stacked bars keep a continuous axis.
     ChoreCreate:
       properties:
         household_id:
@@ -4505,6 +4664,36 @@ components:
 
         NULL is the only "no description" - `core.richtext` collapses visually-empty HTML on
         write - so this needs no emptiness check.
+    ChorePersonStat:
+      properties:
+        user_id:
+          type: integer
+          title: User Id
+        first_name:
+          type: string
+          title: First Name
+        last_name:
+          type: string
+          title: Last Name
+        done:
+          type: integer
+          title: Done
+        skipped:
+          type: integer
+          title: Skipped
+      type: object
+      required:
+        - user_id
+        - first_name
+        - last_name
+        - done
+        - skipped
+      title: ChorePersonStat
+      description: |-
+        One row of the per-chore chart: how often this person completed and skipped the chore
+        in the range. Current assignees are always present, at zero if need be, so "never does
+        it" is visible; anybody else appears once they have a closure in the range. A skip
+        counts against whoever it was recorded against (the "Skip as ..." choice).
     ChoreRead:
       properties:
         id:
@@ -4584,6 +4773,40 @@ components:
       description: |-
         A single chore: create, `GET /chores/{id}` and patch. Open to every role, since the
         description dialog on My Chores and Unscheduled fetches it.
+    ChoreStatsRead:
+      properties:
+        chore_id:
+          type: integer
+          title: Chore Id
+        title:
+          type: string
+          title: Title
+        range:
+          type: string
+          title: Range
+        granularity:
+          type: string
+          title: Granularity
+        people:
+          items:
+            $ref: '#/components/schemas/ChorePersonStat'
+          type: array
+          title: People
+        over_time:
+          items:
+            $ref: '#/components/schemas/ChoreBucket'
+          type: array
+          title: Over Time
+      type: object
+      required:
+        - chore_id
+        - title
+        - range
+        - granularity
+        - people
+        - over_time
+      title: ChoreStatsRead
+      description: 'Per-chore statistics: who completed and skipped one chore over the range, and when.'
     ChoreUpdate:
       properties:
         title:
@@ -5903,6 +6126,11 @@ components:
               minimum: 1
             - type: 'null'
           title: Count
+        completed_by_user_id:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Completed By User Id
       type: object
       title: SkipChoreRequest
       description: |-
@@ -5914,6 +6142,11 @@ components:
         body gets the same landing spot a skip always had. A number may not exceed the chore's
         `due_count` (refused with a 400, since that depends on the chore rather than on the
         request), except that a chore with nothing due yet still accepts a single skip.
+
+        `completed_by_user_id` records the skip against another member instead of the caller, so
+        the per-chore stats show who gave it up. Same rule as `CompleteChoreRequest`: it must be
+        the caller or one of the chore's current assignees (400 otherwise). Omitted or None
+        records the caller.
     SkippedChoreStat:
       properties:
         chore_id:
@@ -5955,6 +6188,31 @@ components:
 
         `household_name` rides along because the page spans every household the caller is a
         deputy in, and two of them can hold a chore with the same title.
+    StatsChoreOption:
+      properties:
+        id:
+          type: integer
+          title: Id
+        title:
+          type: string
+          title: Title
+        household_id:
+          type: integer
+          title: Household Id
+        household_name:
+          type: string
+          title: Household Name
+      type: object
+      required:
+        - id
+        - title
+        - household_id
+        - household_name
+      title: StatsChoreOption
+      description: |-
+        One entry of the Statistics page's chore picker: an active chore in a household where
+        the caller is at least a deputy. `household_name` rides along for the same reason as on
+        `SkippedChoreStat`: two households can hold a chore with the same title.
     StatsKpis:
       properties:
         completed_in_range:
@@ -6220,6 +6478,20 @@ components:
       required:
         - items
       title: UnscheduledRead
+    UserCount:
+      properties:
+        user_id:
+          type: integer
+          title: User Id
+        count:
+          type: integer
+          title: Count
+      type: object
+      required:
+        - user_id
+        - count
+      title: UserCount
+      description: How many completions one person was credited with in one bucket.
     UserCreate:
       properties:
         email:

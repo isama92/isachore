@@ -335,6 +335,35 @@ export type StatsData = {
   most_skipped: { chore_id: number; title: string; household_name: string; count: number }[]
 }
 
+// One option of the Statistics chore picker: GET /api/v1/stats/chores. Active chores in the
+// households where the caller is at least a deputy, sorted by title.
+export type StatsChoreOption = {
+  id: number
+  title: string
+  household_id: number
+  household_name: string
+}
+
+// One chore's figures for the per-chore charts: GET /api/v1/stats/chores/{id}. `people` holds
+// the chore's current assignees (at zero if need be) plus anyone else with a closure in the
+// range, most active first; a skip counts against whoever it was recorded against. Each
+// `over_time` bucket (an ISO date, the day or the week's Monday, every one present) lists the
+// people with completions in it and counts every skip, whoever it belongs to.
+export type ChoreStatsData = {
+  chore_id: number
+  title: string
+  range: StatsRange
+  granularity: 'day' | 'week'
+  people: {
+    user_id: number
+    first_name: string
+    last_name: string
+    done: number
+    skipped: number
+  }[]
+  over_time: { bucket: string; done: { user_id: number; count: number }[]; skipped: number }[]
+}
+
 // A chore due within the Home window (overdue / today / next 7 days), with its
 // server-computed due state plus the household it belongs to and its assignees,
 // so a row can show whose chore it is (data-minimised member shape, no email).

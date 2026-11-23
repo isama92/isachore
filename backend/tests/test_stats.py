@@ -1,3 +1,4 @@
+import itertools
 from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime, timedelta
 
@@ -1046,3 +1047,255 @@ async def test_stats_drops_a_backdated_completion_dated_outside_the_range(
     # doing its job rather than the backdated closure going missing.
     quarter = (await client.get("/api/v1/stats", params={"range": "90d"})).json()
     assert quarter["kpis"]["completed_in_range"] == 2
+
+
+# --- Per-chore statistics ------------------------------------------------------------
+
+
+async def _close(
+    make_occurrence: MakeOccurrence,
+    chore: Chore,
+    by: User | None,
+    *,
+    days_ago: int = 0,
+    skipped: bool = False,
+) -> None:
+    """One closure of `chore`, `days_ago` days back, credited to `by`. Each gets its own slot,
+    since a chore holds one row per slot; the slot plays no part in these stats, which bucket
+    on `completed_at`."""
+    await make_occurrence(
+        chore=chore,
+        scheduled_for=TODAY_START - timedelta(days=100 + next(_SLOTS)),
+        status=OccurrenceStatus.done,
+        completed_by=by,
+        completed_at=NOW - timedelta(days=days_ago),
+        skipped=skipped,
+    )
+
+
+_SLOTS = itertools.count()
+
+
+def _people(body: dict) -> list[tuple[int, int, int]]:
+    return [(p["user_id"], p["done"], p["skipped"]) for p in body["people"]]
+
+
+async def test_chore_stats_requires_auth(client: AsyncClient) -> None:
+    assert (await client.get("/api/v1/stats/chores")).status_code == 401
+    assert (await client.get("/api/v1/stats/chores/1")).status_code == 401
+
+
+async def test_stats_chore_options_list_active_chores_sorted_by_title(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    user = await make_user()
+    home = await make_household(members=[user], name="Home")
+    other = await make_household(members=[user], name="Cabin")
+    await make_chore(household=home, title="vacuum", repeats=RepeatPeriod.manual)
+    await make_chore(household=other, title="Bins")
+    gone = await make_chore(household=home, title="Attic")
+    gone.deleted_at = datetime.now(UTC)
+    await db_session.commit()
+    client = await auth_client(user)
+
+    body = (await client.get("/api/v1/stats/chores")).json()
+    # Case-insensitive, unscheduled chores included, the soft-deleted one gone.
+    assert [(c["title"], c["household_name"]) for c in body] == [
+        ("Bins", "Cabin"),
+        ("vacuum", "Home"),
+    ]
+
+    narrowed = (await client.get(f"/api/v1/stats/chores?household_id={home.id}")).json()
+    assert [c["title"] for c in narrowed] == ["vacuum"]
+
+
+async def test_stats_chore_options_skip_a_household_where_the_caller_is_a_helper(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    user = await make_user()
+    deputy_in = await make_household(members=[user], roles={user.id: HouseholdRole.deputy})
+    helper_in = await make_household(members=[user], roles={user.id: HouseholdRole.helper})
+    await make_chore(household=deputy_in, title="Visible")
+    await make_chore(household=helper_in, title="Hidden")
+    client = await auth_client(user)
+
+    body = (await client.get("/api/v1/stats/chores")).json()
+    assert [c["title"] for c in body] == ["Visible"]
+
+
+async def test_chore_stats_404_outside_the_deputy_scope(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+) -> None:
+    user = await make_user()
+    stranger = await make_user(email="stranger@example.com")
+    helper_in = await make_household(members=[user], roles={user.id: HouseholdRole.helper})
+    elsewhere = await make_household(members=[stranger])
+    as_helper = await make_chore(household=helper_in)
+    not_mine = await make_chore(household=elsewhere)
+    client = await auth_client(user)
+
+    assert (await client.get(f"/api/v1/stats/chores/{as_helper.id}")).status_code == 404
+    assert (await client.get(f"/api/v1/stats/chores/{not_mine.id}")).status_code == 404
+    assert (await client.get("/api/v1/stats/chores/999999")).status_code == 404
+
+
+async def test_chore_stats_404_for_a_soft_deleted_chore(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household)
+    client = await auth_client(user)
+    # Reachable while alive, so the 404 below is about the deletion and nothing else.
+    assert (await client.get(f"/api/v1/stats/chores/{chore.id}")).status_code == 200
+
+    chore.deleted_at = datetime.now(UTC)
+    await db_session.commit()
+    assert (await client.get(f"/api/v1/stats/chores/{chore.id}")).status_code == 404
+
+
+async def test_chore_stats_splits_done_and_skipped_per_person(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    ava = await make_user(email="ava@example.com", first_name="Ava")
+    ben = await make_user(email="ben@example.com", first_name="Ben")
+    cleo = await make_user(email="cleo@example.com", first_name="Cleo")
+    dan = await make_user(email="dan@example.com", first_name="Dan")
+    household = await make_household(members=[ava, ben, cleo, dan])
+    chore = await make_chore(household=household, assignees=[ava, ben, dan], with_occurrence=False)
+    other = await make_chore(household=household, assignees=[ava], with_occurrence=False)
+    for _ in range(3):
+        await _close(make_occurrence, chore, ava)
+    await _close(make_occurrence, chore, ava, skipped=True)
+    await _close(make_occurrence, chore, ben, days_ago=1, skipped=True)
+    await _close(make_occurrence, chore, ben, days_ago=2, skipped=True)
+    # Cleo is no assignee, but did it once, so her row appears.
+    await _close(make_occurrence, chore, cleo, days_ago=3)
+    # Closures of another chore never leak in.
+    await _close(make_occurrence, other, ava, days_ago=4)
+    client = await auth_client(ava)
+
+    body = (await client.get(f"/api/v1/stats/chores/{chore.id}?range=7d")).json()
+    assert body["title"] == chore.title
+    assert body["granularity"] == "day"
+    # Most active first; Dan is an assignee with nothing, so he is listed at zero.
+    assert _people(body) == [(ava.id, 3, 1), (ben.id, 0, 2), (cleo.id, 1, 0), (dan.id, 0, 0)]
+
+    buckets = {b["bucket"]: b for b in body["over_time"]}
+    assert len(buckets) == 7
+    today = NOW.date().isoformat()
+    assert buckets[today]["done"] == [{"user_id": ava.id, "count": 3}]
+    assert buckets[today]["skipped"] == 1
+    yesterday = (NOW.date() - timedelta(days=1)).isoformat()
+    assert buckets[yesterday]["done"] == []
+    assert buckets[yesterday]["skipped"] == 1
+
+
+async def test_chore_stats_respects_the_range(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, with_occurrence=False)
+    await _close(make_occurrence, chore, user, days_ago=6)  # last day inside 7d
+    await _close(make_occurrence, chore, user, days_ago=7)  # first day outside it
+    await _close(make_occurrence, chore, user, days_ago=40)
+    client = await auth_client(user)
+
+    week = (await client.get(f"/api/v1/stats/chores/{chore.id}?range=7d")).json()
+    assert _people(week) == [(user.id, 1, 0)]
+
+    quarter = (await client.get(f"/api/v1/stats/chores/{chore.id}?range=90d")).json()
+    assert quarter["granularity"] == "week"
+    assert _people(quarter) == [(user.id, 3, 0)]
+    # Weekly keys are Mondays, and every closure lands in one of them.
+    assert all(date.fromisoformat(b["bucket"]).weekday() == 0 for b in quarter["over_time"])
+    assert sum(sum(d["count"] for d in b["done"]) for b in quarter["over_time"]) == 3
+
+
+async def test_chore_stats_user_filter_narrows_both_outputs(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    ava = await make_user(email="ava@example.com", first_name="Ava")
+    ben = await make_user(email="ben@example.com", first_name="Ben")
+    household = await make_household(members=[ava, ben])
+    chore = await make_chore(household=household, assignees=[ava, ben], with_occurrence=False)
+    await _close(make_occurrence, chore, ava, days_ago=1)
+    await _close(make_occurrence, chore, ava, days_ago=2, skipped=True)
+    await _close(make_occurrence, chore, ben)
+    await _close(make_occurrence, chore, ben, days_ago=3, skipped=True)
+    client = await auth_client(ava)
+
+    url = f"/api/v1/stats/chores/{chore.id}?range=7d&user_id={ben.id}"
+    body = (await client.get(url)).json()
+    assert _people(body) == [(ben.id, 1, 1)]
+    assert sum(b["skipped"] for b in body["over_time"]) == 1
+    done_by = {d["user_id"] for b in body["over_time"] for d in b["done"]}
+    assert done_by == {ben.id}
+
+
+async def test_chore_stats_for_an_unassigned_unscheduled_chore_lists_only_activity(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    ava = await make_user(email="ava@example.com", first_name="Ava")
+    ben = await make_user(email="ben@example.com", first_name="Ben")
+    household = await make_household(members=[ava, ben])
+    chore = await make_chore(
+        household=household, repeats=RepeatPeriod.manual, with_occurrence=False
+    )
+    await _close(make_occurrence, chore, ben)
+    client = await auth_client(ava)
+
+    body = (await client.get(f"/api/v1/stats/chores/{chore.id}?range=7d")).json()
+    # Ava did nothing and is no assignee, so she is not listed.
+    assert _people(body) == [(ben.id, 1, 0)]
+
+
+async def test_chore_stats_closure_without_a_completer_counts_only_in_the_skip_total(
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    make_occurrence: MakeOccurrence,
+    auth_client: AuthClient,
+) -> None:
+    user = await make_user()
+    household = await make_household(members=[user])
+    chore = await make_chore(household=household, with_occurrence=False)
+    await _close(make_occurrence, chore, None, skipped=True)
+    await _close(make_occurrence, chore, None, days_ago=1)
+    client = await auth_client(user)
+
+    body = (await client.get(f"/api/v1/stats/chores/{chore.id}?range=7d")).json()
+    assert _people(body) == []
+    assert sum(b["skipped"] for b in body["over_time"]) == 1
+    assert all(b["done"] == [] for b in body["over_time"])
