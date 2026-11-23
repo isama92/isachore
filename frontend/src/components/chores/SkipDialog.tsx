@@ -122,13 +122,13 @@ function SkipDialogBody({
         // Radix reports '' when the pressed item is pressed again; a choice is always required.
         onValueChange={(next) => next && setMode(next as Mode)}
       >
-        <ToggleGroupItem value="one" className="w-full sm:flex-1">
+        <ToggleGroupItem value="one" className="w-full sm:w-auto sm:flex-auto">
           {t('home.skipMany.one')}
         </ToggleGroupItem>
-        <ToggleGroupItem value="all" className="w-full sm:flex-1">
+        <ToggleGroupItem value="all" className="w-full sm:w-auto sm:flex-auto">
           {t('home.skipMany.all', { count: due })}
         </ToggleGroupItem>
-        <ToggleGroupItem value="custom" className="w-full sm:flex-1">
+        <ToggleGroupItem value="custom" className="w-full sm:w-auto sm:flex-auto">
           {t('home.skipMany.custom')}
         </ToggleGroupItem>
       </ToggleGroup>
