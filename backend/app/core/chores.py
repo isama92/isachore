@@ -244,6 +244,31 @@ def advance_anchor(
     return anchor
 
 
+def due_slots(
+    scheduled_for: datetime, now: datetime, rule: RecurrenceRule, tz: ZoneInfo
+) -> list[datetime]:
+    """Every slot of the chain that is due by `now`, starting with `scheduled_for` itself:
+    the open occurrence plus each missed slot after it whose local date is on or before
+    today. Empty for an occurrence still in the future, and for `manual`, which has no grid
+    and is never due.
+
+    This is what a multi-skip closes, one history row per slot, and its length is what Home
+    reports as `due_count`. It runs the same loop as `advance_anchor` and stops at the same
+    place, so its last element is exactly the anchor a closure at `now` would roll to: "skip
+    all" and the plain swallow-everything skip therefore land on the same successor."""
+    if rule.repeats == RepeatPeriod.manual:
+        return []
+    today = now.astimezone(tz).date()
+    if scheduled_for.astimezone(tz).date() > today:
+        return []
+    slots = [scheduled_for]
+    nxt = next_slot_after(scheduled_for, rule, tz)
+    while nxt.astimezone(tz).date() <= today:
+        slots.append(nxt)
+        nxt = next_slot_after(nxt, rule, tz)
+    return slots
+
+
 def first_occurrence(start_date: date, rule: RecurrenceRule, tz: ZoneInfo) -> datetime:
     """The first occurrence's due datetime: local midnight of the chore's start date in the
     household's zone, snapped forward to the first selected weekday (materialised as the

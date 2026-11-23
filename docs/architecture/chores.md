@@ -167,7 +167,7 @@ recompute `elif` would immediately re-derive somebody from the strategy and undo
 In the form the choice is a `UNASSIGNED` sentinel option rather than `value=""`, which Radix
 reserves for "nothing selected" and would render as the placeholder.
 
-### Calendar turns ("Ignore skipped")
+### Calendar turns ("Skips use up the turn")
 
 `chores.turns_follow_calendar`. By default a turn is `turn_length` **completions**
 (`should_reassign` over `_completion_tally`) and a skip never spends one. That is what stops a
@@ -202,7 +202,46 @@ What to keep straight:
   calendar; the tally passed to `next_assignee` still excludes skips.
 - **The schema forces it off** where it means nothing (turn length 1, unscheduled, the
   `manual` strategy), and the form defaults it **on** for a new chore but keeps the stored
-  value on edit. The UI label is "Ignore skipped", explained behind an `InfoHint` icon.
+  value on edit. The UI label is "Skips use up the turn", explained behind an `InfoHint` icon.
+  It used to read "Ignore skipped", which said the opposite of what the option does.
+
+## Skipping several occurrences
+
+`SkipChoreRequest.count`, and `due_count` on every Home row. A chore ignored for a week has
+eight occurrences due (the open one, the missed ones, today's), and the skip dialog asks
+whether to skip one of them, all of them, or a custom number up to that many. It asks only
+when more than one is due; otherwise it is the plain confirm it always was.
+
+What to keep straight:
+
+- **One skipped row per slot.** Skipping three leaves three history rows, so "most skipped"
+  and punctuality count what was really missed. This includes "all": a skip used to swallow
+  the whole backlog into a single row, and now writes one per due slot.
+- **`count: null` (or no body) means every due slot**, so a client that sends nothing lands
+  where a skip always landed. `due_slots` runs the same loop as `advance_anchor` and stops
+  at the same place, which is what makes that true by construction rather than by test.
+  **The dialog never sends null once a number is on screen**, "all" included: the count the
+  user saw is the only guard against a stale page. Sent as null, a dialog opened before a
+  housemate completed the chore would skip tomorrow's slot with a 201; sent as the number, it
+  gets the 400 instead. Only the plain one-or-none confirm sends no body.
+- **The cap is the due count**, a 400 above it, because how many are due depends on the chore
+  rather than on the request. A chore with nothing due still accepts a single skip: that is
+  the endpoint's documented latitude, and the count is what may not reach into the future.
+  Both are resolved after the row lock, from the slot it re-read, and before anything is
+  written.
+- **The assignee is decided once**, from the first slot to the successor. A completion-counted
+  turn never moves on a skip however many slots it spans, and a calendar turn hands over at
+  most once (the same call as "several turns at once still hand over once" above). So the
+  extra rows all carry the assignee the chore was closed with, and the closure never loops
+  over `_calendar_turn_assignee`. Walking a backlog with backdated completions differs here,
+  by design: those are separate requests, one closure each.
+- **Extra rows are inserted in slot order**, so `undo_completion`'s `max(id)` reopens the
+  latest of them and an undo walks back one slot at a time.
+- **A slot the chore already has a done row for is passed over**, for the reason
+  `free_slot_from` exists: an open slot re-seeded into the past can sit behind history, and
+  inserting it again would be a 409 no retry clears.
+- **The dialog's unit follows the period only when it can.** "3 days" is true for a plain
+  daily chore; every 2 days or a week pinned to Tue and Fri say "3 occurrences" instead.
 
 ## Backdating a completion
 

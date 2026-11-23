@@ -15,6 +15,7 @@ from app.schemas.home import (
     DueChoreRead,
     HomeRead,
     ProgressRead,
+    SkipChoreRequest,
     UnscheduledChoreRead,
     UnscheduledRead,
 )
@@ -87,6 +88,7 @@ __all__ = [
     "RecoveryCodesRead",
     "ServerSettingsRead",
     "ServerSettingsUpdate",
+    "SkipChoreRequest",
     "TagCreate",
     "TagRead",
     "TagUpdate",

@@ -50,7 +50,7 @@ export type ChoreFormValues = {
   // Completions per assignee before a handoff (1 = every completion). "Take turns"
   // is on when this is > 1.
   turn_length: number
-  // "Ignore skipped": count a turn in calendar slots from the start date rather than in
+  // "Skips use up the turn": count a turn in calendar slots from the start date rather than in
   // completions, so skips and missed days still move the handover along. Only applies under
   // "Take turns" on a scheduled, auto-rotating chore; the API forces it off everywhere else.
   turns_follow_calendar: boolean
@@ -151,7 +151,7 @@ export function ChoreForm({
   )
   // Its own state for the same reason as takeTurns: unticking "Take turns" hides it without
   // forgetting it, and the payload below gates it rather than this state.
-  const [ignoreSkipped, setIgnoreSkipped] = useState(() => initial.turns_follow_calendar)
+  const [skipsUseUpTurn, setSkipsUseUpTurn] = useState(() => initial.turns_follow_calendar)
   // String-backed for the same reasons as turnLength: it can be cleared and typed into
   // multi-digit, then parsed and clamped on submit.
   const [repeatInterval, setRepeatInterval] = useState(() => String(initial.repeat_interval))
@@ -229,7 +229,7 @@ export function ChoreForm({
         turn_length: isManual || !takeTurns ? 1 : Math.max(2, Math.trunc(Number(turnLength)) || 2),
         // Gated on exactly what shows the checkbox, so a hidden one never submits true. The API
         // normalises the same way, which keeps other clients honest too.
-        turns_follow_calendar: !isManual && takeTurns && !manualRepeat && ignoreSkipped,
+        turns_follow_calendar: !isManual && takeTurns && !manualRepeat && skipsUseUpTurn,
         repeat_interval: interval,
         // null both when the period is not weekly and when nothing is pinned: the API
         // treats both as unpinned. Since ChoreUpdate is a full replace, this is also how
@@ -388,7 +388,7 @@ export function ChoreForm({
       {/* Take turns: only for the auto-rotating strategies (manual never rotates). */}
       {!isManual && (
         <div className="flex flex-col gap-3">
-          {/* The two toggles share a row; "Ignore skipped" only exists under "Take turns", and
+          {/* The two toggles share a row; "Skips use up the turn" only exists under "Take turns", and
               only for a scheduled chore, since an unscheduled one has no calendar to follow. */}
           <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
             <div className="flex items-center gap-1.5">
@@ -407,13 +407,13 @@ export function ChoreForm({
               <div className="flex items-center gap-1.5">
                 <label className="flex items-center gap-2 text-sm font-medium">
                   <Checkbox
-                    checked={ignoreSkipped}
-                    onCheckedChange={(checked) => setIgnoreSkipped(checked === true)}
+                    checked={skipsUseUpTurn}
+                    onCheckedChange={(checked) => setSkipsUseUpTurn(checked === true)}
                   />
-                  {t('choreCreate.ignoreSkipped')}
+                  {t('choreCreate.skipsUseUpTurn')}
                 </label>
-                <InfoHint label={t('choreCreate.ignoreSkippedInfoLabel')}>
-                  {t('choreCreate.ignoreSkippedInfo')}
+                <InfoHint label={t('choreCreate.skipsUseUpTurnInfoLabel')}>
+                  {t('choreCreate.skipsUseUpTurnInfo')}
                 </InfoHint>
               </div>
             )}
@@ -434,7 +434,7 @@ export function ChoreForm({
               />
               <p className="text-[13px] font-medium text-muted-foreground">
                 {t(
-                  !manualRepeat && ignoreSkipped
+                  !manualRepeat && skipsUseUpTurn
                     ? 'choreCreate.turnLengthCalendarHint'
                     : 'choreCreate.turnLengthHint',
                 )}

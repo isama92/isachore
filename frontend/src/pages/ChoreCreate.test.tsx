@@ -378,14 +378,16 @@ describe('ChoreCreate', () => {
     await user.type(await screen.findByLabelText('Title'), 'Bins')
     await user.click(screen.getByRole('combobox', { name: 'Assignment' }))
     await user.click(await screen.findByRole('option', { name: 'Alphabetical' }))
-    expect(screen.queryByRole('checkbox', { name: 'Ignore skipped' })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('checkbox', { name: 'Skips use up the turn' }),
+    ).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('checkbox', { name: 'Take turns' }))
-    const ignoreSkipped = screen.getByRole('checkbox', { name: 'Ignore skipped' })
-    expect(ignoreSkipped).toBeChecked()
+    const skipsUseUpTurn = screen.getByRole('checkbox', { name: 'Skips use up the turn' })
+    expect(skipsUseUpTurn).toBeChecked()
     // The turn-length hint switches to the calendar wording while it is on.
     expect(screen.getByText(/counted from the start date/)).toBeInTheDocument()
-    await user.click(ignoreSkipped)
+    await user.click(skipsUseUpTurn)
     expect(
       screen.getByText('Completions before the chore hands off to the next person.'),
     ).toBeInTheDocument()
@@ -404,12 +406,14 @@ describe('ChoreCreate', () => {
     await user.click(screen.getByRole('combobox', { name: 'Assignment' }))
     await user.click(await screen.findByRole('option', { name: 'Alphabetical' }))
     await user.click(screen.getByRole('checkbox', { name: 'Take turns' }))
-    expect(screen.getByRole('checkbox', { name: 'Ignore skipped' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Skips use up the turn' })).toBeChecked()
     // Unscheduled has no calendar to follow: the option goes, and so must the value, even
     // though take turns and the checkbox's own state are both still on.
     await user.click(screen.getByRole('combobox', { name: 'Repeats' }))
     await user.click(await screen.findByRole('option', { name: 'Unscheduled' }))
-    expect(screen.queryByRole('checkbox', { name: 'Ignore skipped' })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('checkbox', { name: 'Skips use up the turn' }),
+    ).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Add chore' }))
 
     await screen.findByText('chores-list')
@@ -442,7 +446,7 @@ describe('ChoreCreate', () => {
     await user.click(screen.getByRole('combobox', { name: 'Assignment' }))
     await user.click(await screen.findByRole('option', { name: 'Alphabetical' }))
     await user.click(screen.getByRole('checkbox', { name: 'Take turns' }))
-    expect(screen.getByRole('checkbox', { name: 'Ignore skipped' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Skips use up the turn' })).toBeChecked()
     await user.click(screen.getByRole('combobox', { name: 'Assignment' }))
     await user.click(await screen.findByRole('option', { name: 'Manual' }))
     await user.click(screen.getByRole('button', { name: 'Add chore' }))
@@ -458,7 +462,7 @@ describe('ChoreCreate', () => {
     singleHouseholdMocks()
     withRoutes(cloneState({ turn_length: 7, turns_follow_calendar: false }))
 
-    expect(await screen.findByRole('checkbox', { name: 'Ignore skipped' })).not.toBeChecked()
+    expect(await screen.findByRole('checkbox', { name: 'Skips use up the turn' })).not.toBeChecked()
   })
 
   it('gives a clone that never took turns the new-chore default', async () => {
@@ -468,7 +472,7 @@ describe('ChoreCreate', () => {
     withRoutes(cloneState())
 
     await user.click(await screen.findByRole('checkbox', { name: 'Take turns' }))
-    expect(screen.getByRole('checkbox', { name: 'Ignore skipped' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Skips use up the turn' })).toBeChecked()
   })
 
   it('gives a clone whose false was forced by the manual strategy the new-chore default', async () => {
@@ -481,7 +485,7 @@ describe('ChoreCreate', () => {
 
     await user.click(await screen.findByRole('combobox', { name: 'Assignment' }))
     await user.click(await screen.findByRole('option', { name: 'Alphabetical' }))
-    expect(screen.getByRole('checkbox', { name: 'Ignore skipped' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Skips use up the turn' })).toBeChecked()
   })
 
   it('gives a clone whose false was forced by being unscheduled the new-chore default', async () => {
@@ -498,7 +502,7 @@ describe('ChoreCreate', () => {
 
     await user.click(await screen.findByRole('combobox', { name: 'Repeats' }))
     await user.click(await screen.findByRole('option', { name: 'Daily' }))
-    expect(screen.getByRole('checkbox', { name: 'Ignore skipped' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Skips use up the turn' })).toBeChecked()
   })
 
   it('explains take turns and ignore skipped behind an info icon', async () => {
@@ -510,7 +514,7 @@ describe('ChoreCreate', () => {
     await user.click(await screen.findByRole('option', { name: 'Alphabetical' }))
     await user.click(screen.getByRole('checkbox', { name: 'Take turns' }))
 
-    await user.click(screen.getByRole('button', { name: 'About ignoring skipped' }))
+    await user.click(screen.getByRole('button', { name: 'About skips using up the turn' }))
     expect(await screen.findByText(/The turn follows the calendar/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'About taking turns' })).toBeInTheDocument()
   })

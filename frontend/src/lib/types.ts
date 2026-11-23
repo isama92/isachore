@@ -169,7 +169,7 @@ export type Chore = {
   // Completions one assignee holds before the chore hands off (1 = every
   // completion; "take turns" in the form sets a larger value).
   turn_length: number
-  // "Ignore skipped": a turn is `turn_length` calendar slots counted from `start_date`, so
+  // "Skips use up the turn": a turn is `turn_length` calendar slots counted from `start_date`, so
   // skipped and missed slots count too. Always false unless taking turns on a scheduled,
   // auto-rotating chore (the API normalises it).
   turns_follow_calendar: boolean
@@ -350,6 +350,9 @@ export type DueChore = {
   next_due: string
   days_until_due: number
   status: DueStatus
+  // How many occurrences are due by today, the open one plus every missed slot after it: 0 for
+  // an upcoming chore. Above 1, the skip dialog asks how many to skip, up to this many.
+  due_count: number
   // Whether the chore carries written instructions, NOT the instructions themselves. Drives the
   // marker icon on the row; the dialog fetches the chore itself on open, so a household's
   // descriptions never ride along on the landing page's payload.

@@ -761,6 +761,44 @@ describe('description dialog', () => {
       expect(homeGets(fetchMock).length).toBe(1)
     })
 
+    it.each([
+      ['Just 1', 'Skip 1 day', JSON.stringify({ count: 1 })],
+      ['All until today (5)', 'Skip 5 days', JSON.stringify({ count: 5 })],
+    ])('with several due, choosing "%s" posts the matching body', async (option, confirm, body) => {
+      const fetchMock = mockFetch([
+        { path: FILTERS, method: 'GET', body: SOLO_OPTIONS },
+        {
+          path: HOME,
+          method: 'GET',
+          body: homeBody(0, 1, [
+            makeDueChore({
+              id: 7,
+              title: 'Do the dishes',
+              repeats: 'daily',
+              status: 'overdue',
+              days_until_due: -4,
+              due_count: 5,
+            }),
+          ]),
+        },
+        { path: SKIP, method: 'POST', status: 201, body: {} },
+      ])
+      const user = userEvent.setup({ pointerEventsCheck: 0 })
+      renderWithProviders(<Home />, { authValue: { user: makeUser({ id: 1 }) } })
+
+      await user.click(await screen.findByRole('button', { name: /^Skip: .*Do the dishes/ }))
+      const dialog = await screen.findByRole('alertdialog')
+      await user.click(within(dialog).getByRole('radio', { name: option }))
+      await user.click(within(dialog).getByRole('button', { name: confirm }))
+
+      const post = await waitFor(() =>
+        fetchMock.mock.calls.find(
+          ([url, init]) => String(url).includes('/api/v1/chores/7/skip') && init?.method === 'POST',
+        )!,
+      )
+      expect(post[1]?.body).toBe(body)
+    })
+
     it('disables both row actions while the row animates out', async () => {
       stub({ status: 201, body: {} })
       const user = userEvent.setup({ pointerEventsCheck: 0 })

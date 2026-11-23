@@ -1,4 +1,6 @@
+from datetime import UTC, datetime
 from typing import Annotated, Literal
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
@@ -16,11 +18,14 @@ from app.core.assignment import (
     should_reassign,
 )
 from app.core.chores import (
+    RecurrenceRule,
     days_until_due,
+    due_slots,
     due_status,
     end_of_local_day,
     first_occurrence,
     next_occurrence_after,
+    next_slot_after,
     slot_index,
     snap_to_slot,
 )
@@ -55,6 +60,7 @@ from app.schemas import (
     CompleteChoreRequest,
     CompletionRead,
     Page,
+    SkipChoreRequest,
 )
 
 router = APIRouter()
@@ -807,6 +813,7 @@ async def _close_occurrence(
     skipped: bool,
     backdate: bool,
     conflict_detail: str,
+    skip_count: int | None = None,
 ) -> CompletionRead:
     """Close a chore's open occurrence and materialise its successor. Shared by completing
     and skipping, which differ only in `skipped` and in who ends up on the hook next, so the
@@ -858,6 +865,14 @@ async def _close_occurrence(
     which leaves that row on the old grid until the next chore edit re-seeds it through
     `_reconcile_open_occurrence`. Narrower again, and self-healing, so it is documented rather
     than locked.
+
+    **A skip may close several slots** (`skip_count`, see `_skip_slots`). Each extra slot gets
+    its own skipped row, inserted in slot order so `undo_completion`'s `max(id)` reopens the
+    latest one and an undo walks back a single slot. The successor and its assignee are still
+    decided ONCE, from the first slot to the successor: a skip keeps the chore where it is
+    however many slots it spans, and a calendar turn hands over at most once, the same answer
+    a single late completion over the same span gives. So the extra rows all carry the
+    assignee the chore was closed with, and nothing here loops over `_calendar_turn_assignee`.
     """
     # `SELECT ... FOR UPDATE` on this one row, which is the row a completion already contends on -
     # not a household-wide advisory lock, which would serialise housemates completing different
@@ -876,6 +891,10 @@ async def _close_occurrence(
     # early the end of its due day is still ahead, so the answer is `now`, which is on time
     # anyway. A caller that mis-decides therefore cannot date a completion into the future.
     completed_at = min(end_of_local_day(scheduled_for, tz), now) if backdate else now
+    rule = rule_for(chore)
+    # Resolved before anything is written, so a refused count leaves the row untouched. Only
+    # a skip ever closes more than the open slot.
+    skipped_slots = _skip_slots(scheduled_for, now, rule, tz, skip_count) if skipped else []
     # Flip the current occurrence to done FIRST (it becomes the history row and frees
     # the one-open-per-chore slot), then materialise the successor - never the reverse,
     # or the two momentarily-open rows would trip the partial unique index.
@@ -892,11 +911,19 @@ async def _close_occurrence(
     occ.completed_timezone = str(tz)
     await session.flush()
 
-    # Anchor the successor to the occurrence just cleared (skip-missed applied), so its
-    # due date advances one interval on the grid rather than from the completion time.
-    # An unscheduled chore has no grid and reopens at the completion moment instead.
-    rule = rule_for(chore)
-    upcoming = next_occurrence_after(scheduled_for, completed_at, rule, tz)
+    if skipped_slots:
+        # A skip: one row per further slot, then the successor one step past the last of them.
+        # For "all" that is exactly where `next_occurrence_after` lands (`due_slots` stops
+        # where `advance_anchor` does), so the plain skip keeps its landing spot.
+        last_slot = await _record_extra_skips(
+            session, chore, occ, skipped_slots[1:], tz=tz, closed_at=completed_at
+        )
+        upcoming = next_slot_after(last_slot, rule, tz)
+    else:
+        # Anchor the successor to the occurrence just cleared (skip-missed applied), so its
+        # due date advances one interval on the grid rather than from the completion time.
+        # An unscheduled chore has no grid and reopens at the completion moment instead.
+        upcoming = next_occurrence_after(scheduled_for, completed_at, rule, tz)
     if chore.repeats != RepeatPeriod.manual:
         # Walk past any slot this chore has already completed. Unconditional rather than
         # gated on `backdate`, because it is the identity whenever nothing collides and
@@ -913,7 +940,7 @@ async def _close_occurrence(
         upcoming = await free_slot_from(session, chore.id, upcoming, rule, tz)
     pool = list(chore.assignees)
     if chore.turns_follow_calendar and chore.start_date is not None:
-        # "Ignore skipped": the turn is counted on the calendar, so a skip and a completion
+        # "Skips use up the turn": the turn is counted on the calendar, so a skip and a completion
         # are the same event here and both go through one branch. The `start_date` check is
         # belt and braces - the schema forces the flag off for unscheduled chores, the only
         # ones without a start date.
@@ -965,6 +992,88 @@ async def _close_occurrence(
         days_until_due=days,
         status=due_status(days),
     )
+
+
+def _skip_slots(
+    scheduled_for: datetime,
+    now: datetime,
+    rule: RecurrenceRule,
+    tz: ZoneInfo,
+    count: int | None,
+) -> list[datetime]:
+    """The slots a skip closes, starting with the open one: every due slot when `count` is
+    None (what a skip with no body always did), else the first `count` of them. A chore with
+    nothing due yet still skips its one open slot, which keeps the endpoint's documented
+    latitude to push a chore forward a step at a time; asking for more than that, or for more
+    than are due, is a 400 rather than a silent clamp, because a client that asked for three
+    and got two would have no way to tell."""
+    due = due_slots(scheduled_for, now, rule, tz) or [scheduled_for]
+    if count is None:
+        return due
+    if count > len(due):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Only occurrences that are already due can be skipped together, "
+                f"and this chore has {len(due)}"
+            ),
+        )
+    return due[:count]
+
+
+async def _record_extra_skips(
+    session: SessionDep,
+    chore: Chore,
+    occ: ChoreOccurrence,
+    slots: list[datetime],
+    *,
+    tz: ZoneInfo,
+    closed_at: datetime,
+) -> datetime:
+    """Insert a skipped `done` row for each of `slots` (the slots after the open one), as
+    copies of the closure just made on `occ`, and return the last slot closed.
+
+    A slot the chore already has a done row for is passed over rather than inserted, for the
+    reason `free_slot_from` exists: an open slot re-seeded into the past can sit behind slots
+    the chore has history on, and `uq_occurrence_chore_scheduled` would turn a duplicate into
+    a 409 no retry clears. One query for the whole batch, normalised to UTC as that function
+    explains."""
+    if not slots:
+        return occ.scheduled_for
+    taken = set(
+        (
+            await session.execute(
+                select(ChoreOccurrence.scheduled_for).where(
+                    ChoreOccurrence.chore_id == chore.id,
+                    ChoreOccurrence.status == OccurrenceStatus.done,
+                    ChoreOccurrence.scheduled_for >= slots[0],
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for slot in slots:
+        if slot.astimezone(UTC) in taken:
+            continue
+        session.add(
+            ChoreOccurrence(
+                chore_id=chore.id,
+                scheduled_for=slot,
+                # Who was on the hook when it was skipped: the skip moved nobody, see
+                # `_close_occurrence`.
+                assignee_id=occ.assignee_id,
+                status=OccurrenceStatus.done,
+                skipped=True,
+                title=occ.title,
+                completed_by_user_id=occ.completed_by_user_id,
+                completed_at=closed_at,
+                completed_timezone=str(tz),
+            )
+        )
+    # The unit of work inserts in `add` order, so ids follow slot order: undo relies on it.
+    await session.flush()
+    return slots[-1]
 
 
 @router.post(
@@ -1065,7 +1174,8 @@ async def complete_chore(
     responses=refusals(
         (
             status.HTTP_400_BAD_REQUEST,
-            "The chore is unscheduled, so it is never due and there is nothing to skip.",
+            "The chore is unscheduled, so it is never due and there is nothing to skip, "
+            "or `count` asks for more occurrences than are due.",
         ),
         (
             status.HTTP_404_NOT_FOUND,
@@ -1078,7 +1188,12 @@ async def complete_chore(
         ),
     ),
 )
-async def skip_chore(chore_id: int, user: ApiUser, session: SessionDep) -> CompletionRead:
+async def skip_chore(
+    chore_id: int,
+    user: ApiUser,
+    session: SessionDep,
+    payload: SkipChoreRequest | None = None,
+) -> CompletionRead:
     """Skip a chore's current occurrence: close it and move the chore on to its next slot
     without recording any work. Ungated like completing, since every role that can complete a
     chore can decide not to do one.
@@ -1098,6 +1213,12 @@ async def skip_chore(chore_id: int, user: ApiUser, session: SessionDep) -> Compl
     and Home only ever surfaces overdue/today/soon, so a pushed-out chore simply leaves the
     view. Bounding it would need a notion of "too early" that the completion path does not
     have; if that is ever wanted, both paths should get it together.
+
+    By default it skips every occurrence that is due by today, one skipped history row each,
+    and the chore reopens at its next future slot. An optional `count` skips only that many of
+    them, so a chore ignored for a week can be moved on by a day; it may not exceed the number
+    due (400), checked under the row lock in `_close_occurrence`. However many slots it spans,
+    the assignee is decided once (see `_close_occurrence`).
     """
     chore = await _get_user_chore_or_404(session, user, chore_id)
     if chore.repeats == RepeatPeriod.manual:
@@ -1124,4 +1245,5 @@ async def skip_chore(chore_id: int, user: ApiUser, session: SessionDep) -> Compl
         # Not the pre-check's wording: reaching this means the slot WAS open and a concurrent
         # request closed it underneath us, so "nothing to skip" would describe the wrong event.
         conflict_detail="This chore has already been closed",
+        skip_count=payload.count if payload is not None else None,
     )

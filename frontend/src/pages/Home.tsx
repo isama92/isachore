@@ -12,19 +12,10 @@ import { dueDotClass, groupByDue, relativeDueLabel } from '../lib/home'
 import type { DueChore, HomeData } from '../lib/types'
 import ChoreFilters from '@/components/chores/ChoreFilters'
 import ChoreRow from '@/components/chores/ChoreRow'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 import BackdateDialog from '@/components/chores/BackdateDialog'
 import CreditDialog from '@/components/chores/CreditDialog'
 import DescriptionDialog from '@/components/chores/DescriptionDialog'
+import SkipDialog from '@/components/chores/SkipDialog'
 import { useFilterOptions } from '@/components/chores/useFilterOptions'
 import { fullName } from '@/lib/user'
 import { Progress } from '@/components/ui/progress'
@@ -189,10 +180,17 @@ export default function Home() {
   }
 
   // No credit question for a skip: there is no work to attribute, so it is always recorded
-  // against whoever confirmed it and the endpoint takes no body. No toast either, unlike
-  // completing: a skip was just confirmed through a dialog, so the tap is already acknowledged.
-  function skipChore(chore: DueChore) {
-    closeChore(chore, () => api.post(endpoints.chores.skip(chore.id)), t('home.skipError'))
+  // against whoever confirmed it. No toast either, unlike completing: a skip was just
+  // confirmed through a dialog, so the tap is already acknowledged.
+  //
+  // `count` null skips every due occurrence, which is the endpoint's default, so it sends no
+  // body; a number sends `{ count }`.
+  function skipChore(chore: DueChore, count: number | null) {
+    closeChore(
+      chore,
+      () => api.post(endpoints.chores.skip(chore.id), count === null ? undefined : { count }),
+      t('home.skipError'),
+    )
   }
 
   // Clicking Done asks up to two questions, in this order. First "when did you do it?", but
@@ -228,10 +226,10 @@ export default function Home() {
     if (pending) completeChore(pending.chore, { completedByUserId, backdate: pending.backdate })
   }
 
-  function confirmSkip() {
+  function confirmSkip(count: number | null) {
     const chore = skipFor
     setSkipFor(null)
-    if (chore) skipChore(chore)
+    if (chore) skipChore(chore, count)
   }
 
   const left = data ? data.progress.total_today - data.progress.done_today : 0
@@ -376,24 +374,9 @@ export default function Home() {
         onConfirm={confirmBackdate}
       />
 
-      {/* Inline rather than its own component, unlike CreditDialog: only this page skips, and
-          one caller does not earn the indirection. Controlled the same way, on skipFor. */}
-      <AlertDialog open={skipFor !== null} onOpenChange={(open) => !open && setSkipFor(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t('home.skipConfirm', { title: skipFor?.title ?? '' })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>{t('home.skipConfirmBody')}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmSkip}>
-              {t('home.skipConfirmAction')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {/* Asks how many to skip when several occurrences are due, and is the plain "really
+          skip this?" confirm otherwise. Controlled on skipFor, like its neighbours. */}
+      <SkipDialog chore={skipFor} onClose={() => setSkipFor(null)} onConfirm={confirmSkip} />
 
       <DescriptionDialog chore={descriptionFor} onClose={() => setDescriptionFor(null)} />
     </main>

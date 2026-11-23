@@ -11,6 +11,7 @@ from app.core.chores import (
     advance_anchor,
     days_since,
     days_until_due,
+    due_slots,
     due_status,
     end_of_local_day,
     first_occurrence,
@@ -863,3 +864,80 @@ def test_slot_index_pinned_weekly_does_not_walk_from_a_distant_start(
     slot = _midnight(start + timedelta(weeks=100_000, days=3))
     assert slot_index(start, slot, rule, UTC_ZONE) == 100_000 * 7 + 3
     assert steps() <= 2 * 7 + 1
+
+
+# --- due_slots (what a multi-skip closes) ------------------------------------
+
+
+def test_due_slots_lists_the_open_slot_and_every_missed_one_through_today() -> None:
+    # Ignored for a week: the 13th through the 20th (today) are all due, eight slots.
+    slots = due_slots(
+        datetime(2026, 7, 13, tzinfo=UTC), datetime(2026, 7, 20, 12, 0, tzinfo=UTC), DAILY, UTC_ZONE
+    )
+    assert slots == [datetime(2026, 7, d, tzinfo=UTC) for d in range(13, 21)]
+
+
+@pytest.mark.parametrize(
+    "rule", [DAILY, weekly_on(TUE, FRI), MONTHLY, repeating(RepeatPeriod.daily, 3)]
+)
+def test_due_slots_ends_where_advance_anchor_rolls_to(rule: RecurrenceRule) -> None:
+    # The contract "skip all" rests on: its last slot is the anchor a plain closure at `now`
+    # rolls to, so both land on the same successor.
+    scheduled = (
+        datetime(2026, 1, 31, tzinfo=UTC) if rule is MONTHLY else datetime(2026, 7, 3, tzinfo=UTC)
+    )
+    now = datetime(2026, 7, 29, 9, 0, tzinfo=UTC)
+    slots = due_slots(scheduled, now, rule, UTC_ZONE)
+    assert slots[0] == scheduled
+    assert slots[-1] == advance_anchor(scheduled, now, rule, UTC_ZONE)
+
+
+def test_due_slots_follows_pinned_weekdays() -> None:
+    # Tue/Fri from Tuesday the 7th, today Saturday the 18th: 7, 10, 14, 17.
+    slots = due_slots(
+        datetime(2026, 7, 7, tzinfo=UTC),
+        datetime(2026, 7, 18, 10, 0, tzinfo=UTC),
+        weekly_on(TUE, FRI),
+        UTC_ZONE,
+    )
+    assert [s.day for s in slots] == [7, 10, 14, 17]
+
+
+def test_due_slots_monthly_follows_the_drifting_chain() -> None:
+    # Jan 31 -> Feb 28 -> Mar 28: the chain, not a day-exact lattice. Today Apr 27 is before
+    # the April slot (the 28th), so three are due.
+    slots = due_slots(
+        datetime(2026, 1, 31, tzinfo=UTC), datetime(2026, 4, 27, tzinfo=UTC), MONTHLY, UTC_ZONE
+    )
+    assert slots == [
+        datetime(2026, 1, 31, tzinfo=UTC),
+        datetime(2026, 2, 28, tzinfo=UTC),
+        datetime(2026, 3, 28, tzinfo=UTC),
+    ]
+
+
+def test_due_slots_is_judged_on_the_households_day() -> None:
+    # 23:30 UTC on the 19th is already the 20th in Amsterdam, so the 20th's slot is due there.
+    tz = ZoneInfo("Europe/Amsterdam")
+    scheduled = datetime(2026, 7, 18, tzinfo=tz)
+    slots = due_slots(scheduled, datetime(2026, 7, 19, 23, 30, tzinfo=UTC), DAILY, tz)
+    assert [s.astimezone(tz).day for s in slots] == [18, 19, 20]
+    # And local midnight survives a DST change along the walk.
+    autumn = due_slots(
+        datetime(2026, 10, 24, tzinfo=tz), datetime(2026, 10, 26, 12, 0, tzinfo=tz), DAILY, tz
+    )
+    assert all(s.astimezone(tz).hour == 0 for s in autumn)
+    assert len(autumn) == 3
+
+
+def test_due_slots_due_today_is_one_slot() -> None:
+    slots = due_slots(
+        datetime(2026, 7, 20, tzinfo=UTC), datetime(2026, 7, 20, 18, 0, tzinfo=UTC), DAILY, UTC_ZONE
+    )
+    assert slots == [datetime(2026, 7, 20, tzinfo=UTC)]
+
+
+def test_due_slots_is_empty_for_a_future_slot_and_for_manual() -> None:
+    now = datetime(2026, 7, 20, 18, 0, tzinfo=UTC)
+    assert due_slots(datetime(2026, 7, 21, tzinfo=UTC), now, DAILY, UTC_ZONE) == []
+    assert due_slots(datetime(2026, 7, 1, tzinfo=UTC), now, MANUAL, UTC_ZONE) == []

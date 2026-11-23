@@ -1,4 +1,4 @@
-"""`turns_follow_calendar` ("Ignore skipped"): a turn is `turn_length` grid slots counted
+"""`turns_follow_calendar` ("Skips use up the turn"): a turn is `turn_length` grid slots counted
 from the start date, so skips and swallowed missed days move the handover along with the
 calendar instead of holding it back.
 
@@ -405,3 +405,59 @@ async def test_update_round_trips_and_logs_the_flag(
     ).scalar_one()
     assert entry.changed_fields is not None
     assert "turns_follow_calendar" in entry.changed_fields
+
+
+# --- skipping several slots at once -----------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("count", "expected", "open_slot"),
+    [
+        # Slots 0..2 skipped, slot 3 open: still the first turn.
+        (3, "ava", 3),
+        # Slots 0..7 skipped, slot 8 open: the second turn, one handover.
+        (8, "ben", 8),
+        # Everything due (slots 0 through today) skipped: two boundaries crossed, and still
+        # only one handover, as one late completion over the same span gives.
+        (None, "ben", None),
+    ],
+)
+async def test_a_multi_skip_hands_over_at_most_once_on_the_calendar(
+    count: int | None,
+    expected: str,
+    open_slot: int | None,
+    make_user: MakeUser,
+    make_household: MakeHousehold,
+    make_chore: MakeChore,
+    auth_client: AuthClient,
+    db_session: AsyncSession,
+) -> None:
+    ava, ben, cai = await _three(make_user)
+    household = await make_household(members=[ava, ben, cai])
+    chore = await _weekly_turns(make_chore, household, [ava, ben, cai], start=_PAST_START)
+    client = await auth_client(ava)
+    assert await _open_assignee(db_session, chore.id) == ava.id
+
+    resp = await client.post(f"/api/v1/chores/{chore.id}/skip", json={"count": count})
+    assert resp.status_code == 201
+
+    occ = await _open(db_session, chore.id)
+    expected_day = (
+        _TODAY + timedelta(days=1) if open_slot is None else _PAST_START + timedelta(days=open_slot)
+    )
+    assert occ.scheduled_for.astimezone(UTC).date() == expected_day
+    assert await _open_assignee(db_session, chore.id) == {"ava": ava.id, "ben": ben.id}[expected]
+    # Every skipped row names the person who held the chore when it was skipped.
+    closed = (
+        (
+            await db_session.execute(
+                select(ChoreOccurrence).where(
+                    ChoreOccurrence.chore_id == chore.id,
+                    ChoreOccurrence.status == OccurrenceStatus.done,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert {o.assignee_id for o in closed} == {ava.id}

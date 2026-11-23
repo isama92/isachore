@@ -108,7 +108,7 @@ describe('ChoreEdit', () => {
     expect(screen.getByRole('checkbox', { name: 'Take turns' })).toBeChecked()
     expect(screen.getByLabelText('Turn length')).toHaveValue(3)
     // Edit keeps the stored value rather than the create page's default of on.
-    expect(screen.getByRole('checkbox', { name: 'Ignore skipped' })).not.toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Skips use up the turn' })).not.toBeChecked()
   })
 
   it('pre-fills ignore skipped and resends it on an untouched save', async () => {
@@ -130,7 +130,7 @@ describe('ChoreEdit', () => {
     renderEdit()
 
     expect(await screen.findByDisplayValue('Bins')).toBeInTheDocument()
-    expect(screen.getByRole('checkbox', { name: 'Ignore skipped' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Skips use up the turn' })).toBeChecked()
 
     await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
     await screen.findByText('chores-list')
