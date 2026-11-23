@@ -1007,17 +1007,20 @@ def _skip_slots(
     latitude to push a chore forward a step at a time; asking for more than that, or for more
     than are due, is a 400 rather than a silent clamp, because a client that asked for three
     and got two would have no way to tell."""
-    due = due_slots(scheduled_for, now, rule, tz) or [scheduled_for]
+    already_due = due_slots(scheduled_for, now, rule, tz)
+    due = already_due or [scheduled_for]
     if count is None:
         return due
     if count > len(due):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Only occurrences that are already due can be skipped together, "
-                f"and this chore has {len(due)}"
-            ),
+        # Two wordings because the fallback slot above is not due: telling a client "this chore
+        # has 1 due" about a chore due next week would be false.
+        detail = (
+            f"Only occurrences that are already due can be skipped together, "
+            f"and this chore has {len(already_due)}"
+            if already_due
+            else "Nothing is due yet, so only one occurrence can be skipped"
         )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
     return due[:count]
 
 

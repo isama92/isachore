@@ -136,8 +136,10 @@ export default function Home() {
     })
 
     let req = 0
+    let closed = false
     request()
       .then(() => {
+        closed = true
         if (successMessage) toast.success(successMessage)
         req = ++reqRef.current
         return Promise.all([fetchHomeRef.current(), animated])
@@ -147,6 +149,20 @@ export default function Home() {
       })
       .catch((err: unknown) => {
         setError(err instanceof ApiError ? err.message : fallbackError)
+        // A 400 or 409 on the close itself means the page is out of date: a housemate closed
+        // the chore first, or fewer occurrences are due than the row says. Reload the view so
+        // the row (and the skip dialog's count) reflects the server, or every retry is refused
+        // the same way. Not after a network failure or a failed refetch, where reloading
+        // would just fail again. The error message stays up either way.
+        if (!closed && err instanceof ApiError && (err.status === 400 || err.status === 409)) {
+          const refetch = ++reqRef.current
+          fetchHomeRef
+            .current()
+            .then((home) => {
+              if (refetch === reqRef.current) setData(home)
+            })
+            .catch(() => {})
+        }
       })
       .finally(stopExiting)
   }

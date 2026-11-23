@@ -662,7 +662,7 @@ async def test_skip_count_above_the_due_count_is_refused_and_writes_nothing(
 
     resp = await client.post(f"/api/v1/chores/{chore.id}/skip", json={"count": 9})
     assert resp.status_code == 400
-    assert "already due" in resp.json()["detail"]
+    assert resp.json()["detail"].endswith("and this chore has 8")
     occurrences = await _occurrences(db_session, chore.id)
     assert len(occurrences) == 1
     await db_session.refresh(occurrences[0])
@@ -701,6 +701,8 @@ async def test_a_not_yet_due_chore_skips_one_step_but_no_more(
 
     two = await client.post(f"/api/v1/chores/{chore.id}/skip", json={"count": 2})
     assert two.status_code == 400
+    # Not "this chore has 1": the one allowed step is not a due occurrence.
+    assert two.json()["detail"] == "Nothing is due yet, so only one occurrence can be skipped"
     one = await client.post(f"/api/v1/chores/{chore.id}/skip", json={"count": 1})
     assert one.status_code == 201
     assert _days(await _occurrences(db_session, chore.id)) == [2, 3]
