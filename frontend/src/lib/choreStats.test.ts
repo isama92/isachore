@@ -8,6 +8,11 @@ function person(user_id: number, done = 0, skipped = 0) {
   return { user_id, first_name: `P${user_id}`, last_name: 'X', done, skipped }
 }
 
+// Inclusive, so the tests read as the people they describe ("1 to 10").
+function range(from: number, to: number): number[] {
+  return Array.from({ length: to - from + 1 }, (_, i) => from + i)
+}
+
 function stats(overrides: Partial<ChoreStatsData> = {}): ChoreStatsData {
   return {
     chore_id: 1,
@@ -37,28 +42,24 @@ describe('buildTimeline', () => {
     expect(rows).toEqual([{ bucket: '2026-11-01', u3: 0, u9: 2, skipped: 1 }])
   })
 
-  it('has no Others series with five people', () => {
-    const data = stats({ people: [1, 2, 3, 4, 5].map((id) => person(id)) })
-    expect(buildTimeline(data, LABELS).series.map((s) => s.key)).toEqual([
-      'u1',
-      'u2',
-      'u3',
-      'u4',
-      'u5',
-      'skipped',
-    ])
+  it('has no Others series with ten people, the tenth on the last colour', () => {
+    const ids = range(1, 10)
+    const { series } = buildTimeline(stats({ people: ids.map((id) => person(id)) }), LABELS)
+
+    expect(series.map((s) => s.key)).toEqual([...ids.map((id) => `u${id}`), 'skipped'])
+    expect(series[9].colour).toBe('var(--color-chart-10)')
   })
 
-  it('folds the sixth person onwards into one Others series, summing their counts', () => {
+  it('folds the eleventh person onwards into one Others series, summing their counts', () => {
     const data = stats({
-      people: [1, 2, 3, 4, 5, 6, 7].map((id) => person(id)),
+      people: range(1, 12).map((id) => person(id)),
       over_time: [
         {
           bucket: '2026-11-01',
           done: [
             { user_id: 1, count: 1 },
-            { user_id: 6, count: 2 },
-            { user_id: 7, count: 3 },
+            { user_id: 11, count: 2 },
+            { user_id: 12, count: 3 },
           ],
           skipped: 0,
         },
@@ -66,7 +67,11 @@ describe('buildTimeline', () => {
     })
     const { series, rows } = buildTimeline(data, LABELS)
 
-    expect(series.map((s) => s.key)).toEqual(['u1', 'u2', 'u3', 'u4', 'u5', 'others', 'skipped'])
+    expect(series.map((s) => s.key)).toEqual([
+      ...range(1, 10).map((id) => `u${id}`),
+      'others',
+      'skipped',
+    ])
     expect(series.find((s) => s.key === 'others')).toEqual({
       key: 'others',
       label: 'Others',

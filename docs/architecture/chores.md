@@ -284,8 +284,8 @@ the numbers add up with the rest of the page. Differences worth knowing:
   counts in the bucket's `skipped`, which is why the frontend's empty state sums skips from the
   buckets rather than from the people. Its *completion* shows nowhere, a known gap that unlike
   `GET /stats` the per-chore figures do not total.
-- **Timeline colours follow the user id**, not the rank, using the reserved `--chart-1..5`
-  ramp; the sixth person onwards folds into one "Others" series (`lib/choreStats.ts`).
+- **Timeline colours follow the user id**, not the rank, using the reserved `--chart-1..10`
+  ramp; the eleventh person onwards folds into one "Others" series (`lib/choreStats.ts`).
 
 ## Backdating a completion
 

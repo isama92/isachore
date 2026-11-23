@@ -2,10 +2,10 @@ import { fullName } from './user'
 import type { ChoreStatsData } from './types'
 
 // How many people get a colour of their own on the per-chore timeline: the reserved categorical
-// ramp (--chart-1..5 in index.css) has five. Everyone after that shares one "Others" series
-// rather than a generated sixth hue, which could no longer be told apart from its neighbours.
-export const TIMELINE_COLOURS = 5
-// The "Others" fill. A grey, so it never reads as a sixth person, but NOT --stat-skipped:
+// ramp (--chart-1..10 in index.css) has ten. Everyone after that shares one "Others" series
+// rather than a generated eleventh hue, which could no longer be told apart from its neighbours.
+export const TIMELINE_COLOURS = 10
+// The "Others" fill. A grey, so it never reads as one more person, but NOT --stat-skipped:
 // skips are stacked in the same bars and the two must stay apart. --muted-foreground is the
 // heavier grey of the same family (see the --stat-skipped comment in index.css).
 export const OTHERS_COLOUR = 'var(--color-muted-foreground)'
